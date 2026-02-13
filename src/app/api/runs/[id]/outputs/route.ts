@@ -1,0 +1,43 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { listOutputFiles } from '@/lib/run-state-persistence';
+import { readFile } from 'fs/promises';
+import { resolve } from 'path';
+
+const RUNS_DIR = resolve(process.cwd(), 'runs');
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const runId = params.id;
+  const stepName = request.nextUrl.searchParams.get('step');
+
+  try {
+    if (stepName) {
+      // Return content of a specific step's output
+      const safeName = stepName.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+      const outputDir = resolve(RUNS_DIR, runId, 'outputs');
+      // Try .md first, then .txt
+      let content = '';
+      try {
+        content = await readFile(resolve(outputDir, `${safeName}.md`), 'utf-8');
+      } catch {
+        try {
+          content = await readFile(resolve(outputDir, `${safeName}.txt`), 'utf-8');
+        } catch {
+          return NextResponse.json({ error: '未找到该步骤的输出' }, { status: 404 });
+        }
+      }
+      return NextResponse.json({ stepName, content });
+    }
+
+    // List all output files
+    const files = await listOutputFiles(runId);
+    return NextResponse.json({ files });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: '获取输出失败', message: error.message },
+      { status: 500 }
+    );
+  }
+}

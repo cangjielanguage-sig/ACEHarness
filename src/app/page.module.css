@@ -1,0 +1,329 @@
+.container {
+  min-height: 100vh;
+  background: #2b2b2b;
+  color: #a9b7c6;
+}
+
+.header {
+  background: #313335;
+  border-bottom: 1px solid #515151;
+  padding: 20px 40px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.titleArea {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  font-size: 28px;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #a9b7c6;
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #808080;
+  margin: 4px 0 0 0;
+}
+
+.headerActions {
+  display: flex;
+  gap: 12px;
+}
+
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+
+.btnPrimary {
+  background: #4a88c7;
+  color: white;
+}
+
+.btnPrimary:hover { background: #3a6ea5; }
+
+.btnSuccess {
+  background: #6a8759;
+  color: white;
+}
+
+.btnSuccess:hover { background: #567a48; }
+
+.btnDanger {
+  background: #cc7832;
+  color: white;
+}
+
+.btnDanger:hover { background: #a85a28; }
+
+.btnSecondary {
+  background: #515151;
+  color: #a9b7c6;
+}
+
+.btnSecondary:hover { background: #5e6060; }
+
+.main {
+  padding: 24px 40px;
+}
+
+.sectionTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #a9b7c6;
+  margin: 0 0 16px 0;
+}
+
+.configGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.configCard {
+  background: #313335;
+  border: 1px solid #515151;
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.configCard:hover {
+  border-color: #4a88c7;
+  background: #3c3f41;
+}
+
+.configCard.selected {
+  border-color: #4a88c7;
+  background: #2d3f50;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.cardFilename {
+  font-size: 11px;
+  color: #808080;
+  background: #515151;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.cardName {
+  font-size: 15px;
+  font-weight: 600;
+  color: #a9b7c6;
+  margin: 8px 0 4px 0;
+}
+
+.cardDesc {
+  font-size: 12px;
+  color: #808080;
+  margin: 0 0 12px 0;
+  line-height: 1.4;
+}
+
+.cardStats {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.cardStat {
+  font-size: 12px;
+  color: #808080;
+}
+
+.cardStatValue {
+  color: #a9b7c6;
+  font-weight: 600;
+}
+
+.cardActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cardBtn {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cardBtnRun {
+  background: #4a88c7;
+  color: white;
+}
+
+.cardBtnRun:hover { background: #3a6ea5; }
+
+.cardBtnDesign {
+  background: #6a8759;
+  color: white;
+}
+
+.cardBtnDesign:hover { background: #567a48; }
+
+.cardBtnCopy {
+  background: #515151;
+  color: #a9b7c6;
+}
+
+.cardBtnCopy:hover { background: #5e6060; }
+
+.cardBtnDelete {
+  background: transparent;
+  color: #cc7832;
+  border: 1px solid #cc7832;
+}
+
+.cardBtnDelete:hover {
+  background: #cc7832;
+  color: white;
+}
+
+/* Run History Section */
+.historySection {
+  margin-top: 32px;
+}
+
+.historyHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.historyTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #a9b7c6;
+  margin: 0;
+}
+
+.historyTable {
+  width: 100%;
+  border-collapse: collapse;
+  background: #313335;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.historyTable th {
+  background: #3c3f41;
+  color: #808080;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  padding: 10px 16px;
+  border-bottom: 1px solid #515151;
+}
+
+.historyTable td {
+  color: #a9b7c6;
+  font-size: 13px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #515151;
+}
+
+.historyTable tr:last-child td {
+  border-bottom: none;
+}
+
+.historyTable tr:hover td {
+  background: #3c3f41;
+}
+
+.statusBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.statusRunning {
+  background: rgba(74, 136, 199, 0.2);
+  color: #6897bb;
+}
+
+.statusCompleted {
+  background: rgba(106, 135, 89, 0.2);
+  color: #6a8759;
+}
+
+.statusFailed {
+  background: rgba(204, 120, 50, 0.2);
+  color: #cc7832;
+}
+
+.statusStopped {
+  background: rgba(128, 128, 128, 0.2);
+  color: #808080;
+}
+
+.emptyHistory {
+  text-align: center;
+  padding: 32px;
+  color: #808080;
+  font-size: 13px;
+}
+
+.newConfigCard {
+  background: #313335;
+  border: 2px dashed #515151;
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  gap: 8px;
+}
+
+.newConfigCard:hover {
+  border-color: #4a88c7;
+  background: #3c3f41;
+}
+
+.newConfigIcon {
+  font-size: 32px;
+  color: #808080;
+}
+
+.newConfigText {
+  font-size: 14px;
+  color: #808080;
+}

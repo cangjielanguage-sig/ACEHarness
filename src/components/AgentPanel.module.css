@@ -1,0 +1,334 @@
+.agentPanel {
+  background: #3c3f41;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.agentHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #515151;
+}
+
+.agentAvatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.agentAvatar.blue {
+  background: linear-gradient(135deg, #6897bb, #6a8759);
+}
+
+.agentAvatar.red {
+  background: linear-gradient(135deg, #cc7832, #a5c261);
+}
+
+.agentAvatar.judge {
+  background: linear-gradient(135deg, #ffc66d, #e8bf6a);
+}
+
+.agentInfo {
+  flex: 1;
+}
+
+.agentName {
+  color: #a9b7c6;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.agentMeta {
+  display: flex;
+  gap: 8px;
+}
+
+.teamBadge, .modelBadge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.teamBadge {
+  color: white;
+}
+
+.teamBadge.blue {
+  background: #6897bb;
+}
+
+.teamBadge.red {
+  background: #cc7832;
+}
+
+.teamBadge.judge {
+  background: #ffc66d;
+  color: #2b2b2b;
+}
+
+.modelBadge {
+  background: #515151;
+  color: #808080;
+}
+
+.agentStatus {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.agentStatus.waiting {
+  background: #515151;
+  color: #808080;
+}
+
+.agentStatus.running {
+  background: #2d3f50;
+  color: #6897bb;
+}
+
+.agentStatus.completed {
+  background: #2d4a2d;
+  color: #6a8759;
+}
+
+.agentStatus.failed {
+  background: #4a2020;
+  color: #cc7832;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.currentTask {
+  background: #313335;
+  padding: 12px;
+  border-radius: 6px;
+  border-left: 3px solid #4a88c7;
+}
+
+.taskLabel {
+  color: #808080;
+  font-size: 11px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.taskContent {
+  color: #a9b7c6;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.agentStats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.statItem {
+  flex: 1;
+  min-width: 70px;
+  background: #313335;
+  padding: 8px;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.statLabel {
+  display: block;
+  color: #808080;
+  font-size: 10px;
+  margin-bottom: 2px;
+}
+
+.statValue {
+  display: block;
+  color: #a9b7c6;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.agentLogs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+
+.logsHeader, .outputHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.logsTitle, .outputTitle {
+  color: #a9b7c6;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btnClear, .btnCopy {
+  background: #515151;
+  color: #a9b7c6;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btnClear:hover, .btnCopy:hover {
+  background: #5e6060;
+}
+
+.logsContent {
+  flex: 1;
+  background: #2b2b2b;
+  border-radius: 6px;
+  padding: 12px;
+  overflow-y: auto;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+}
+
+.logEntry {
+  padding: 4px 0;
+  border-left: 2px solid transparent;
+  padding-left: 8px;
+  margin-bottom: 4px;
+}
+
+.logEntry.info {
+  border-left-color: #4a88c7;
+  color: #6897bb;
+}
+
+.logEntry.success {
+  border-left-color: #6a8759;
+  color: #6a8759;
+}
+
+.logEntry.warning {
+  border-left-color: #ffc66d;
+  color: #ffc66d;
+}
+
+.logEntry.error {
+  border-left-color: #cc7832;
+  color: #cc7832;
+}
+
+.logTime {
+  color: #808080;
+  margin-right: 8px;
+}
+
+.logMessage {
+  color: #a9b7c6;
+}
+
+.logsEmpty {
+  color: #808080;
+  text-align: center;
+  padding: 40px;
+}
+
+.agentOutput {
+  max-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.outputContent {
+  flex: 1;
+  background: #2b2b2b;
+  border-radius: 6px;
+  padding: 12px;
+  overflow: auto;
+  color: #a9b7c6;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.summarySection,
+.changesSection {
+  background: #313335;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.sectionTitle {
+  color: #a9b7c6;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.summaryContent {
+  color: #b0b0b0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.changesList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.changeItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.changeAction {
+  width: 16px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.changeItem.created .changeAction { color: #6a8759; }
+.changeItem.modified .changeAction { color: #ffc66d; }
+.changeItem.deleted .changeAction { color: #cc7832; }
+
+.changeFile {
+  color: #a9b7c6;
+}

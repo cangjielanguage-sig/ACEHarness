@@ -1,0 +1,225 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #3c3f41;
+  overflow-y: auto;
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #515151;
+  position: sticky;
+  top: 0;
+  background: #3c3f41;
+  z-index: 1;
+}
+
+.panelHeader h3 {
+  margin: 0;
+  color: #a9b7c6;
+  font-size: 14px;
+}
+
+.addBtn {
+  background: #4a88c7;
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.addBtn:hover { background: #3a6ea5; }
+
+.roleList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.roleCard {
+  background: #313335;
+  border-radius: 6px;
+  border-left: 3px solid #515151;
+  overflow: hidden;
+}
+
+.roleCard.editing {
+  border-left-width: 3px;
+}
+
+.roleInfo {
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.roleInfo:hover { background: #3a3a3a; }
+
+.roleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.roleName {
+  color: #a9b7c6;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.teamChip {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.teamChip.blue { background: #6897bb; color: white; }
+.teamChip.red { background: #cc7832; color: white; }
+.teamChip.judge { background: #ffc66d; color: #2b2b2b; }
+
+.roleMeta {
+  margin-bottom: 6px;
+}
+
+.modelTag {
+  font-size: 11px;
+  color: #808080;
+  background: #515151;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.capTag {
+  font-size: 10px;
+  color: #6a8759;
+  background: rgba(106, 135, 89, 0.1);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.editForm {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.formRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.formRow label {
+  color: #808080;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.formRow input,
+.formRow textarea,
+.selectInput {
+  background: #515151;
+  border: 1px solid #5e6060;
+  color: #a9b7c6;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.formRow input:focus,
+.formRow textarea:focus,
+.selectInput:focus {
+  outline: none;
+  border-color: #4a88c7;
+}
+
+.monoTextarea {
+  font-family: 'Consolas', 'Monaco', monospace;
+  resize: vertical;
+}
+
+.inputError {
+  border-color: #cc7832 !important;
+}
+
+.radioGroup {
+  display: flex;
+  gap: 8px;
+}
+
+.radioLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.radioLabel input[type='radio'] {
+  width: auto;
+  margin: 0;
+}
+
+.formActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid #515151;
+}
+
+.formActionsRight {
+  display: flex;
+  gap: 8px;
+}
+
+.deleteBtn {
+  background: #cc7832;
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cancelBtn {
+  background: #515151;
+  color: #a9b7c6;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.saveBtn {
+  background: #4a88c7;
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.deleteBtn:hover { background: #a85a28; }
+.cancelBtn:hover { background: #5e6060; }
+.saveBtn:hover { background: #3a6ea5; }

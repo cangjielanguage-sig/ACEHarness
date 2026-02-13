@@ -1,0 +1,132 @@
+.flowContainer {
+  width: 100%;
+  height: 100%;
+  background: #2b2b2b;
+}
+
+.phaseNode {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.phaseNumber {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #4a88c7;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.phaseName {
+  color: #e8e8e8;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.checkpointBadge {
+  background: #cc7832;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.iterLabel {
+  background: #4a88c7;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.groupLabel {
+  color: #808080;
+  font-size: 12px;
+  font-weight: 500;
+  position: absolute;
+  top: 8px;
+  left: 12px;
+}
+
+.stepNode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stepHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepNumber {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #515151;
+  color: #a9b7c6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.stepName {
+  color: #a9b7c6;
+  font-size: 13px;
+  font-weight: 500;
+  flex: 1;
+}
+
+.stepAgent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #808080;
+  font-size: 12px;
+}
+
+.agentIcon {
+  font-size: 14px;
+}
+
+.roleBadge {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.editBtn {
+  background: #4a88c7;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-top: 4px;
+}
+
+.editBtn:hover {
+  background: #3a6ea5;
+}
+
+.checkpointNode {
+  color: #cc7832;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}

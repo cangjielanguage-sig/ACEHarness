@@ -1,0 +1,54 @@
+import { NextRequest } from 'next/server';
+import { workflowManager } from '@/lib/workflow-manager';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: NextRequest) {
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    start(controller) {
+      const sendEvent = (data: any) => {
+        const message = `data: ${JSON.stringify(data)}\n\n`;
+        controller.enqueue(encoder.encode(message));
+      };
+
+      // 监听工作流事件
+      const handlers = {
+        status: (data: any) => sendEvent({ type: 'status', data }),
+        phase: (data: any) => sendEvent({ type: 'phase', data }),
+        step: (data: any) => sendEvent({ type: 'step', data }),
+        result: (data: any) => sendEvent({ type: 'result', data }),
+        checkpoint: (data: any) => sendEvent({ type: 'checkpoint', data }),
+        agents: (data: any) => sendEvent({ type: 'agents', data }),
+        iteration: (data: any) => sendEvent({ type: 'iteration', data }),
+        'iteration-complete': (data: any) => sendEvent({ type: 'iteration-complete', data }),
+        escalation: (data: any) => sendEvent({ type: 'escalation', data }),
+        'token-usage': (data: any) => sendEvent({ type: 'token-usage', data }),
+      };
+
+      Object.entries(handlers).forEach(([event, handler]) => {
+        workflowManager.on(event, handler);
+      });
+
+      // 清理函数
+      request.signal.addEventListener('abort', () => {
+        Object.entries(handlers).forEach(([event, handler]) => {
+          workflowManager.off(event, handler);
+        });
+        controller.close();
+      });
+
+      // 发送初始连接消息
+      sendEvent({ type: 'connected', data: { message: '已连接到事件流' } });
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
+}

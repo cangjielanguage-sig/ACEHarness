@@ -1,0 +1,200 @@
+import { mkdir, writeFile, readFile, readdir } from 'fs/promises';
+import { resolve } from 'path';
+import { existsSync } from 'fs';
+import { stringify, parse } from 'yaml';
+
+const RUNS_DIR = resolve(process.cwd(), 'runs');
+
+export interface PersistedAgentState {
+  name: string;
+  team: string;
+  model: string;
+  status: string;
+  completedTasks: number;
+  tokenUsage: { inputTokens: number; outputTokens: number };
+  costUsd: number;
+  sessionId: string | null;
+  iterationCount: number;
+  summary: string;
+}
+
+export interface PersistedIterationState {
+  phaseName: string;
+  currentIteration: number;
+  maxIterations: number;
+  consecutiveCleanRounds: number;
+  status: string;
+  bugsFoundPerRound: number[];
+}
+
+export interface PersistedProcessInfo {
+  pid: number;
+  id: string;
+  agent: string;
+  step: string;
+  startTime: string;
+}
+
+export interface PersistedStepLog {
+  stepName: string;
+  agent: string;
+  status: 'completed' | 'failed';
+  output: string;
+  error: string;
+  costUsd: number;
+  durationMs: number;
+  timestamp: string;
+}
+
+export interface PersistedRunState {
+  runId: string;
+  configFile: string;
+  status: 'running' | 'completed' | 'failed' | 'stopped' | 'crashed';
+  statusReason?: string;
+  startTime: string;
+  endTime: string | null;
+  currentPhase: string | null;
+  currentStep: string | null;
+  completedSteps: string[];
+  failedSteps: string[];
+  stepLogs: PersistedStepLog[];
+  agents: PersistedAgentState[];
+  iterationStates: Record<string, PersistedIterationState>;
+  processes: PersistedProcessInfo[];
+}
+
+function runDir(runId: string): string {
+  return resolve(RUNS_DIR, runId);
+}
+
+function stateFilePath(runId: string): string {
+  return resolve(runDir(runId), 'state.yaml');
+}
+
+function outputsDir(runId: string): string {
+  return resolve(runDir(runId), 'outputs');
+}
+
+export async function saveRunState(state: PersistedRunState): Promise<void> {
+  const dir = runDir(state.runId);
+  if (!existsSync(dir)) {
+    await mkdir(dir, { recursive: true });
+  }
+  const yamlContent = '# Auto-generated run state\n' + stringify(state);
+  await writeFile(stateFilePath(state.runId), yamlContent, 'utf-8');
+}
+
+export async function loadRunState(runId: string): Promise<PersistedRunState | null> {
+  try {
+    const content = await readFile(stateFilePath(runId), 'utf-8');
+    return parse(content) as PersistedRunState;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveProcessOutput(
+  runId: string,
+  stepName: string,
+  output: string
+): Promise<string> {
+  const dir = outputsDir(runId);
+  if (!existsSync(dir)) {
+    await mkdir(dir, { recursive: true });
+  }
+  const safeName = stepName.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+  const filepath = resolve(dir, `${safeName}.md`);
+  await writeFile(filepath, output, 'utf-8');
+  return filepath;
+}
+
+/**
+ * Load all completed step outputs for a run.
+ * Returns a map of stepName → output content.
+ */
+export async function loadStepOutputs(runId: string): Promise<Record<string, string>> {
+  const dir = outputsDir(runId);
+  if (!existsSync(dir)) return {};
+  const files = await readdir(dir);
+  const results: Record<string, string> = {};
+  for (const file of files) {
+    if (file.endsWith('.md') || file.endsWith('.txt')) {
+      try {
+        const content = await readFile(resolve(dir, file), 'utf-8');
+        // Strip extension to get step name
+        const stepName = file.replace(/\.(md|txt)$/, '');
+        results[stepName] = content;
+      } catch { /* skip unreadable */ }
+    }
+  }
+  return results;
+}
+
+/**
+ * List output files for a run with metadata.
+ */
+export async function listOutputFiles(runId: string): Promise<{ stepName: string; filename: string; size: number }[]> {
+  const dir = outputsDir(runId);
+  if (!existsSync(dir)) return [];
+  const { stat } = await import('fs/promises');
+  const files = await readdir(dir);
+  const results: { stepName: string; filename: string; size: number }[] = [];
+  for (const file of files) {
+    try {
+      const fileStat = await stat(resolve(dir, file));
+      const stepName = file.replace(/\.(md|txt)$/, '');
+      results.push({ stepName, filename: file, size: fileStat.size });
+    } catch { /* skip */ }
+  }
+  return results;
+}
+
+export async function findRunningRuns(): Promise<PersistedRunState[]> {
+  if (!existsSync(RUNS_DIR)) return [];
+  const entries = await readdir(RUNS_DIR, { withFileTypes: true });
+  const results: PersistedRunState[] = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const state = await loadRunState(entry.name);
+      if (state && state.status === 'running') {
+        results.push(state);
+      }
+    }
+  }
+  return results;
+}
+
+export function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Save live stream content for a running step */
+export async function saveStreamContent(
+  runId: string,
+  stepName: string,
+  content: string
+): Promise<void> {
+  const dir = resolve(runDir(runId), 'streams');
+  if (!existsSync(dir)) await mkdir(dir, { recursive: true });
+  const safeName = stepName.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+  await writeFile(resolve(dir, `${safeName}.stream.md`), content, 'utf-8');
+}
+
+/** Load live stream content for a step */
+export async function loadStreamContent(
+  runId: string,
+  stepName: string
+): Promise<string | null> {
+  const safeName = stepName.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+  const filepath = resolve(runDir(runId), 'streams', `${safeName}.stream.md`);
+  try {
+    return await readFile(filepath, 'utf-8');
+  } catch {
+    return null;
+  }
+}

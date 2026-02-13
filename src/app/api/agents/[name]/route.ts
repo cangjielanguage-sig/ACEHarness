@@ -1,0 +1,73 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { readFile, writeFile, unlink } from 'fs/promises';
+import { resolve } from 'path';
+import { parse, stringify } from 'yaml';
+import { roleConfigSchema } from '@/lib/schemas';
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { name: string } }
+) {
+  try {
+    const name = params.name;
+    const filepath = resolve(process.cwd(), 'configs', 'agents', `${name}.yaml`);
+    const content = await readFile(filepath, 'utf-8');
+    const agent = parse(content);
+    return NextResponse.json({ agent, raw: content });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: '读取 Agent 配置失败', message: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { name: string } }
+) {
+  try {
+    const name = params.name;
+    const body = await request.json();
+    const { agent } = body;
+
+    const validationResult = roleConfigSchema.safeParse(agent);
+    if (!validationResult.success) {
+      return NextResponse.json(
+        { error: 'Agent 配置验证失败', details: validationResult.error.errors },
+        { status: 400 }
+      );
+    }
+
+    const filepath = resolve(process.cwd(), 'configs', 'agents', `${name}.yaml`);
+    const yamlContent = stringify(agent);
+    await writeFile(filepath, yamlContent, 'utf-8');
+
+    return NextResponse.json({ success: true, message: 'Agent 配置已保存' });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: '保存 Agent 配置失败', message: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { name: string } }
+) {
+  try {
+    const name = params.name;
+    if (name.includes('..') || name.includes('/')) {
+      return NextResponse.json({ error: '无效名称' }, { status: 400 });
+    }
+    const filepath = resolve(process.cwd(), 'configs', 'agents', `${name}.yaml`);
+    await unlink(filepath);
+    return NextResponse.json({ success: true, message: 'Agent 配置已删除' });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: '删除 Agent 配置失败', message: error.message },
+      { status: 500 }
+    );
+  }
+}

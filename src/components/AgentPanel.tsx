@@ -1,0 +1,179 @@
+'use client';
+
+import { useEffect, useRef } from 'react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+
+interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+interface ChangeRecord {
+  file: string;
+  action: 'created' | 'modified' | 'deleted';
+  description: string;
+}
+
+interface Agent {
+  name: string;
+  team: string;
+  model: string;
+  status: 'waiting' | 'running' | 'completed' | 'failed';
+  currentTask: string | null;
+  completedTasks: number;
+  output?: string;
+  tokenUsage?: TokenUsage;
+  iterationCount?: number;
+  summary?: string;
+  changes?: ChangeRecord[];
+}
+
+interface Log {
+  agent: string;
+  level: string;
+  message: string;
+  time: string;
+}
+
+interface AgentPanelProps {
+  agent: Agent;
+  logs: Log[];
+  onClearLogs: (agentName: string) => void;
+}
+
+export default function AgentPanel({ agent, logs, onClearLogs }: AgentPanelProps) {
+  const logsContainerRef = useRef<HTMLDivElement>(null);
+  const agentLogs = logs.filter((log) => log.agent === agent.name);
+
+  useEffect(() => {
+    if (logsContainerRef.current) {
+      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+    }
+  }, [agentLogs.length]);
+
+  const getTeamLabel = (team: string) => {
+    const labels: Record<string, string> = { blue: 'Blue Team', red: 'Red Team', judge: 'Judge Team' };
+    return labels[team] || team;
+  };
+
+  const getStatusText = (status: string) => {
+    const texts: Record<string, string> = { waiting: '等待中', running: '运行中', completed: '已完成', failed: '失败' };
+    return texts[status] || status;
+  };
+
+  const copyOutput = () => {
+    if (agent.output) navigator.clipboard.writeText(agent.output);
+  };
+
+  const formatTokens = (n: number) => {
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return String(n);
+  };
+
+  const teamColor = agent.team === 'red' ? 'text-red-400' : agent.team === 'judge' ? 'text-yellow-400' : 'text-blue-400';
+  const teamBg = agent.team === 'red' ? 'bg-red-500/20' : agent.team === 'judge' ? 'bg-yellow-500/20' : 'bg-blue-500/20';
+  const statusColor = agent.status === 'running' ? 'bg-blue-500' : agent.status === 'completed' ? 'bg-green-500' : agent.status === 'failed' ? 'bg-red-500' : 'bg-muted-foreground';
+
+  return (
+    <div className="flex flex-col gap-4 p-4">
+      <div className="flex items-center gap-3">
+        <div className={`w-10 h-10 rounded-full ${teamBg} flex items-center justify-center`}>
+          <span className="material-symbols-outlined text-lg">smart_toy</span>
+        </div>
+        <div className="flex-1">
+          <div className="font-medium text-sm">{agent.name}</div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <Badge variant="outline" className={`text-xs ${teamColor} border-current/30`}>
+              {getTeamLabel(agent.team)}
+            </Badge>
+            <Badge variant="secondary" className="text-xs">{agent.model}</Badge>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full ${statusColor} ${agent.status === 'running' ? 'animate-pulse' : ''}`} />
+          <span className="text-xs text-muted-foreground">{getStatusText(agent.status)}</span>
+        </div>
+      </div>
+      {/* PLACEHOLDER_REST */}
+
+      {agent.currentTask && (
+        <div className="rounded-md bg-muted p-3">
+          <div className="text-xs text-muted-foreground uppercase mb-1">当前任务</div>
+          <div className="text-sm">{agent.currentTask}</div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-4 gap-2">
+        <div className="text-center p-2 rounded-md bg-muted">
+          <span className="block text-xs text-muted-foreground">已完成</span>
+          <span className="block text-lg font-semibold">{agent.completedTasks}</span>
+        </div>
+        <div className="text-center p-2 rounded-md bg-muted">
+          <span className="block text-xs text-muted-foreground">迭代轮次</span>
+          <span className="block text-lg font-semibold">{agent.iterationCount || 0}</span>
+        </div>
+        <div className="text-center p-2 rounded-md bg-muted">
+          <span className="block text-xs text-muted-foreground">Input</span>
+          <span className="block text-lg font-semibold">{formatTokens(agent.tokenUsage?.inputTokens || 0)}</span>
+        </div>
+        <div className="text-center p-2 rounded-md bg-muted">
+          <span className="block text-xs text-muted-foreground">Output</span>
+          <span className="block text-lg font-semibold">{formatTokens(agent.tokenUsage?.outputTokens || 0)}</span>
+        </div>
+      </div>
+
+      {agent.summary && (
+        <div>
+          <div className="text-xs text-muted-foreground uppercase mb-1">工作总结</div>
+          <div className="text-sm bg-muted p-3 rounded-md">{agent.summary}</div>
+        </div>
+      )}
+
+      {agent.changes && agent.changes.length > 0 && (
+        <div>
+          <div className="text-xs text-muted-foreground uppercase mb-1">变更记录</div>
+          <div className="space-y-1">
+            {agent.changes.map((change, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs font-mono">
+                <span className={change.action === 'created' ? 'text-green-500' : change.action === 'deleted' ? 'text-red-500' : 'text-yellow-500'}>
+                  {change.action === 'created' ? '+' : change.action === 'deleted' ? '-' : '~'}
+                </span>
+                <span className="text-muted-foreground">{change.file}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-muted-foreground uppercase">执行日志</span>
+          <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => onClearLogs(agent.name)}>清空</Button>
+        </div>
+        <div className="bg-muted rounded-md p-2 max-h-48 overflow-y-auto font-mono text-xs space-y-0.5" ref={logsContainerRef}>
+          {agentLogs.map((log, index) => (
+            <div key={index} className={`flex gap-2 ${log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-yellow-400' : 'text-muted-foreground'}`}>
+              <span className="opacity-60 shrink-0">{log.time}</span>
+              <span>{log.message}</span>
+            </div>
+          ))}
+          {agentLogs.length === 0 && <div className="text-muted-foreground text-center py-4">暂无日志</div>}
+        </div>
+      </div>
+
+      {agent.output && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-muted-foreground uppercase">输出结果</span>
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={copyOutput}>
+              <span className="material-symbols-outlined text-sm mr-1">content_copy</span>
+              复制
+            </Button>
+          </div>
+          <pre className="bg-muted rounded-md p-3 text-xs overflow-auto max-h-60 whitespace-pre-wrap font-mono">{agent.output}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
