@@ -10,6 +10,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 interface AgentConfigPanelProps {
   agents: RoleConfig[];
@@ -32,6 +34,7 @@ const teamBadgeClass: Record<string, string> = {
 export default function AgentConfigPanel({ agents, onSaveAgent, onDeleteAgent }: AgentConfigPanelProps) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const { confirm, dialogProps } = useConfirmDialog();
 
   const handleSave = (data: RoleConfig) => {
     onSaveAgent(data);
@@ -39,8 +42,14 @@ export default function AgentConfigPanel({ agents, onSaveAgent, onDeleteAgent }:
     setIsAdding(false);
   };
 
-  const handleDelete = (index: number) => {
-    if (!confirm(`确定删除 Agent "${agents[index].name}"？`)) return;
+  const handleDelete = async (index: number) => {
+    const ok = await confirm({
+      title: '确认删除',
+      description: `确定删除 Agent "${agents[index].name}"？`,
+      confirmLabel: '删除',
+      variant: 'destructive',
+    });
+    if (!ok) return;
     onDeleteAgent(agents[index].name);
     setEditingIndex(null);
   };
@@ -112,6 +121,7 @@ export default function AgentConfigPanel({ agents, onSaveAgent, onDeleteAgent }:
           />
         </div>
       )}
+      {dialogProps && <ConfirmDialog {...dialogProps} />}
     </div>
   );
 }

@@ -49,6 +49,7 @@ export interface WorkflowState {
   stepResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }>;
   showCheckpoint: boolean;
   checkpointMessage: string;
+  checkpointIsIterative: boolean;
   activeTab: string;
   selectedAgent: Agent | null;
   selectedStep: any | null;
@@ -80,6 +81,7 @@ type WorkflowAction =
   | { type: 'SET_STEP_RESULTS'; payload: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> }
   | { type: 'SET_SHOW_CHECKPOINT'; payload: boolean }
   | { type: 'SET_CHECKPOINT_MESSAGE'; payload: string }
+  | { type: 'SET_CHECKPOINT_IS_ITERATIVE'; payload: boolean }
   | { type: 'SET_ACTIVE_TAB'; payload: string }
   | { type: 'SET_SELECTED_AGENT'; payload: Agent | null }
   | { type: 'SET_SELECTED_STEP'; payload: any | null }
@@ -111,6 +113,7 @@ function createInitialState(initialViewMode: ViewMode = 'run'): WorkflowState {
     stepResults: {},
     showCheckpoint: false,
     checkpointMessage: '',
+    checkpointIsIterative: false,
     activeTab: 'workflow',
     selectedAgent: null,
     selectedStep: null,
@@ -144,6 +147,7 @@ function workflowReducer(state: WorkflowState, action: WorkflowAction): Workflow
     case 'SET_STEP_RESULTS': return { ...state, stepResults: action.payload };
     case 'SET_SHOW_CHECKPOINT': return { ...state, showCheckpoint: action.payload };
     case 'SET_CHECKPOINT_MESSAGE': return { ...state, checkpointMessage: action.payload };
+    case 'SET_CHECKPOINT_IS_ITERATIVE': return { ...state, checkpointIsIterative: action.payload };
     case 'SET_ACTIVE_TAB': return { ...state, activeTab: action.payload };
     case 'SET_SELECTED_AGENT': return { ...state, selectedAgent: action.payload };
     case 'SET_SELECTED_STEP': return { ...state, selectedStep: action.payload };

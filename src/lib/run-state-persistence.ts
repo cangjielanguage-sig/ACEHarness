@@ -5,6 +5,9 @@ import { stringify, parse } from 'yaml';
 
 const RUNS_DIR = resolve(process.cwd(), 'runs');
 
+/** Separator used to delimit output chunks in persisted stream files */
+export const STREAM_CHUNK_SEPARATOR = '\n\n<!-- chunk-boundary -->\n\n';
+
 export interface PersistedAgentState {
   name: string;
   team: string;
@@ -61,6 +64,13 @@ export interface PersistedRunState {
   agents: PersistedAgentState[];
   iterationStates: Record<string, PersistedIterationState>;
   processes: PersistedProcessInfo[];
+  /** If set, the workflow was waiting at a checkpoint when it stopped */
+  pendingCheckpoint?: {
+    phase: string;
+    checkpoint: string;
+    message: string;
+    isIterativePhase: boolean;
+  };
 }
 
 function runDir(runId: string): string {
@@ -99,6 +109,26 @@ export async function saveProcessOutput(
   output: string
 ): Promise<string> {
   const dir = outputsDir(runId);
+  if (!existsSync(dir)) {
+    await mkdir(dir, { recursive: true });
+  }
+  const safeName = stepName.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+  const filepath = resolve(dir, `${safeName}.md`);
+  await writeFile(filepath, output, 'utf-8');
+  return filepath;
+}
+
+/**
+ * Save step output to the workspace directory so AI agents can read it.
+ * Saves to {projectRoot}/.ace-outputs/{runId}/{stepName}.md
+ */
+export async function saveOutputToWorkspace(
+  projectRoot: string,
+  runId: string,
+  stepName: string,
+  output: string
+): Promise<string> {
+  const dir = resolve(projectRoot, '.ace-outputs', runId);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });
   }

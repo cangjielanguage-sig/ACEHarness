@@ -3,6 +3,8 @@
 import { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import Markdown from '@/components/Markdown';
+import styles from '@/app/workbench/[config]/page.module.css';
 
 interface TokenUsage {
   inputTokens: number;
@@ -40,9 +42,10 @@ interface AgentPanelProps {
   agent: Agent;
   logs: Log[];
   onClearLogs: (agentName: string) => void;
+  stepSummary?: string;
 }
 
-export default function AgentPanel({ agent, logs, onClearLogs }: AgentPanelProps) {
+export default function AgentPanel({ agent, logs, onClearLogs, stepSummary }: AgentPanelProps) {
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const agentLogs = logs.filter((log) => log.agent === agent.name);
 
@@ -123,10 +126,10 @@ export default function AgentPanel({ agent, logs, onClearLogs }: AgentPanelProps
         </div>
       </div>
 
-      {agent.summary && (
+      {(stepSummary || agent.summary) && (
         <div>
           <div className="text-xs text-muted-foreground uppercase mb-1">工作总结</div>
-          <div className="text-sm bg-muted p-3 rounded-md">{agent.summary}</div>
+          <div className={`${styles.markdownContent} text-sm bg-muted p-3 rounded-md`}><Markdown>{stepSummary || agent.summary!}</Markdown></div>
         </div>
       )}
 

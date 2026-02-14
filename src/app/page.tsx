@@ -10,6 +10,8 @@ import DeleteConfirmModal from '@/components/DeleteConfirmModal';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
 
 interface ConfigSummary {
   filename: string;
@@ -34,12 +36,17 @@ interface RunRecord {
 export default function HomePage() {
   const router = useRouter();
   const { openChat } = useChat();
+  const { toast } = useToast();
   const [configs, setConfigs] = useState<ConfigSummary[]>([]);
+  const [configsLoading, setConfigsLoading] = useState(true);
   const [selectedConfig, setSelectedConfig] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [showNewModal, setShowNewModal] = useState(false);
   const [copySource, setCopySource] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [renamingConfig, setRenamingConfig] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [navigating, setNavigating] = useState<string | null>(null);
 
   useEffect(() => { loadConfigs(); }, []);
   useEffect(() => {
@@ -47,11 +54,14 @@ export default function HomePage() {
   }, [selectedConfig]);
 
   const loadConfigs = async () => {
+    setConfigsLoading(true);
     try {
       const { configs: list } = await configApi.listConfigs();
       setConfigs(list);
     } catch (error) {
       console.error('加载配置列表失败:', error);
+    } finally {
+      setConfigsLoading(false);
     }
   };
 
@@ -76,8 +86,21 @@ export default function HomePage() {
       }
       loadConfigs();
     } catch (error: any) {
-      alert('删除失败: ' + error.message);
+      toast('error', '删除失败: ' + error.message);
     }
+  };
+
+  const handleRename = async (filename: string, newName: string) => {
+    if (!newName.trim()) { setRenamingConfig(null); return; }
+    try {
+      const { config } = await configApi.getConfig(filename);
+      config.workflow.name = newName.trim();
+      await configApi.saveConfig(filename, config);
+      loadConfigs();
+    } catch (error: any) {
+      toast('error', '重命名失败: ' + error.message);
+    }
+    setRenamingConfig(null);
   };
 
   const formatDuration = (start: string, end: string | null) => {
@@ -100,7 +123,7 @@ export default function HomePage() {
   /* PLACEHOLDER_RETURN */
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background/80 text-foreground">
       <div className="flex items-center justify-between px-8 py-6 border-b">
         <div className="flex items-center gap-3">
           <span className="material-symbols-outlined text-3xl text-primary">bolt</span>
@@ -124,6 +147,12 @@ export default function HomePage() {
 
       <div className="max-w-7xl mx-auto px-8 py-8">
         <h2 className="text-lg font-semibold mb-4">工作流配置</h2>
+        {configsLoading ? (
+          <div className="flex items-center justify-center py-16 gap-3 text-muted-foreground">
+            <span className="material-symbols-outlined text-2xl animate-spin">progress_activity</span>
+            <span className="text-sm">加载配置列表...</span>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {configs.map((cfg) => (
             <div
@@ -134,7 +163,17 @@ export default function HomePage() {
               onClick={() => setSelectedConfig(cfg.filename)}
             >
               <div className="text-xs text-muted-foreground font-mono mb-1">{cfg.filename}</div>
-              <div className="font-medium mb-1">{cfg.name}</div>
+              {renamingConfig === cfg.filename ? (
+                <Input autoFocus className="h-7 text-sm font-medium mb-1" value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => handleRename(cfg.filename, renameValue)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleRename(cfg.filename, renameValue); if (e.key === 'Escape') setRenamingConfig(null); }}
+                  onClick={(e) => e.stopPropagation()} />
+              ) : (
+                <div className="font-medium mb-1 cursor-text hover:underline decoration-dashed underline-offset-4"
+                  onDoubleClick={(e) => { e.stopPropagation(); setRenamingConfig(cfg.filename); setRenameValue(cfg.name); }}
+                  title="双击编辑名称">{cfg.name}</div>
+              )}
               {cfg.description && <p className="text-sm text-muted-foreground mb-3">{cfg.description}</p>}
               <div className="flex gap-4 text-sm text-muted-foreground mb-3">
                 <span><span className="font-semibold text-foreground">{cfg.phaseCount}</span> 阶段</span>
@@ -142,11 +181,13 @@ export default function HomePage() {
                 <span><span className="font-semibold text-foreground">{cfg.agentCount}</span> Agent</span>
               </div>
               <div className="flex gap-2">
-                <Button size="sm" onClick={(e) => { e.stopPropagation(); router.push(`/workbench/${encodeURIComponent(cfg.filename)}?mode=run`); }}>
-                  <span className="material-symbols-outlined text-sm mr-1">play_arrow</span>运行
+                <Button size="sm" disabled={navigating === cfg.filename} onClick={(e) => { e.stopPropagation(); setNavigating(cfg.filename); router.push(`/workbench/${encodeURIComponent(cfg.filename)}?mode=run`); }}>
+                  <span className={`material-symbols-outlined text-sm mr-1 ${navigating === cfg.filename ? 'animate-spin' : ''}`}>{navigating === cfg.filename ? 'progress_activity' : 'login'}</span>
+                  {navigating === cfg.filename ? '加载中...' : '进入'}
                 </Button>
-                <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); router.push(`/workbench/${encodeURIComponent(cfg.filename)}?mode=design`); }}>
-                  <span className="material-symbols-outlined text-sm mr-1">edit</span>设计
+                <Button size="sm" variant="outline" disabled={!!navigating} onClick={(e) => { e.stopPropagation(); setNavigating(cfg.filename + ':design'); router.push(`/workbench/${encodeURIComponent(cfg.filename)}?mode=design`); }}>
+                  <span className={`material-symbols-outlined text-sm mr-1 ${navigating === cfg.filename + ':design' ? 'animate-spin' : ''}`}>{navigating === cfg.filename + ':design' ? 'progress_activity' : 'edit'}</span>
+                  {navigating === cfg.filename + ':design' ? '加载中...' : '设计'}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setCopySource(cfg.filename); }}>
                   <span className="material-symbols-outlined text-sm">content_copy</span>
@@ -165,6 +206,7 @@ export default function HomePage() {
             <span className="text-sm text-muted-foreground">新建配置</span>
           </div>
         </div>
+        )}
         {selectedConfig && (
           <div className="mt-8">
             <h3 className="text-base font-semibold mb-3">运行历史 — {selectedConfig}</h3>

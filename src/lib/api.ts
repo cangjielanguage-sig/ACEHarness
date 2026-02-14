@@ -196,11 +196,11 @@ export const workflowApi = {
     return response.json();
   },
 
-  async resume(runId: string): Promise<ApiResponse> {
+  async resume(runId: string, action?: 'approve' | 'iterate'): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runId }),
+      body: JSON.stringify({ runId, action }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -214,6 +214,25 @@ export const workflowApi = {
       method: 'POST',
     });
     if (!response.ok) throw new Error('批准检查点失败');
+    return response.json();
+  },
+
+  async iterate(): Promise<ApiResponse> {
+    const response = await fetch(`${API_BASE}/workflow/iterate`, {
+      method: 'POST',
+    });
+    if (!response.ok) throw new Error('请求继续迭代失败');
+    return response.json();
+  },
+
+  async forceCompleteStep(): Promise<any> {
+    const response = await fetch(`${API_BASE}/workflow/force-complete`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || '强制完成失败');
+    }
     return response.json();
   },
 

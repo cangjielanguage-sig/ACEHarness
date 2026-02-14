@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 interface ProcessInfo {
   id: string;
@@ -24,9 +27,11 @@ interface ProcessStats {
 }
 
 export default function ProcessPanel({ onClose }: { onClose?: () => void }) {
+  const { toast } = useToast();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [stats, setStats] = useState<ProcessStats | null>(null);
   const [selectedProcess, setSelectedProcess] = useState<ProcessInfo | null>(null);
+  const { confirm, dialogProps } = useConfirmDialog();
 
   useEffect(() => {
     loadProcesses();
@@ -46,7 +51,13 @@ export default function ProcessPanel({ onClose }: { onClose?: () => void }) {
   };
 
   const killProcess = async (id: string) => {
-    if (!confirm('确定要终止这个进程吗？')) return;
+    const ok = await confirm({
+      title: '确认终止',
+      description: '确定要终止这个进程吗？',
+      confirmLabel: '终止',
+      variant: 'destructive',
+    });
+    if (!ok) return;
 
     try {
       const response = await fetch(`/api/processes/${id}`, {
@@ -54,19 +65,25 @@ export default function ProcessPanel({ onClose }: { onClose?: () => void }) {
       });
 
       if (response.ok) {
-        alert('进程已终止');
+        toast('success', '进程已终止');
         loadProcesses();
       } else {
         const data = await response.json();
-        alert(data.error || '终止失败');
+        toast('error', data.error || '终止失败');
       }
     } catch (error: any) {
-      alert('终止失败: ' + error.message);
+      toast('error', '终止失败: ' + error.message);
     }
   };
 
   const killAll = async () => {
-    if (!confirm('确定要终止所有进程吗？')) return;
+    const ok = await confirm({
+      title: '确认终止全部',
+      description: '确定要终止所有进程吗？',
+      confirmLabel: '终止全部',
+      variant: 'destructive',
+    });
+    if (!ok) return;
 
     try {
       const response = await fetch('/api/processes', {
@@ -74,14 +91,14 @@ export default function ProcessPanel({ onClose }: { onClose?: () => void }) {
       });
 
       if (response.ok) {
-        alert('所有进程已终止');
+        toast('success', '所有进程已终止');
         loadProcesses();
       } else {
         const data = await response.json();
-        alert(data.error || '终止失败');
+        toast('error', data.error || '终止失败');
       }
     } catch (error: any) {
-      alert('终止失败: ' + error.message);
+      toast('error', '终止失败: ' + error.message);
     }
   };
 
@@ -133,7 +150,7 @@ export default function ProcessPanel({ onClose }: { onClose?: () => void }) {
           终止全部
         </Button>
         {onClose && (
-          <Button variant="ghost" size="icon" onClick={onClose} title="关闭">
+          <Button variant="ghost" size="icon" className="ml-auto" onClick={onClose} title="关闭">
             <span className="material-symbols-outlined">close</span>
           </Button>
         )}
@@ -239,6 +256,7 @@ export default function ProcessPanel({ onClose }: { onClose?: () => void }) {
           </div>
         )}
       </div>
+      {dialogProps && <ConfirmDialog {...dialogProps} />}
     </div>
   );
 }

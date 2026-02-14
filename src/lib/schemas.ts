@@ -17,6 +17,7 @@ export const workflowStepSchema = z.object({
   type: z.string().optional(),
   role: z.enum(['attacker', 'defender', 'judge']).optional(),
   constraints: z.array(z.string()).optional(),
+  parallelGroup: z.string().optional(),
 });
 
 // 检查点 Schema

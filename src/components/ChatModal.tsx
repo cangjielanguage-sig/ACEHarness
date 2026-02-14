@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
+import Markdown from '@/components/Markdown';
 
 interface Message {
   role: 'user' | 'assistant' | 'error';
@@ -109,12 +110,16 @@ export default function ChatModal() {
               </div>
             )}
             {messages.map((msg, i) => (
-              <div key={i} className={`text-sm rounded-lg px-3 py-2 max-w-[85%] whitespace-pre-wrap ${
-                msg.role === 'user' ? 'ml-auto bg-primary text-primary-foreground' :
-                msg.role === 'error' ? 'bg-destructive/10 text-destructive' :
+              <div key={i} className={`text-sm rounded-lg px-3 py-2 max-w-[85%] ${
+                msg.role === 'user' ? 'ml-auto bg-primary text-primary-foreground whitespace-pre-wrap' :
+                msg.role === 'error' ? 'bg-destructive/10 text-destructive whitespace-pre-wrap' :
                 'bg-muted'
               }`}>
-                {msg.content}
+                {msg.role === 'assistant' ? (
+                  <div className="prose-sm prose-neutral dark:prose-invert max-w-none [&_pre]:bg-background [&_pre]:border [&_pre]:rounded [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:bg-background/50 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_blockquote]:border-l-2 [&_blockquote]:pl-2 [&_blockquote]:text-muted-foreground [&_table]:text-xs">
+                    <Markdown>{msg.content}</Markdown>
+                  </div>
+                ) : msg.content}
                 {msg.role === 'assistant' && (msg.usage || msg.costUsd !== undefined) && (
                   <div className="text-xs text-muted-foreground mt-1 opacity-70">
                     {msg.usage && `${msg.usage.input_tokens}↓ ${msg.usage.output_tokens}↑`}

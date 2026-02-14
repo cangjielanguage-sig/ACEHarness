@@ -55,6 +55,7 @@ export interface ProcessInfo {
   streamContent: string;
   logLines: string[];
   logFile?: string;
+  runId?: string;
 }
 
 interface ExecuteOptions {
@@ -63,6 +64,7 @@ interface ExecuteOptions {
   resumeSessionId?: string;
   appendSystemPrompt?: boolean;
   timeoutMs?: number;
+  runId?: string;
 }
 
 class ProcessManager extends EventEmitter {
@@ -73,8 +75,12 @@ class ProcessManager extends EventEmitter {
 
   private async flushLog(proc: ProcessInfo, cliArgs: string[]): Promise<void> {
     try {
-      if (!existsSync(DEBUG_DIR)) await mkdir(DEBUG_DIR, { recursive: true });
-      const logFile = proc.logFile || resolve(DEBUG_DIR, `${proc.id}.log`);
+      // Use run-specific logs directory if runId is available, otherwise fall back to .tmp
+      const logDir = proc.runId
+        ? resolve(process.cwd(), 'runs', proc.runId, 'logs')
+        : DEBUG_DIR;
+      if (!existsSync(logDir)) await mkdir(logDir, { recursive: true });
+      const logFile = proc.logFile || resolve(logDir, `${proc.id}.log`);
       proc.logFile = logFile;
 
       const elapsed = Date.now() - proc.startTime.getTime();
@@ -124,6 +130,7 @@ class ProcessManager extends EventEmitter {
       output: '', error: '',
       streamContent: '',
       logLines: [`[${ts()}] 任务已创建，等待执行队列...`],
+      runId: options.runId,
     };
     this.processes.set(id, proc);
 
@@ -238,6 +245,11 @@ class ProcessManager extends EventEmitter {
               this.emit('stream', { id, step, delta: delta.text, total: proc.streamContent });
             }
           } else if (obj.type === 'assistant') {
+            // Insert chunk boundary so live stream viewers see visual separation between turns
+            if (proc.streamContent && !proc.streamContent.endsWith('\n\n<!-- chunk-boundary -->\n\n')) {
+              proc.streamContent += '\n\n<!-- chunk-boundary -->\n\n';
+              this.emit('stream', { id, step, delta: '\n\n<!-- chunk-boundary -->\n\n', total: proc.streamContent });
+            }
             // Full completed message block — use as final output
             if (obj.message?.content) {
               const textParts = obj.message.content

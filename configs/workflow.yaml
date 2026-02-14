@@ -1,12 +1,12 @@
 workflow:
-  name: 完整开发流程
+  name: AST结束释放内存
   description: 设计 → 实施 → 测试 → 优化
   phases:
     - name: 设计阶段
       iteration:
         enabled: true
         maxIterations: 5
-        exitCondition: no_new_bugs_3_rounds
+        exitCondition: all_resolved
         consecutiveCleanRounds: 3
         escalateToHuman: true
       steps:

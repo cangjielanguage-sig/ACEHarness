@@ -3,6 +3,7 @@ import './globals.css';
 import { ChatProvider } from '@/contexts/ChatContext';
 import ChatModal from '@/components/ChatModal';
 import { ThemeProvider } from '@/components/theme-provider';
+import { ToastProvider } from '@/components/ui/toast';
 
 export const metadata: Metadata = {
   title: 'AceFlow',
@@ -29,9 +30,18 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <div className="sci-fi-grid" aria-hidden="true" />
+          <div className="siri-glow" aria-hidden="true">
+            <div className="orb orb-1" />
+            <div className="orb orb-2" />
+            <div className="orb orb-3" />
+            <div className="orb orb-4" />
+          </div>
           <ChatProvider>
-            {children}
-            <ChatModal />
+            <ToastProvider>
+              {children}
+              <ChatModal />
+            </ToastProvider>
           </ChatProvider>
         </ThemeProvider>
       </body>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useEffect } from 'react';
+import { useCallback, useMemo, useEffect, useRef } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -9,6 +9,7 @@ import ReactFlow, {
   MiniMap,
   useNodesState,
   useEdgesState,
+  ReactFlowInstance,
   MarkerType,
   Position,
 } from 'reactflow';
@@ -79,6 +80,7 @@ interface Step {
   agent: string;
   task: string;
   role?: 'attacker' | 'defender' | 'judge';
+  parallelGroup?: string;
 }
 
 interface IterationConfig {
@@ -154,12 +156,50 @@ export default function FlowDiagram({
     const stepGap = 24;
     const stepNodeW = 220;
     const stepsStartY = phaseHeaderH + 30;
+    const roundSeparatorH = 32; // height for "轮次 N" separator label
+
+    // Helper: group consecutive steps with same parallelGroup
+    const getStepGroups = (phase: Phase) => {
+      const stepGroups: { steps: Step[]; parallelGroup?: string; startIndex: number }[] = [];
+      let currentGroup: Step[] = [];
+      let currentParallelGroup: string | undefined = undefined;
+      let groupStartIndex = 0;
+
+      phase.steps.forEach((step, idx) => {
+        if (step.parallelGroup && step.parallelGroup === currentParallelGroup) {
+          currentGroup.push(step);
+        } else {
+          if (currentGroup.length > 0) {
+            stepGroups.push({ steps: currentGroup, parallelGroup: currentParallelGroup, startIndex: groupStartIndex });
+          }
+          currentGroup = [step];
+          currentParallelGroup = step.parallelGroup;
+          groupStartIndex = idx;
+        }
+      });
+      if (currentGroup.length > 0) {
+        stepGroups.push({ steps: currentGroup, parallelGroup: currentParallelGroup, startIndex: groupStartIndex });
+      }
+      return stepGroups;
+    };
+
+    // Count how many rounds to display for a phase
+    const getRoundCount = (phase: Phase) => {
+      const iterState = iterationStates[phase.name];
+      if (!iterState || !phase.iteration?.enabled || iterState.currentIteration <= 1) return 1;
+      return iterState.currentIteration;
+    };
 
     // Pre-calculate group heights for checkpoint vertical centering
     const groupHeights: number[] = workflow.phases.map((phase) => {
-      const stepCount = phase.steps.length;
-      const lastStepBottom = stepCount > 0
-        ? stepsStartY + (stepCount - 1) * (stepNodeH + stepGap) + stepNodeH
+      const stepGroups = getStepGroups(phase);
+      const rowCount = stepGroups.length;
+      const rounds = getRoundCount(phase);
+      // Each round has rowCount rows + a separator (except the first round)
+      const totalRows = rowCount * rounds;
+      const separators = rounds > 1 ? rounds - 1 : 0;
+      const lastStepBottom = totalRows > 0
+        ? stepsStartY + (totalRows - 1) * (stepNodeH + stepGap) + stepNodeH + separators * roundSeparatorH
         : stepsStartY;
       return lastStepBottom + 15;
     });
@@ -207,9 +247,9 @@ export default function FlowDiagram({
           ),
         },
         style: {
-          background: isActive ? '#2d3f50' : isDone ? '#2d4a2d' : '#3c3f41',
-          border: isActive ? '2px solid #4a88c7' : isDone ? '2px solid #6a8759' : '2px solid #515151',
-          borderLeft: isActive ? '4px solid #4a88c7' : isDone ? '4px solid #6a8759' : '4px solid #4a88c7',
+          background: isActive ? 'hsl(var(--primary) / 0.2)' : isDone ? 'hsl(var(--flow-success) / 0.2)' : 'hsl(var(--flow-node-bg))',
+          border: isActive ? '2px solid hsl(var(--primary))' : isDone ? '2px solid hsl(var(--flow-success))' : '2px solid hsl(var(--flow-node-border))',
+          borderLeft: isActive ? '4px solid hsl(var(--primary))' : isDone ? '4px solid hsl(var(--flow-success))' : '4px solid hsl(var(--primary))',
           borderRadius: '6px',
           padding: '10px 14px',
           width: stepNodeW,
@@ -250,8 +290,8 @@ export default function FlowDiagram({
           targetPosition: Position.Left,
           data: { label: <div className={styles.checkpointNode}>✋ {phase.checkpoint.name}</div> },
           style: {
-            background: '#3c3f41',
-            border: '2px solid #cc7832',
+            background: 'hsl(var(--flow-node-bg))',
+            border: '2px solid hsl(var(--flow-warning))',
             borderRadius: '4px',
             padding: '6px 8px',
             width: 50,
@@ -283,16 +323,16 @@ export default function FlowDiagram({
           id: `${anchorLeftId}-${cpId}`,
           source: anchorLeftId, target: cpId,
           type: 'straight',
-          style: { stroke: '#cc7832', strokeWidth: 2 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#cc7832' },
+          style: { stroke: 'hsl(var(--flow-warning))', strokeWidth: 2 },
+          markerEnd: { type: MarkerType.ArrowClosed, color: 'hsl(var(--flow-warning))' },
         });
         // Edge: checkpoint → right anchor
         edges.push({
           id: `${cpId}-${anchorRightId}`,
           source: cpId, target: anchorRightId,
           type: 'straight',
-          style: { stroke: '#4a88c7', strokeWidth: 2 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#4a88c7' },
+          style: { stroke: 'hsl(var(--primary))', strokeWidth: 2 },
+          markerEnd: { type: MarkerType.ArrowClosed, color: 'hsl(var(--primary))' },
         });
       } else if (pi < workflow.phases.length - 1 && !phase.checkpoint) {
         // Direct inter-phase edge (horizontal)
@@ -301,69 +341,259 @@ export default function FlowDiagram({
           source: phaseId, target: `phase-${pi + 1}`,
           type: 'smoothstep',
           animated: isActive,
-          style: { stroke: isDone ? '#6a8759' : '#4a88c7', strokeWidth: 2 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: isDone ? '#6a8759' : '#4a88c7' },
+          style: { stroke: isDone ? 'hsl(var(--flow-success))' : 'hsl(var(--primary))', strokeWidth: 2 },
+          markerEnd: { type: MarkerType.ArrowClosed, color: isDone ? 'hsl(var(--flow-success))' : 'hsl(var(--primary))' },
         });
       }
 
-      // Steps vertically below header
-      phase.steps.forEach((step, si) => {
-        const stepId = `step-${pi}-${si}`;
-        const status = getStepStatus(step);
-        const team = getAgentTeam(step.agent);
-        const stepY = stepsStartY + si * (stepNodeH + stepGap);
-        const roleColor = step.role === 'attacker' ? '#cc7832' : step.role === 'judge' ? '#ffc66d' : '#6897bb';
+      // Steps vertically below header — with iteration round duplication
+      const stepGroups = getStepGroups(phase);
+      const rounds = getRoundCount(phase);
 
-        nodes.push({
-          id: stepId,
-          type: 'default',
-          position: { x: colX, y: stepY },
-          sourcePosition: Position.Bottom,
-          targetPosition: Position.Top,
-          data: {
-            label: (
-              <div className={`${styles.stepNode} ${styles[status]} ${styles[team]} ${status === 'running' ? styles.pulseGlow : ''}`}>
-                <div className={styles.stepHeader}>
-                  {step.role ? (
-                    <span className={`${styles.roleBadgeWrap} ${styles[step.role]}`}>
-                      {step.role === 'attacker' ? <IconAttacker /> : step.role === 'judge' ? <IconJudge /> : <IconDefender />}
-                    </span>
-                  ) : (
-                    <span className={styles.stepNumber}>{si + 1}</span>
-                  )}
-                  <span className={styles.stepName}>{step.name}</span>
-                  {status === 'completed' && <IconCheck />}
-                  {status === 'failed' && <IconFail />}
-                  {status === 'running' && <IconRunning />}
-                  {status === 'pending' && <IconPending />}
-                </div>
-                <div className={styles.stepAgent}>
-                  <IconAgent />
-                  <span>{step.agent}</span>
-                </div>
-                {status === 'running' && (
-                  <div className={styles.stepProgress}><div className={styles.progressBar}></div></div>
-                )}
-              </div>
-            ),
-            step,
-          },
-          style: { background: 'transparent', border: 'none', padding: 0, width: stepNodeW, cursor: 'pointer' },
-          zIndex: 1,
-        });
+      for (let round = 0; round < rounds; round++) {
+        const roundOffset = round > 0
+          ? round * stepGroups.length * (stepNodeH + stepGap) + round * roundSeparatorH
+          : 0;
 
-        // Vertical edge: step → step (no edge from header, it's containment)
-        if (si > 0) {
-          edges.push({
-            id: `step-${pi}-${si - 1}-${stepId}`,
-            source: `step-${pi}-${si - 1}`, target: stepId,
-            type: 'smoothstep',
-            animated: status === 'running',
-            style: { stroke: roleColor, strokeWidth: 2 },
-            markerEnd: { type: MarkerType.ArrowClosed, color: roleColor },
+        // Round separator label
+        if (round > 0) {
+          const sepY = stepsStartY + round * stepGroups.length * (stepNodeH + stepGap) + (round - 1) * roundSeparatorH;
+          nodes.push({
+            id: `round-sep-${pi}-${round}`,
+            type: 'default',
+            position: { x: colX, y: sepY },
+            data: {
+              label: (
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--primary))', textAlign: 'center' }}>
+                  ── 轮次 {round + 1} ──
+                </div>
+              ),
+            },
+            style: {
+              background: 'transparent',
+              border: 'none',
+              padding: '4px 0',
+              width: stepNodeW,
+              pointerEvents: 'none' as const,
+            },
+            zIndex: 2,
+            selectable: false,
+            draggable: false,
+            connectable: false,
           });
         }
-      });
+
+        // Render each group for this round
+        stepGroups.forEach((group, groupIdx) => {
+          const groupY = stepsStartY + roundOffset + groupIdx * (stepNodeH + stepGap);
+          const isParallel = group.parallelGroup && group.steps.length > 1;
+          const roundSuffix = rounds > 1 ? ` (轮次 ${round + 1})` : '';
+          const idSuffix = round > 0 ? `-r${round}` : '';
+          // For iteration rounds >= 2, step names in completedSteps/failedSteps have "-迭代N" suffix
+          const iterNameSuffix = round > 0 ? `-迭代${round + 1}` : '';
+
+          if (isParallel) {
+            // Render parallel group container
+            const parallelGap = 10;
+            const totalWidth = group.steps.length * stepNodeW + (group.steps.length - 1) * parallelGap;
+            const containerPadding = 12;
+            const containerX = colX - containerPadding;
+            const containerY = groupY - containerPadding;
+            const containerW = totalWidth + 2 * containerPadding;
+            const containerH = stepNodeH + 2 * containerPadding;
+
+            nodes.push({
+              id: `parallel-container-${pi}-${groupIdx}${idSuffix}`,
+              type: 'default',
+              position: { x: containerX, y: containerY },
+              data: {
+                label: (
+                  <div style={{
+                    position: 'absolute',
+                    top: '4px',
+                    left: '8px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: 'hsl(var(--primary))',
+                    opacity: 0.7,
+                  }}>
+                    并行{roundSuffix}
+                  </div>
+                ),
+              },
+              style: {
+                background: 'hsl(var(--primary) / 0.05)',
+                border: '2px dashed hsl(var(--primary) / 0.3)',
+                borderRadius: '8px',
+                width: containerW,
+                height: containerH,
+                pointerEvents: 'none' as const,
+              },
+              zIndex: 0,
+              selectable: false,
+              draggable: false,
+              connectable: false,
+            });
+
+            // Render steps horizontally
+            group.steps.forEach((step, stepIdxInGroup) => {
+              const iterStep = iterNameSuffix ? { ...step, name: `${step.name}${iterNameSuffix}` } : step;
+              const stepId = `step-${pi}-${group.startIndex + stepIdxInGroup}${idSuffix}`;
+              const status = round < rounds - 1 ? 'completed' : getStepStatus(iterStep);
+              const team = getAgentTeam(step.agent);
+              const stepX = colX + stepIdxInGroup * (stepNodeW + parallelGap);
+              const displayName = step.name + roundSuffix;
+
+              nodes.push({
+                id: stepId,
+                type: 'default',
+                position: { x: stepX, y: groupY },
+                sourcePosition: Position.Bottom,
+                targetPosition: Position.Top,
+                data: {
+                  label: (
+                    <div className={`${styles.stepNode} ${styles[status]} ${styles[team]} ${status === 'running' ? styles.pulseGlow : ''}`}>
+                      <div className={styles.stepHeader}>
+                        {step.role ? (
+                          <span className={`${styles.roleBadgeWrap} ${styles[step.role]}`}>
+                            {step.role === 'attacker' ? <IconAttacker /> : step.role === 'judge' ? <IconJudge /> : <IconDefender />}
+                          </span>
+                        ) : (
+                          <span className={styles.stepNumber}>{group.startIndex + stepIdxInGroup + 1}</span>
+                        )}
+                        <span className={styles.stepName}>{displayName}</span>
+                        {status === 'completed' && <IconCheck />}
+                        {status === 'failed' && <IconFail />}
+                        {status === 'running' && <IconRunning />}
+                        {status === 'pending' && <IconPending />}
+                      </div>
+                      <div className={styles.stepAgent}>
+                        <IconAgent />
+                        <span>{step.agent}</span>
+                      </div>
+                      {status === 'running' && (
+                        <div className={styles.stepProgress}><div className={styles.progressBar}></div></div>
+                      )}
+                    </div>
+                  ),
+                  step: iterStep,
+                },
+                style: { background: 'transparent', border: 'none', padding: 0, width: stepNodeW, cursor: 'pointer' },
+                zIndex: 1,
+              });
+            });
+
+            // Edges from previous group in this round
+            if (groupIdx > 0) {
+              const prevGroup = stepGroups[groupIdx - 1];
+              prevGroup.steps.forEach((prevStep, prevStepIdx) => {
+                const prevStepId = `step-${pi}-${prevGroup.startIndex + prevStepIdx}${idSuffix}`;
+                group.steps.forEach((step, stepIdxInGroup) => {
+                  const stepId = `step-${pi}-${group.startIndex + stepIdxInGroup}${idSuffix}`;
+                  const status = round < rounds - 1 ? 'completed' : getStepStatus(step);
+                  const roleColor = step.role === 'attacker' ? 'hsl(var(--flow-warning))' : step.role === 'judge' ? 'hsl(var(--flow-judge))' : 'hsl(var(--flow-defender))';
+                  edges.push({
+                    id: `${prevStepId}-${stepId}`,
+                    source: prevStepId,
+                    target: stepId,
+                    type: 'smoothstep',
+                    animated: status === 'running',
+                    style: { stroke: roleColor, strokeWidth: 2 },
+                    markerEnd: { type: MarkerType.ArrowClosed, color: roleColor },
+                  });
+                });
+              });
+            }
+          } else {
+            // Single step (not parallel)
+            const step = group.steps[0];
+            const iterStep = iterNameSuffix ? { ...step, name: `${step.name}${iterNameSuffix}` } : step;
+            const stepId = `step-${pi}-${group.startIndex}${idSuffix}`;
+            const status = round < rounds - 1 ? 'completed' : getStepStatus(iterStep);
+            const team = getAgentTeam(step.agent);
+            const roleColor = step.role === 'attacker' ? 'hsl(var(--flow-warning))' : step.role === 'judge' ? 'hsl(var(--flow-judge))' : 'hsl(var(--flow-defender))';
+            const displayName = step.name + roundSuffix;
+
+            nodes.push({
+              id: stepId,
+              type: 'default',
+              position: { x: colX, y: groupY },
+              sourcePosition: Position.Bottom,
+              targetPosition: Position.Top,
+              data: {
+                label: (
+                  <div className={`${styles.stepNode} ${styles[status]} ${styles[team]} ${status === 'running' ? styles.pulseGlow : ''}`}>
+                    <div className={styles.stepHeader}>
+                      {step.role ? (
+                        <span className={`${styles.roleBadgeWrap} ${styles[step.role]}`}>
+                          {step.role === 'attacker' ? <IconAttacker /> : step.role === 'judge' ? <IconJudge /> : <IconDefender />}
+                        </span>
+                      ) : (
+                        <span className={styles.stepNumber}>{group.startIndex + 1}</span>
+                      )}
+                      <span className={styles.stepName}>{displayName}</span>
+                      {status === 'completed' && <IconCheck />}
+                      {status === 'failed' && <IconFail />}
+                      {status === 'running' && <IconRunning />}
+                      {status === 'pending' && <IconPending />}
+                    </div>
+                    <div className={styles.stepAgent}>
+                      <IconAgent />
+                      <span>{step.agent}</span>
+                    </div>
+                    {status === 'running' && (
+                      <div className={styles.stepProgress}><div className={styles.progressBar}></div></div>
+                    )}
+                  </div>
+                ),
+                step: iterStep,
+              },
+              style: { background: 'transparent', border: 'none', padding: 0, width: stepNodeW, cursor: 'pointer' },
+              zIndex: 1,
+            });
+
+            // Edge from previous group in this round
+            if (groupIdx > 0) {
+              const prevGroup = stepGroups[groupIdx - 1];
+              prevGroup.steps.forEach((prevStep, prevStepIdx) => {
+                const prevStepId = `step-${pi}-${prevGroup.startIndex + prevStepIdx}${idSuffix}`;
+                edges.push({
+                  id: `${prevStepId}-${stepId}`,
+                  source: prevStepId,
+                  target: stepId,
+                  type: 'smoothstep',
+                  animated: status === 'running',
+                  style: { stroke: roleColor, strokeWidth: 2 },
+                  markerEnd: { type: MarkerType.ArrowClosed, color: roleColor },
+                });
+              });
+            }
+          }
+        });
+
+        // Edge connecting last step of previous round to first step of this round
+        if (round > 0 && stepGroups.length > 0) {
+          const lastGroup = stepGroups[stepGroups.length - 1];
+          const firstGroup = stepGroups[0];
+          const prevIdSuffix = round > 1 ? `-r${round - 1}` : '';
+          const curIdSuffix = `-r${round}`;
+          lastGroup.steps.forEach((prevStep, prevStepIdx) => {
+            const prevStepId = `step-${pi}-${lastGroup.startIndex + prevStepIdx}${prevIdSuffix}`;
+            firstGroup.steps.forEach((step, stepIdxInGroup) => {
+              const stepId = `step-${pi}-${firstGroup.startIndex + stepIdxInGroup}${curIdSuffix}`;
+              edges.push({
+                id: `${prevStepId}-${stepId}`,
+                source: prevStepId,
+                target: stepId,
+                type: 'smoothstep',
+                animated: false,
+                style: { stroke: 'hsl(var(--primary))', strokeWidth: 2, strokeDasharray: '6 3' },
+                markerEnd: { type: MarkerType.ArrowClosed, color: 'hsl(var(--primary))' },
+              });
+            });
+          });
+        }
+      }
 
       // Group background box for this phase column
       const groupHeight = groupHeights[pi];
@@ -373,8 +603,8 @@ export default function FlowDiagram({
         position: { x: colX - 10, y: headerY - 10 },
         data: { label: '' },
         style: {
-          background: 'rgba(74, 136, 199, 0.06)',
-          border: '1px dashed #515151',
+          background: 'hsl(var(--flow-group-bg))',
+          border: '1px dashed hsl(var(--flow-group-border))',
           borderRadius: '10px',
           width: stepNodeW + 20,
           height: groupHeight,
@@ -392,10 +622,14 @@ export default function FlowDiagram({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const rfInstance = useRef<ReactFlowInstance | null>(null);
 
   useEffect(() => {
     setNodes(initialNodes);
     setEdges(initialEdges);
+    if (rfInstance.current) {
+      setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 50);
+    }
   }, [initialNodes, initialEdges, setNodes, setEdges]);
 
   const onNodeClick = useCallback(
@@ -411,22 +645,23 @@ export default function FlowDiagram({
         nodes={nodes} edges={edges}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
+        onInit={(instance) => { rfInstance.current = instance; }}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
         fitView fitViewOptions={{ padding: 0.2 }}
         attributionPosition="bottom-left"
       >
-        <Background color="#515151" gap={16} />
+        <Background color="hsl(var(--flow-node-border))" gap={16} />
         <Controls />
         <MiniMap
           nodeColor={(node) => {
-            if (node.id.startsWith('phase')) return '#4a88c7';
-            if (node.id.startsWith('group')) return 'rgba(74, 136, 199, 0.2)';
-            if (node.id.startsWith('checkpoint')) return '#cc7832';
-            return '#313335';
+            if (node.id.startsWith('phase')) return 'hsl(var(--primary))';
+            if (node.id.startsWith('group')) return 'hsl(var(--primary) / 0.2)';
+            if (node.id.startsWith('checkpoint')) return 'hsl(var(--flow-warning))';
+            return 'hsl(var(--flow-step-bg))';
           }}
-          maskColor="rgba(0, 0, 0, 0.6)"
+          maskColor="hsl(var(--background) / 0.6)"
         />
       </ReactFlow>
     </div>

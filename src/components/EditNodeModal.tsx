@@ -55,6 +55,9 @@ interface EditNodeModalProps {
   type: 'phase' | 'step';
   data: any;
   roles?: RoleOption[];
+  isNew?: boolean;
+  existingPhases?: any[];
+  existingSteps?: any[];
   onClose: () => void;
   onSave: (data: any) => void;
   onDelete?: () => void;
@@ -65,6 +68,9 @@ export default function EditNodeModal({
   type,
   data,
   roles = [],
+  isNew = false,
+  existingPhases = [],
+  existingSteps = [],
   onClose,
   onSave,
   onDelete,
@@ -78,6 +84,7 @@ export default function EditNodeModal({
     formState: { errors, isSubmitting },
     watch,
     setValue,
+    reset,
   } = useForm({
     resolver: zodResolver(schema),
     defaultValues: isPhase
@@ -102,7 +109,34 @@ export default function EditNodeModal({
 
   const checkpointEnabled = watch('checkpointEnabled');
   const iterationEnabled = watch('iterationEnabled');
-  /* PLACEHOLDER_ONSUBMIT */
+
+  const handleCopyFrom = (sourceName: string) => {
+    if (!sourceName) return;
+    if (isPhase) {
+      const source = existingPhases.find((p: any) => p.name === sourceName);
+      if (!source) return;
+      reset({
+        name: source.name + ' (副本)',
+        checkpointEnabled: !!source.checkpoint,
+        checkpointName: source.checkpoint?.name || '',
+        checkpointMessage: source.checkpoint?.message || '',
+        iterationEnabled: !!source.iteration?.enabled,
+        maxIterations: source.iteration?.maxIterations || 5,
+        exitCondition: source.iteration?.exitCondition || 'no_new_bugs_3_rounds',
+        consecutiveCleanRounds: source.iteration?.consecutiveCleanRounds || 3,
+        escalateToHuman: source.iteration?.escalateToHuman ?? true,
+      });
+    } else {
+      const source = existingSteps.find((s: any) => s.name === sourceName);
+      if (!source) return;
+      reset({
+        name: source.name + ' (副本)',
+        agent: source.agent || '',
+        task: source.task || '',
+        constraints: source.constraints?.join('\n') || '',
+      });
+    }
+  };
 
   const onSubmit = (formData: any) => {
     if (isPhase) {
@@ -150,9 +184,29 @@ export default function EditNodeModal({
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isPhase ? '编辑阶段' : '编辑步骤'}</DialogTitle>
+          <DialogTitle>{isNew ? (isPhase ? '新建阶段' : '新建步骤') : (isPhase ? '编辑阶段' : '编辑步骤')}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {isNew && ((isPhase && existingPhases.length > 0) || (!isPhase && existingSteps.length > 0)) && (
+            <div className="space-y-2">
+              <Label>从现有复制</Label>
+              <Select onValueChange={handleCopyFrom}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择要复制的模板..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {(isPhase ? existingPhases : existingSteps).map((item: any) => (
+                    <SelectItem key={item.name} value={item.name}>
+                      <span className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-sm">content_copy</span>
+                        {item.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {isPhase ? (
             <>
               <div className="space-y-2">

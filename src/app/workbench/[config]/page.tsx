@@ -7,13 +7,23 @@ import { configApi, workflowApi, agentApi, runsApi, processApi, streamApi } from
 import { useWorkflowState } from '@/hooks/useWorkflowState';
 import type { ViewMode } from '@/hooks/useWorkflowState';
 import FlowDiagram from '@/components/FlowDiagram';
-import DesignFlowDiagram from '@/components/DesignFlowDiagram';
+import DesignPanel from '@/components/DesignPanel';
 import AgentPanel from '@/components/AgentPanel';
 import AgentConfigPanel from '@/components/AgentConfigPanel';
 import EditNodeModal from '@/components/EditNodeModal';
 import ProcessPanel from '@/components/ProcessPanel';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import Markdown from '@/components/Markdown';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Separator } from '@/components/ui/separator';
+import { ThemeToggle } from '@/components/theme-toggle';
+import { useToast } from '@/components/ui/toast';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import styles from './page.module.css';
 
 export default function WorkbenchPage() {
@@ -35,7 +45,11 @@ export default function WorkbenchPage() {
     router.replace(`/workbench/${encodeURIComponent(configFile)}${qs ? '?' + qs : ''}`, { scroll: false });
   }, [searchParams, configFile, router]);
 
+  const { toast } = useToast();
+  const { confirm, dialogProps: confirmDialogProps } = useConfirmDialog();
   const { state, dispatch, addLog } = useWorkflowState(initialMode);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   const [historyRuns, setHistoryRuns] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<any>(null);
@@ -43,16 +57,21 @@ export default function WorkbenchPage() {
   const [viewingHistoryRun, setViewingHistoryRun] = useState(false);
   const [fullStepOutput, setFullStepOutput] = useState<string | null>(null);
   const [loadingOutput, setLoadingOutput] = useState(false);
-  const [markdownModal, setMarkdownModal] = useState<{ title: string; content: string } | null>(null);
+  const [markdownModal, setMarkdownModal] = useState<{ title: string; chunks: string[] } | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
-  const [liveStream, setLiveStream] = useState<string | null>(null);
+  const [liveStream, setLiveStream] = useState<string[]>([]);
   const [showLiveStream, setShowLiveStream] = useState(false);
+  const [isNewNode, setIsNewNode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [showAgentDrawer, setShowAgentDrawer] = useState(false);
   const liveStreamRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const liveStreamLenRef = useRef(0);
   const {
     viewMode, workflowConfig, editingConfig, agentConfigs,
     workflowStatus, runId, currentPhase, currentStep, agents, logs, completedSteps, failedSteps,
-    showCheckpoint, checkpointMessage, activeTab, selectedAgent, selectedStep,
+    showCheckpoint, checkpointMessage, checkpointIsIterative, activeTab, selectedAgent, selectedStep,
     projectRoot, requirements, timeoutMinutes, showProcessPanel,
     showEditNodeModal, editingNode, iterationStates, stepResults,
   } = state;
@@ -235,6 +254,12 @@ export default function WorkbenchPage() {
       if (agents.length > 0) {
         dispatch({ type: 'SET_SELECTED_AGENT', payload: agents[0] });
       }
+      // If there's a pending checkpoint, show the checkpoint dialog
+      if (detail.pendingCheckpoint) {
+        dispatch({ type: 'SET_CHECKPOINT_MESSAGE', payload: detail.pendingCheckpoint.message });
+        dispatch({ type: 'SET_CHECKPOINT_IS_ITERATIVE', payload: !!detail.pendingCheckpoint.isIterativePhase });
+        dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
+      }
       addLog('system', 'info', `查看历史运行: ${runId}`);
     } catch (error: any) {
       addLog('system', 'error', `加载历史运行失败: ${error.message}`);
@@ -242,6 +267,8 @@ export default function WorkbenchPage() {
   };
 
   const loadWorkflowConfig = async () => {
+    setPageLoading(true);
+    setLoadError(null);
     try {
       const { config, agents: loadedAgents } = await configApi.getConfig(configFile);
       dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: config });
@@ -249,8 +276,11 @@ export default function WorkbenchPage() {
       dispatch({ type: 'SET_PROJECT_ROOT', payload: config.context?.projectRoot || '' });
       dispatch({ type: 'SET_REQUIREMENTS', payload: config.context?.requirements || '' });
       dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: config.context?.timeoutMinutes || 30 });
-    } catch (error) {
+    } catch (error: any) {
       console.error('加载工作流配置失败:', error);
+      setLoadError(error.message || '加载失败');
+    } finally {
+      setPageLoading(false);
     }
   };
 
@@ -300,6 +330,7 @@ export default function WorkbenchPage() {
       case 'checkpoint':
         dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
         dispatch({ type: 'SET_CHECKPOINT_MESSAGE', payload: event.data.message });
+        dispatch({ type: 'SET_CHECKPOINT_IS_ITERATIVE', payload: !!event.data.isIterativePhase });
         addLog('system', 'warning', `✋ 检查点: ${event.data.checkpoint}`);
         break;
       case 'iteration':
@@ -338,13 +369,16 @@ export default function WorkbenchPage() {
   handleEventRef.current = handleEvent;
 
   const saveConfig = async () => {
+    setSaving(true);
     try {
       const config = { ...workflowConfig, context: { ...workflowConfig.context, projectRoot, requirements, timeoutMinutes } };
       await configApi.saveConfig(configFile, config);
       dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: config });
-      alert('配置已保存');
+      toast('success', '配置已保存');
     } catch (error: any) {
-      alert('保存失败: ' + error.message);
+      toast('error', '保存失败: ' + error.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -359,6 +393,7 @@ export default function WorkbenchPage() {
   };
 
   const startWorkflow = async () => {
+    setStarting(true);
     try {
       setViewingHistoryRun(false);
       dispatch({ type: 'RESET_RUN' });
@@ -371,6 +406,8 @@ export default function WorkbenchPage() {
     } catch (error: any) {
       dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'failed' });
       addLog('system', 'error', `启动失败: ${error.message}`);
+    } finally {
+      setStarting(false);
     }
   };
 
@@ -383,6 +420,16 @@ export default function WorkbenchPage() {
       addLog('system', 'warning', '工作流已停止');
     } catch (error: any) {
       addLog('system', 'error', `停止失败: ${error.message}`);
+    }
+  };
+
+  const forceCompleteStep = async () => {
+    try {
+      const result = await workflowApi.forceCompleteStep();
+      addLog('system', 'info', `步骤 "${result.step}" 已完成 (${result.outputLength} 字符)`);
+    } catch (error: any) {
+      addLog('system', 'error', `完成失败: ${error.message}`);
+      toast('error', error.message);
     }
   };
 
@@ -408,7 +455,20 @@ export default function WorkbenchPage() {
 
   const approveCheckpoint = async () => {
     try {
-      await workflowApi.approve();
+      if (isRunning) {
+        await workflowApi.approve();
+      } else {
+        // Workflow not running (restored from pendingCheckpoint) — resume with approve action
+        const rid = runId || selectedRun?.id;
+        if (rid) {
+          setViewingHistoryRun(false);
+          dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'running' });
+          dispatch({ type: 'SET_FAILED_STEPS', payload: [] });
+          await workflowApi.resume(rid, 'approve');
+          dispatch({ type: 'SET_VIEW_MODE', payload: 'run' });
+          fetchCurrentStatus();
+        }
+      }
       dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
       addLog('system', 'success', '✓ 检查点已批准，继续执行');
     } catch (error: any) {
@@ -418,8 +478,33 @@ export default function WorkbenchPage() {
 
   const rejectCheckpoint = async () => {
     dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
-    await stopWorkflow();
+    if (isRunning) {
+      await stopWorkflow();
+    }
     addLog('system', 'warning', '✗ 检查点被拒绝，工作流已停止');
+  };
+
+  const iterateCheckpoint = async () => {
+    try {
+      if (isRunning) {
+        await workflowApi.iterate();
+      } else {
+        // Workflow not running — resume with iterate action
+        const rid = runId || selectedRun?.id;
+        if (rid) {
+          setViewingHistoryRun(false);
+          dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'running' });
+          dispatch({ type: 'SET_FAILED_STEPS', payload: [] });
+          await workflowApi.resume(rid, 'iterate');
+          dispatch({ type: 'SET_VIEW_MODE', payload: 'run' });
+          fetchCurrentStatus();
+        }
+      }
+      dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
+      addLog('system', 'info', '↻ 继续迭代，重新执行当前阶段');
+    } catch (error: any) {
+      addLog('system', 'error', `请求迭代失败: ${error.message}`);
+    }
   };
 
   const getStatusText = (status: string) => {
@@ -454,50 +539,68 @@ export default function WorkbenchPage() {
   const openMarkdownModal = async (stepName: string) => {
     const result = stepResults[stepName];
     if (!result) return;
-    // Try to load full output from server
     const rid = runId || selectedRun?.id;
     if (rid) {
       try {
+        // Try stream file first (has chunk separators for visual separation)
+        const streamContent = await streamApi.getStreamContent(rid, stepName);
+        if (streamContent) {
+          const chunks = streamContent.split(CHUNK_SEP).filter(Boolean);
+          if (chunks.length > 1) {
+            setMarkdownModal({ title: stepName, chunks });
+            return;
+          }
+        }
+        // Fall back to output file
         const { content } = await runsApi.getStepOutput(rid, stepName);
-        setMarkdownModal({ title: stepName, content });
+        setMarkdownModal({ title: stepName, chunks: [content] });
         return;
       } catch { /* fall through to local */ }
     }
-    setMarkdownModal({ title: stepName, content: result.output });
+    setMarkdownModal({ title: stepName, chunks: [result.output] });
   };
+
+  // Chunk separator used in persisted stream files
+  const CHUNK_SEP = '\n\n<!-- chunk-boundary -->\n\n';
 
   // --- Live stream polling ---
   const startLiveStream = () => {
     setShowLiveStream(true);
-    setLiveStream(null);
+    setLiveStream([]);
+    liveStreamLenRef.current = 0;
     if (liveStreamRef.current) clearInterval(liveStreamRef.current);
     liveStreamRef.current = setInterval(async () => {
       try {
         // Try in-memory process first
         const { processes } = await processApi.list();
         const running = processes.find((p: any) => p.status === 'running');
+        let content: string | null = null;
+        let fromPersisted = false;
         if (running?.streamContent) {
-          setLiveStream(running.streamContent);
-          return;
-        }
-        // Fallback: read from persisted stream file
-        const rid = runId || selectedRun?.id;
-        const step = currentStep || selectedStep?.name;
-        if (rid && step) {
-          const content = await streamApi.getStreamContent(rid, step);
-          if (content) {
-            setLiveStream(content);
-            return;
+          content = running.streamContent;
+        } else {
+          // Fallback: read from persisted stream file (contains chunk separators)
+          const rid = runId || selectedRun?.id;
+          const step = currentStep || selectedStep?.name;
+          if (rid && step) {
+            content = await streamApi.getStreamContent(rid, step);
+            if (content) fromPersisted = true;
+          }
+          if (!content) {
+            // Check latest completed process
+            const latest = processes.sort((a: any, b: any) =>
+              new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
+            )[0];
+            if (latest?.streamContent) {
+              content = latest.streamContent;
+            }
           }
         }
-        // Check latest completed process
-        const latest = processes.sort((a: any, b: any) =>
-          new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
-        )[0];
-        if (latest?.streamContent) {
-          setLiveStream(latest.streamContent);
-        } else {
-          setLiveStream('(等待输出...)');
+        if (content && content.length > liveStreamLenRef.current) {
+          liveStreamLenRef.current = content.length;
+          // Always split full content by chunk separator so boundaries render as visual dividers
+          const chunks = content.split(CHUNK_SEP).filter(Boolean);
+          setLiveStream(chunks);
         }
         // Stop polling if nothing is running
         if (!processes.some((p: any) => p.status === 'running') && !isRunning) {
@@ -525,6 +628,7 @@ export default function WorkbenchPage() {
     : null;
 
   const handleSelectNode = (type: 'phase' | 'step', phaseIndex: number, stepIndex?: number) => {
+    setIsNewNode(false);
     dispatch({ type: 'SET_EDITING_NODE', payload: { type, phaseIndex, stepIndex } });
     dispatch({ type: 'SET_SHOW_EDIT_NODE_MODAL', payload: true });
   };
@@ -548,7 +652,13 @@ export default function WorkbenchPage() {
 
   const handleDeleteNode = async () => {
     if (!editingNode || !editingConfig) return;
-    if (!confirm('确定要删除吗？')) return;
+    const ok = await confirm({
+      title: '确认删除',
+      description: '确定要删除吗？',
+      confirmLabel: '删除',
+      variant: 'destructive',
+    });
+    if (!ok) return;
     const newConfig = JSON.parse(JSON.stringify(editingConfig));
     if (editingNode.type === 'phase') {
       newConfig.workflow.phases.splice(editingNode.phaseIndex, 1);
@@ -560,14 +670,169 @@ export default function WorkbenchPage() {
     dispatch({ type: 'SET_EDITING_NODE', payload: null });
   };
 
+  const handleAddPhase = (afterIndex: number) => {
+    if (!editingConfig) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    const newPhase = {
+      name: `新阶段 ${newConfig.workflow.phases.length + 1}`,
+      steps: [],
+      iteration: { enabled: false },
+    };
+    newConfig.workflow.phases.splice(afterIndex + 1, 0, newPhase);
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+    setIsNewNode(true);
+    dispatch({ type: 'SET_EDITING_NODE', payload: { type: 'phase' as const, phaseIndex: afterIndex + 1 } });
+    dispatch({ type: 'SET_SHOW_EDIT_NODE_MODAL', payload: true });
+  };
+
+  const handleAddStep = (phaseIndex: number) => {
+    if (!editingConfig) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    const phase = newConfig.workflow.phases[phaseIndex];
+    const newStep = {
+      name: `新步骤 ${phase.steps.length + 1}`,
+      agent: agentConfigs.length > 0 ? agentConfigs[0].name : '',
+      task: '',
+      role: 'defender',
+    };
+    phase.steps.push(newStep);
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+    setIsNewNode(true);
+    dispatch({ type: 'SET_EDITING_NODE', payload: { type: 'step' as const, phaseIndex, stepIndex: phase.steps.length - 1 } });
+    dispatch({ type: 'SET_SHOW_EDIT_NODE_MODAL', payload: true });
+  };
+
+  const handleDeletePhase = async (phaseIndex: number) => {
+    if (!editingConfig) return;
+    const ok = await confirm({
+      title: '确认删除阶段',
+      description: `确定要删除阶段 "${editingConfig.workflow.phases[phaseIndex].name}" 吗？`,
+      confirmLabel: '删除',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    newConfig.workflow.phases.splice(phaseIndex, 1);
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+  };
+
+  const handleDeleteStep = async (phaseIndex: number, stepIndex: number) => {
+    if (!editingConfig) return;
+    const step = editingConfig.workflow.phases[phaseIndex].steps[stepIndex];
+    const ok = await confirm({
+      title: '确认删除步骤',
+      description: `确定要删除步骤 "${step.name}" 吗？`,
+      confirmLabel: '删除',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    newConfig.workflow.phases[phaseIndex].steps.splice(stepIndex, 1);
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+  };
+
+  const handleAddStepAt = (phaseIndex: number, afterStepIndex: number) => {
+    if (!editingConfig) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    const phase = newConfig.workflow.phases[phaseIndex];
+    const newStep = {
+      name: `新步骤 ${phase.steps.length + 1}`,
+      agent: agentConfigs.length > 0 ? agentConfigs[0].name : '',
+      task: '',
+      role: 'defender',
+    };
+    phase.steps.splice(afterStepIndex + 1, 0, newStep);
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+    setIsNewNode(true);
+    dispatch({ type: 'SET_EDITING_NODE', payload: { type: 'step' as const, phaseIndex, stepIndex: afterStepIndex + 1 } });
+    dispatch({ type: 'SET_SHOW_EDIT_NODE_MODAL', payload: true });
+  };
+
+  const handleMoveStep = (phaseIndex: number, fromIndex: number, toIndex: number) => {
+    if (!editingConfig) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    const steps = newConfig.workflow.phases[phaseIndex].steps;
+    if (toIndex < 0 || toIndex >= steps.length) return;
+    const [moved] = steps.splice(fromIndex, 1);
+    steps.splice(toIndex, 0, moved);
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+  };
+
+  const handleToggleParallel = (phaseIndex: number, stepIndices: number[]) => {
+    if (!editingConfig) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    const steps = newConfig.workflow.phases[phaseIndex].steps;
+    // Reuse existing group ID if any target step is already in a group
+    let groupId = stepIndices.map((si: number) => steps[si]?.parallelGroup).find((pg: string | undefined) => pg != null);
+    if (!groupId) groupId = `parallel-${Date.now()}`;
+    stepIndices.forEach((si: number) => {
+      if (steps[si]) steps[si].parallelGroup = groupId;
+    });
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+  };
+
+  const handleUngroup = (phaseIndex: number, stepIndex: number) => {
+    if (!editingConfig) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    const steps = newConfig.workflow.phases[phaseIndex].steps;
+    const groupId = steps[stepIndex]?.parallelGroup;
+    if (!groupId) return;
+    steps.forEach((s: any) => { if (s.parallelGroup === groupId) delete s.parallelGroup; });
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+  };
+
+  const handleCrossPhaseMove = (fromPhase: number, fromIndex: number, toPhase: number, toIndex: number) => {
+    if (!editingConfig) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    const sourceSteps = newConfig.workflow.phases[fromPhase].steps;
+    const targetSteps = newConfig.workflow.phases[toPhase].steps;
+    const [moved] = sourceSteps.splice(fromIndex, 1);
+    delete moved.parallelGroup;
+    targetSteps.splice(Math.min(toIndex, targetSteps.length), 0, moved);
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+  };
+
+  const handleMoveGroup = (fromPhase: number, groupStartIndex: number, toPhase: number, toIndex: number) => {
+    if (!editingConfig) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    const sourceSteps = newConfig.workflow.phases[fromPhase].steps;
+    const groupId = sourceSteps[groupStartIndex]?.parallelGroup;
+    if (!groupId) return;
+    const groupSteps: any[] = [];
+    let i = groupStartIndex;
+    while (i < sourceSteps.length && sourceSteps[i].parallelGroup === groupId) {
+      groupSteps.push(sourceSteps[i]);
+      i++;
+    }
+    sourceSteps.splice(groupStartIndex, groupSteps.length);
+    const targetSteps = fromPhase === toPhase ? sourceSteps : newConfig.workflow.phases[toPhase].steps;
+    let insertAt = Math.min(toIndex, targetSteps.length);
+    if (fromPhase === toPhase && toIndex > groupStartIndex) {
+      insertAt = Math.max(0, toIndex - groupSteps.length);
+    }
+    targetSteps.splice(insertAt, 0, ...groupSteps);
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+  };
+
+  const handleJoinGroup = (phaseIndex: number, stepIndex: number, groupId: string) => {
+    if (!editingConfig) return;
+    const newConfig = JSON.parse(JSON.stringify(editingConfig));
+    const step = newConfig.workflow.phases[phaseIndex].steps[stepIndex];
+    if (step) step.parallelGroup = groupId;
+    dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+  };
+
   const handleSaveConfig = async () => {
     if (!editingConfig) return;
+    setSaving(true);
     try {
       await configApi.saveConfig(configFile, editingConfig);
-      alert('配置已保存！下次运行时生效。');
+      toast('success', '配置已保存，下次运行时生效');
       dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: editingConfig });
     } catch (error: any) {
-      alert('保存失败: ' + error.message);
+      toast('error', '保存失败: ' + error.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -578,7 +843,7 @@ export default function WorkbenchPage() {
       const { agents: updatedAgents } = await agentApi.listAgents();
       dispatch({ type: 'SET_AGENTS_CONFIG', payload: updatedAgents });
     } catch (error: any) {
-      alert('保存 Agent 失败: ' + error.message);
+      toast('error', '保存 Agent 失败: ' + error.message);
     }
   };
 
@@ -588,7 +853,7 @@ export default function WorkbenchPage() {
       const { agents: updatedAgents } = await agentApi.listAgents();
       dispatch({ type: 'SET_AGENTS_CONFIG', payload: updatedAgents });
     } catch (error: any) {
-      alert('删除 Agent 失败: ' + error.message);
+      toast('error', '删除 Agent 失败: ' + error.message);
     }
   };
 
@@ -599,146 +864,208 @@ export default function WorkbenchPage() {
     return null;
   };
 
-  return (
-    <div className={styles.ideContainer}>
-      <div className={styles.toolbar}>
-        <div className={styles.toolbarLeft}>
-          <Link href="/" className={styles.backBtn}>← 首页</Link>
-          <h1 className={styles.appTitle}>
-            <span className={styles.titleIcon}>⚡</span>
-            {workflowConfig?.workflow?.name || configFile}
-          </h1>
-          <div className={styles.viewModeTabs}>
-            <button className={`${styles.viewModeTab} ${viewMode === 'run' ? styles.active : ''}`}
-              onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'run' })}>▶️ 运行</button>
-            <button className={`${styles.viewModeTab} ${viewMode === 'design' ? styles.active : ''}`}
-              onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'design' })}>✏️ 设计</button>
-            <button className={`${styles.viewModeTab} ${viewMode === 'history' ? styles.active : ''}`}
-              onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'history' })}>📜 历史</button>
-          </div>
+  if (pageLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground gap-4">
+        <span className="material-symbols-outlined text-4xl text-primary animate-spin">progress_activity</span>
+        <p className="text-sm text-muted-foreground">加载工作流配置...</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground gap-4">
+        <span className="material-symbols-outlined text-4xl text-destructive">error</span>
+        <p className="text-sm text-destructive">{loadError}</p>
+        <div className="flex gap-2">
+          <Button variant="outline" asChild><Link href="/">返回首页</Link></Button>
+          <Button onClick={loadWorkflowConfig}>重试</Button>
         </div>
-        <div className={styles.toolbarCenter}>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-screen bg-background/80 text-foreground">
+      <div className="shrink-0 bg-muted border-b flex flex-wrap items-center px-4 py-2 gap-x-4 gap-y-2">
+        <div className="flex items-center gap-2 shrink-0">
+          <Button variant="outline" size="sm" asChild><Link href="/">
+            <span className="material-symbols-outlined text-sm">arrow_back</span><span className="hidden sm:inline"> 首页</span>
+          </Link></Button>
+          <h1 className="text-sm sm:text-base font-semibold m-0 flex items-center gap-1.5 truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
+            <span className="material-symbols-outlined text-lg sm:text-xl shrink-0">bolt</span>
+            <span className="truncate">{workflowConfig?.workflow?.name || configFile}</span>
+          </h1>
+        </div>
+        <div className="flex gap-0.5 bg-background/50 rounded-md p-0.5 shrink-0">
+          <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${viewMode === 'run' ? 'bg-primary text-primary-foreground' : ''}`}
+            onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'run' })}>
+            <span className="material-symbols-outlined text-sm">play_arrow</span><span className="hidden sm:inline ml-1">运行</span>
+          </Button>
+          <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${viewMode === 'design' ? 'bg-primary text-primary-foreground' : ''}`}
+            onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'design' })}>
+            <span className="material-symbols-outlined text-sm">edit</span><span className="hidden sm:inline ml-1">设计</span>
+          </Button>
+          <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${viewMode === 'history' ? 'bg-primary text-primary-foreground' : ''}`}
+            onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'history' })}>
+            <span className="material-symbols-outlined text-sm">history</span><span className="hidden sm:inline ml-1">历史</span>
+          </Button>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
           {viewMode === 'run' && (<>
-            <button onClick={startWorkflow} disabled={isRunning} className={`${styles.btn} ${styles.btnPrimary}`}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ marginRight: 4, verticalAlign: -2 }}><path d="M3 1.5v11l9-5.5z" fill="currentColor"/></svg>启动工作流</button>
-            <button onClick={stopWorkflow} disabled={!isRunning} className={`${styles.btn} ${styles.btnDanger}`}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ marginRight: 4, verticalAlign: -2 }}><rect x="2.5" y="2.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>停止</button>
-            <button onClick={() => dispatch({ type: 'SET_SHOW_PROCESS_PANEL', payload: !showProcessPanel })}
-              className={`${styles.btn} ${styles.btnSecondary}`}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ marginRight: 4, verticalAlign: -2 }}><circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.3" fill="none"/><circle cx="7" cy="7" r="2" fill="currentColor"/><path d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M2.8 2.8l1 1M10.2 10.2l1 1M11.2 2.8l-1 1M3.8 10.2l-1 1" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/></svg>进程管理</button>
+            <Button size="sm" onClick={startWorkflow} disabled={starting || isRunning}>
+              <span className={`material-symbols-outlined text-sm mr-1 ${starting ? 'animate-spin' : ''}`}>{starting ? 'sync' : 'play_arrow'}</span>
+              <span className="hidden sm:inline">{starting ? '启动中...' : '启动工作流'}</span>
+              <span className="sm:hidden">{starting ? '...' : '启动'}</span>
+            </Button>
+            <Button variant="destructive" size="sm" onClick={stopWorkflow} disabled={!isRunning}>
+              <span className="material-symbols-outlined text-sm">stop</span><span className="hidden sm:inline">停止</span>
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => dispatch({ type: 'SET_SHOW_PROCESS_PANEL', payload: !showProcessPanel })}>
+              <span className="material-symbols-outlined text-sm">settings</span><span className="hidden sm:inline">进程</span>
+            </Button>
           </>)}
           {viewMode === 'design' && (
-            <button onClick={handleSaveConfig} className={`${styles.btn} ${styles.btnSuccess}`}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ marginRight: 4, verticalAlign: -2 }}><path d="M2 1.5h7.5L12.5 4.5V12a.5.5 0 01-.5.5H2a.5.5 0 01-.5-.5V2a.5.5 0 01.5-.5z" stroke="currentColor" strokeWidth="1.3" fill="none"/><rect x="4" y="8" width="6" height="4" rx=".5" stroke="currentColor" strokeWidth="1" fill="none"/><path d="M5 1.5v3h4v-3" stroke="currentColor" strokeWidth="1"/></svg>保存配置</button>
+            <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={handleSaveConfig} disabled={saving}>
+              <span className={`material-symbols-outlined text-sm mr-1 ${saving ? 'animate-spin' : ''}`}>{saving ? 'sync' : 'save'}</span>
+              {saving ? '保存中...' : '保存配置'}
+            </Button>
           )}
         </div>
-        <div className={styles.toolbarRight}>
-          <div className={`${styles.statusIndicator} ${styles[workflowStatus]}`}>
-            <span className={styles.statusDot}></span><span>{getStatusText(workflowStatus)}</span>
-          </div>
+        <div className="flex items-center gap-2 ml-auto shrink-0">
+          {workflowStatus === 'idle' && (
+            <Badge variant="secondary"><span className="w-2 h-2 rounded-full bg-current animate-pulse" />{getStatusText(workflowStatus)}</Badge>
+          )}
+          {workflowStatus === 'running' && (
+            <Badge className="bg-blue-500/20 text-blue-400"><span className="w-2 h-2 rounded-full bg-current animate-pulse" />{getStatusText(workflowStatus)}</Badge>
+          )}
+          {workflowStatus === 'completed' && (
+            <Badge className="bg-green-500/20 text-green-400"><span className="w-2 h-2 rounded-full bg-current animate-pulse" />{getStatusText(workflowStatus)}</Badge>
+          )}
+          {(workflowStatus === 'failed' || workflowStatus === 'stopped' || workflowStatus === 'crashed') && (
+            <Badge className="bg-red-500/20 text-red-400"><span className="w-2 h-2 rounded-full bg-current animate-pulse" />{getStatusText(workflowStatus)}</Badge>
+          )}
+          <ThemeToggle />
         </div>
       </div>
 
-      <div className={styles.mainContent}>
+      <div className="flex-1 flex overflow-hidden">
         {viewMode === 'run' && (<>
-          <div className={styles.sidebar}>
-            <div className={styles.sidebarTabs}>
-              <button className={`${styles.tabBtn} ${activeTab === 'workflow' ? styles.active : ''}`}
-                onClick={() => dispatch({ type: 'SET_ACTIVE_TAB', payload: 'workflow' })}><span className={styles.tabIcon}>📊</span>工作流</button>
-              <button className={`${styles.tabBtn} ${activeTab === 'agents' ? styles.active : ''}`}
-                onClick={() => dispatch({ type: 'SET_ACTIVE_TAB', payload: 'agents' })}><span className={styles.tabIcon}>🤖</span>Agents</button>
-              <button className={`${styles.tabBtn} ${activeTab === 'config' ? styles.active : ''}`}
-                onClick={() => dispatch({ type: 'SET_ACTIVE_TAB', payload: 'config' })}><span className={styles.tabIcon}>⚙️</span>配置</button>
-            </div>
-            <div className={styles.sidebarContent}>
-              {activeTab === 'workflow' && workflowConfig && (
-                <div className={styles.tabPanel}>
-                  <div className={styles.workflowInfo}>
-                    {editingName ? (
-                      <input className={styles.inlineNameInput} autoFocus value={nameValue}
-                        onChange={(e) => setNameValue(e.target.value)}
-                        onBlur={() => saveWorkflowName(nameValue)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') saveWorkflowName(nameValue); if (e.key === 'Escape') setEditingName(false); }}
-                      />
-                    ) : (
-                      <h3 className={styles.editableName} onClick={() => { setNameValue(workflowConfig.workflow.name); setEditingName(true); }}
-                        title="点击编辑名称">{workflowConfig.workflow.name}</h3>
-                    )}
-                    <p className={styles.workflowDesc}>{workflowConfig.workflow.description}</p>
-                    <div className={styles.workflowStats}>
-                      <div className={styles.stat}><span className={styles.statLabel}>阶段</span><span className={styles.statValue}>{workflowConfig.workflow.phases.length}</span></div>
-                      <div className={styles.stat}><span className={styles.statLabel}>步骤</span><span className={styles.statValue}>{totalSteps}</span></div>
-                      <div className={styles.stat}><span className={styles.statLabel}>Agent</span><span className={styles.statValue}>{agentConfigs.length}</span></div>
+          <div className="w-[280px] bg-card border-r flex flex-col">
+            <Tabs value={activeTab} onValueChange={(val) => dispatch({ type: 'SET_ACTIVE_TAB', payload: val })}>
+              <TabsList className="w-full rounded-none border-b">
+                <TabsTrigger value="workflow" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>monitoring</span>工作流
+                </TabsTrigger>
+                <TabsTrigger value="agents" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>smart_toy</span>Agents
+                </TabsTrigger>
+                <TabsTrigger value="config" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span>配置
+                </TabsTrigger>
+              </TabsList>
+              <div className="flex-1 overflow-y-auto p-4">
+                <TabsContent value="workflow" className="mt-0">
+                  {workflowConfig && (
+                    <div>
+                      <div>
+                        {editingName ? (
+                          <Input autoFocus value={nameValue}
+                            onChange={(e) => setNameValue(e.target.value)}
+                            onBlur={() => saveWorkflowName(nameValue)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') saveWorkflowName(nameValue); if (e.key === 'Escape') setEditingName(false); }}
+                          />
+                        ) : (
+                          <h3 className="text-base font-semibold mb-2 cursor-pointer border-b border-dashed border-transparent hover:border-muted-foreground"
+                            onClick={() => { setNameValue(workflowConfig.workflow.name); setEditingName(true); }}
+                            title="点击编辑名称">{workflowConfig.workflow.name}</h3>
+                        )}
+                        <p className="text-sm text-muted-foreground mb-4 leading-relaxed">{workflowConfig.workflow.description}</p>
+                        <div className="flex gap-3">
+                          <div className="flex-1 bg-muted p-3 rounded-md text-center"><span className="block text-xs text-muted-foreground mb-1">阶段</span><span className="block text-xl font-semibold">{workflowConfig.workflow.phases.length}</span></div>
+                          <div className="flex-1 bg-muted p-3 rounded-md text-center"><span className="block text-xs text-muted-foreground mb-1">步骤</span><span className="block text-xl font-semibold">{totalSteps}</span></div>
+                          <div className="flex-1 bg-muted p-3 rounded-md text-center"><span className="block text-xs text-muted-foreground mb-1">Agent</span><span className="block text-xl font-semibold">{agentConfigs.length}</span></div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2 mt-4">
+                        {workflowConfig.workflow.phases.map((phase: any, idx: number) => {
+                          const phaseAgents = phase.steps.map((s: any) => {
+                            const role = agentConfigs.find((r: any) => r.name === s.agent);
+                            return { name: s.agent, team: role?.team || 'blue', role: s.role };
+                          });
+                          const iterState = iterationStates[phase.name];
+                          return (<div key={idx} className="bg-muted rounded-md p-2.5">
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-sm font-medium">{phase.name}</span>
+                              {phase.iteration?.enabled && (<Badge><span className="material-symbols-outlined text-xs">loop</span> {iterState ? `${iterState.currentIteration}/${iterState.maxIterations}` : `max ${phase.iteration.maxIterations}`}</Badge>)}
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {phaseAgents.map((a: any, i: number) => (
+                                <Badge key={i} variant="outline" className={`text-[10px] ${a.team === 'blue' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : a.team === 'red' ? 'bg-red-500/20 text-red-400 border-red-500/30' : a.team === 'judge' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' : ''}`}>
+                                  <span className="material-symbols-outlined text-xs">{a.role === 'attacker' ? 'swords' : a.role === 'judge' ? 'gavel' : 'shield'}</span> {a.name}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>);
+                        })}
+                      </div>
                     </div>
-                  </div>
-                  <div className={styles.phaseCards}>
-                    {workflowConfig.workflow.phases.map((phase: any, idx: number) => {
-                      const phaseAgents = phase.steps.map((s: any) => {
-                        const role = agentConfigs.find((r: any) => r.name === s.agent);
-                        return { name: s.agent, team: role?.team || 'blue', role: s.role };
-                      });
-                      const iterState = iterationStates[phase.name];
-                      return (<div key={idx} className={styles.phaseCard}>
-                        <div className={styles.phaseCardHeader}>
-                          <span className={styles.phaseCardName}>{phase.name}</span>
-                          {phase.iteration?.enabled && (<span className={styles.loopBadge}>🔄 {iterState ? `${iterState.currentIteration}/${iterState.maxIterations}` : `max ${phase.iteration.maxIterations}`}</span>)}
-                        </div>
-                        <div className={styles.agentChips}>
-                          {phaseAgents.map((a: any, i: number) => (<span key={i} className={`${styles.agentChip} ${styles[a.team]}`}>{a.role === 'attacker' ? '⚔️' : a.role === 'judge' ? '⚖️' : '🛡️'} {a.name}</span>))}
-                        </div>
-                      </div>);
-                    })}
-                  </div>
-                </div>
-              )}
-              {activeTab === 'agents' && (<div className={styles.tabPanel}><div className={styles.agentsList}>
-                {agents.map((agent) => (<div key={agent.name} className={`${styles.agentItem} ${selectedAgent?.name === agent.name ? styles.active : ''}`}
-                  onClick={() => dispatch({ type: 'SET_SELECTED_AGENT', payload: agent })}>
-                  <div className={styles.agentItemHeader}><span className={styles.agentItemIcon}>🤖</span><span className={styles.agentItemName}>{agent.name}</span></div>
-                  <div className={styles.agentItemStatus}><span className={styles.statusDot}></span>{agent.status}</div>
-                </div>))}
-              </div></div>)}
-              {activeTab === 'config' && (<div className={styles.tabPanel}><div className={styles.configSection}><h4>项目配置</h4>
-                <div className={styles.configItem}><label>项目根目录</label>
-                  <input value={projectRoot} onChange={(e) => dispatch({ type: 'SET_PROJECT_ROOT', payload: e.target.value })} type="text" className={styles.configInput} placeholder="../cangjie_compiler" /></div>
-                <div className={styles.configItem}><label>需求描述</label>
-                  <textarea value={requirements} onChange={(e) => dispatch({ type: 'SET_REQUIREMENTS', payload: e.target.value })} className={styles.configTextarea} rows={6} placeholder="请输入需求描述..."></textarea></div>
-                <div className={styles.configItem}><label>步骤超时（分钟）</label>
-                  <input value={timeoutMinutes} onChange={(e) => dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: Math.max(1, parseInt(e.target.value) || 1) })} type="number" min={1} className={styles.configInput} /></div>
-                <button onClick={saveConfig} className={`${styles.btn} ${styles.btnSuccess}`}>保存配置</button>
-              </div></div>)}
-            </div>
+                  )}
+                </TabsContent>
+                <TabsContent value="agents" className="mt-0"><div className="flex flex-col gap-2">
+                  {agents.map((agent) => (<div key={agent.name}
+                    className={`bg-muted p-3 rounded-md cursor-pointer transition-colors hover:bg-accent border-l-[3px] border-transparent ${selectedAgent?.name === agent.name ? 'border-l-primary bg-accent' : ''}`}
+                    onClick={() => dispatch({ type: 'SET_SELECTED_AGENT', payload: agent })}>
+                    <div className="flex items-center gap-2 mb-1.5"><span className="material-symbols-outlined text-lg">smart_toy</span><span className="text-sm font-medium">{agent.name}</span></div>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className={`w-2 h-2 rounded-full ${agent.status === 'running' ? 'bg-blue-500 animate-pulse' : agent.status === 'completed' ? 'bg-green-500' : agent.status === 'failed' ? 'bg-red-500' : 'bg-gray-400'}`} />{agent.status}</div>
+                  </div>))}
+                </div></TabsContent>
+                <TabsContent value="config" className="mt-0"><div><h4 className="text-sm font-semibold mb-4">项目配置</h4>
+                  <div className="mb-4"><Label>项目根目录</Label>
+                    <Input value={projectRoot} onChange={(e) => dispatch({ type: 'SET_PROJECT_ROOT', payload: e.target.value })} type="text" placeholder="../cangjie_compiler" /></div>
+                  <div className="mb-4"><Label>需求描述</Label>
+                    <Textarea value={requirements} onChange={(e) => dispatch({ type: 'SET_REQUIREMENTS', payload: e.target.value })} rows={6} placeholder="请输入需求描述..." /></div>
+                  <div className="mb-4"><Label>步骤超时（分钟）</Label>
+                    <Input value={timeoutMinutes} onChange={(e) => dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: Math.max(1, parseInt(e.target.value) || 1) })} type="number" min={1} /></div>
+                  <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={saveConfig} disabled={saving}>
+                    <span className={`material-symbols-outlined text-sm mr-1 ${saving ? 'animate-spin' : ''}`}>{saving ? 'sync' : 'save'}</span>
+                    {saving ? '保存中...' : '保存配置'}
+                  </Button>
+                </div></TabsContent>
+              </div>
+            </Tabs>
           </div>
-          <div className={styles.centerPanel}>
-            <div className={styles.panelHeader}><h2>工作流可视化</h2></div>
-            <div className={styles.panelContent}>
+          <div className="flex-1 flex flex-col border-r">
+            <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">工作流可视化</h2></div>
+            <div className="flex-1 overflow-auto">
               {workflowConfig ? (<FlowDiagram workflow={workflowConfig.workflow} currentPhase={currentPhase} currentStep={currentStep}
                 agents={agents} completedSteps={completedSteps} failedSteps={failedSteps} iterationStates={iterationStates} onSelectStep={selectStep} />
-              ) : (<div className={styles.emptyState}><span className={styles.emptyIcon}>📊</span><p>加载中...</p></div>)}
+              ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">monitoring</span><p>加载中...</p></div>)}
             </div>
           </div>
-          <div className={styles.rightPanel}>
-            <div className={styles.panelHeader}><h2>{selectedStep ? selectedStep.name : selectedAgent ? selectedAgent.name : 'Agent 详情'}</h2></div>
-            <div className={styles.panelContent}>
+          <div className="w-[400px] flex flex-col">
+            <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">{selectedStep ? selectedStep.name : selectedAgent ? selectedAgent.name : 'Agent 详情'}</h2></div>
+            <div className="flex-1 overflow-auto">
               {selectedStep && (
-                <div className={styles.stepDetail}>
-                  <div className={styles.stepDetailHeader}>
-                    <span className={styles.stepDetailRole}>
-                      {selectedStep.role === 'attacker' ? '⚔️' : selectedStep.role === 'judge' ? '⚖️' : '🛡️'}
+                <div className="bg-muted border-b p-3.5">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <span className="material-symbols-outlined text-base">
+                      {selectedStep.role === 'attacker' ? 'swords' : selectedStep.role === 'judge' ? 'gavel' : 'shield'}
                     </span>
-                    <span className={styles.stepDetailName}>{selectedStep.name}</span>
+                    <span className="text-sm font-semibold flex-1">{selectedStep.name}</span>
                     {selectedRoleConfig && (
-                      <span className={`${styles.teamBadge} ${styles[selectedRoleConfig.team]}`}>{selectedRoleConfig.team}</span>
+                      <Badge className={selectedRoleConfig.team === 'blue' ? 'bg-blue-500/20 text-blue-400' : selectedRoleConfig.team === 'red' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}>{selectedRoleConfig.team}</Badge>
                     )}
                   </div>
-                  <div className={styles.stepDetailTask}>
-                    <div className={styles.detailLabel}>任务描述</div>
-                    <div className={styles.detailValue}>{selectedStep.task}</div>
+                  <div className="mb-2.5">
+                    <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">任务描述</div>
+                    <div className="text-sm leading-relaxed">{selectedStep.task}</div>
                   </div>
                   {selectedStep.constraints?.length > 0 && (
-                    <div className={styles.stepDetailConstraints}>
-                      <div className={styles.detailLabel}>约束条件</div>
-                      <ul className={styles.constraintList}>
+                    <div className="mb-2.5">
+                      <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">约束条件</div>
+                      <ul className="list-disc pl-4 text-xs leading-relaxed">
                         {selectedStep.constraints.map((c: string, i: number) => (
                           <li key={i}>{c}</li>
                         ))}
@@ -746,29 +1073,29 @@ export default function WorkbenchPage() {
                     </div>
                   )}
                   {selectedRoleConfig && (
-                    <div className={styles.roleConfigSection}>
-                      <div className={styles.detailLabel}>Agent 配置</div>
-                      <div className={styles.roleConfigGrid}>
-                        <span className={styles.roleConfigKey}>模型</span>
-                        <span className={styles.roleConfigVal}>{selectedRoleConfig.model || '-'}</span>
+                    <div className="border-t pt-2.5">
+                      <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">Agent 配置</div>
+                      <div className="flex gap-2 items-center mb-1.5">
+                        <span className="text-xs text-muted-foreground">模型</span>
+                        <span className="text-xs font-mono">{selectedRoleConfig.model || '-'}</span>
                       </div>
                       {selectedRoleConfig.temperature !== undefined && (
-                        <div className={styles.roleConfigGrid}>
-                          <span className={styles.roleConfigKey}>Temperature</span>
-                          <span className={styles.roleConfigVal}>{selectedRoleConfig.temperature}</span>
+                        <div className="flex gap-2 items-center mb-1.5">
+                          <span className="text-xs text-muted-foreground">Temperature</span>
+                          <span className="text-xs font-mono">{selectedRoleConfig.temperature}</span>
                         </div>
                       )}
                       {selectedRoleConfig.capabilities?.length > 0 && (
-                        <div className={styles.capabilitiesRow}>
+                        <div className="flex flex-wrap gap-1 mb-2">
                           {selectedRoleConfig.capabilities.map((cap: string, i: number) => (
-                            <span key={i} className={styles.capabilityTag}>{cap}</span>
+                            <Badge key={i} variant="secondary" className="text-xs">{cap}</Badge>
                           ))}
                         </div>
                       )}
                       {selectedRoleConfig.constraints?.length > 0 && (
-                        <div className={styles.stepDetailConstraints}>
-                          <div className={styles.detailLabel}>Agent 约束</div>
-                          <ul className={styles.constraintList}>
+                        <div className="mb-2.5">
+                          <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">Agent 约束</div>
+                          <ul className="list-disc pl-4 text-xs leading-relaxed">
                             {selectedRoleConfig.constraints.map((c: string, i: number) => (
                               <li key={i}>{c}</li>
                             ))}
@@ -776,12 +1103,12 @@ export default function WorkbenchPage() {
                         </div>
                       )}
                       {selectedRoleConfig.systemPrompt && (
-                        <div className={styles.systemPromptSection}>
-                          <button className={styles.systemPromptToggle} onClick={() => setShowSystemPrompt(!showSystemPrompt)}>
+                        <div className="mt-1.5">
+                          <Button variant="link" size="sm" className="p-0 h-auto text-xs" onClick={() => setShowSystemPrompt(!showSystemPrompt)}>
                             {showSystemPrompt ? '▼' : '▶'} System Prompt
-                          </button>
+                          </Button>
                           {showSystemPrompt && (
-                            <pre className={styles.systemPromptContent}>{selectedRoleConfig.systemPrompt}</pre>
+                            <pre className="bg-background border rounded p-2 text-xs leading-relaxed max-h-[200px] overflow-y-auto mt-1.5 whitespace-pre-wrap break-words font-mono">{selectedRoleConfig.systemPrompt}</pre>
                           )}
                         </div>
                       )}
@@ -790,148 +1117,187 @@ export default function WorkbenchPage() {
                 </div>
               )}
               {selectedStep && stepResults[selectedStep.name] && (
-                <div className={styles.stepDetail}>
-                  <div className={styles.detailLabel}>
-                    {stepResults[selectedStep.name].error ? '❌ 执行错误' : '✅ 执行结果'}
+                <div className="bg-muted border-b p-3.5">
+                  <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">
+                    {stepResults[selectedStep.name].error ? (<><span className="material-symbols-outlined text-xs text-red-400">error</span> 执行错误</>) : (<><span className="material-symbols-outlined text-xs text-green-400">check_circle</span> 执行结果</>)}
                   </div>
                   {stepResults[selectedStep.name].costUsd !== undefined && (
-                    <div style={{ fontSize: 11, color: '#808080', marginBottom: 6 }}>
+                    <div className="text-[11px] text-muted-foreground mb-1.5">
                       费用: ${stepResults[selectedStep.name].costUsd?.toFixed(4)}
                       {stepResults[selectedStep.name].durationMs ? ` · 耗时: ${(stepResults[selectedStep.name].durationMs! / 1000).toFixed(1)}s` : ''}
                     </div>
                   )}
                   {stepResults[selectedStep.name].error ? (
-                    <pre className={styles.systemPromptContent} style={{ color: '#c75450', borderColor: '#c75450' }}>
+                    <pre className="bg-background border border-red-500 rounded p-2 text-xs leading-relaxed max-h-[200px] overflow-y-auto mt-1.5 whitespace-pre-wrap break-words font-mono text-red-400">
                       {stepResults[selectedStep.name].error}
                     </pre>
-                  ) : fullStepOutput ? (
-                    <pre className={styles.systemPromptContent}>
-                      {fullStepOutput}
-                    </pre>
-                  ) : (
-                    <>
-                      <pre className={styles.systemPromptContent}>
-                        {stepResults[selectedStep.name].output.length > 2000
-                          ? stepResults[selectedStep.name].output.substring(0, 2000) + '\n...(已截断)'
-                          : stepResults[selectedStep.name].output}
-                      </pre>
-                      {stepResults[selectedStep.name].output.length > 2000 && (runId || selectedRun?.id) && (
-                        <button onClick={() => loadFullOutput(selectedStep.name)}
-                          disabled={loadingOutput}
-                          className={`${styles.btn} ${styles.btnSecondary}`}
-                          style={{ marginTop: 6, fontSize: 11 }}>
-                          {loadingOutput ? '加载中...' : '📄 查看完整输出'}
-                        </button>
-                      )}
-                    </>
-                  )}
+                  ) : (() => {
+                    const raw = fullStepOutput || stepResults[selectedStep.name].output;
+                    const displayText = !fullStepOutput && raw.length > 2000
+                      ? raw.substring(0, 2000) + '\n\n...(已截断)'
+                      : raw;
+                    const chunks = displayText.split(CHUNK_SEP).filter(Boolean);
+                    return (
+                      <>
+                        <div className={`${styles.markdownContent} bg-background border rounded p-2 text-sm leading-relaxed max-h-[200px] overflow-y-auto mt-1.5`}>
+                          {chunks.map((chunk, i) => (
+                            <div key={i} className={i < chunks.length - 1 ? 'border-b border-border/50 pb-3 mb-3' : ''}>
+                              <Markdown>{chunk}</Markdown>
+                            </div>
+                          ))}
+                        </div>
+                        {!fullStepOutput && stepResults[selectedStep.name].output.length > 2000 && (runId || selectedRun?.id) && (
+                          <Button variant="secondary" size="sm" className="mt-1.5 text-[11px]"
+                            onClick={() => loadFullOutput(selectedStep.name)}
+                            disabled={loadingOutput}>
+                            {loadingOutput ? '加载中...' : (<><span className="material-symbols-outlined text-xs">description</span> 查看完整输出</>)}
+                          </Button>
+                        )}
+                      </>
+                    );
+                  })()}
                   {!stepResults[selectedStep.name].error && (
-                    <button onClick={() => openMarkdownModal(selectedStep.name)}
-                      className={`${styles.btn} ${styles.btnSecondary}`}
-                      style={{ marginTop: 6, fontSize: 11 }}>
+                    <Button variant="secondary" size="sm" className="mt-1.5 text-[11px]"
+                      onClick={() => openMarkdownModal(selectedStep.name)}>
                       查看 Markdown
-                    </button>
+                    </Button>
                   )}
                 </div>
               )}
               {/* Resume button on failed/crashed step */}
               {selectedStep && failedSteps.includes(selectedStep.name) && !isRunning && (runId || selectedRun?.id) && (
-                <div className={styles.stepDetail}>
-                  <button onClick={() => resumeWorkflow()} disabled={isRunning}
-                    className={`${styles.btn} ${styles.btnSuccess}`} style={{ fontSize: 12, width: '100%' }}>
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ marginRight: 6, verticalAlign: -2 }}>
-                      <path d="M2 7a5 5 0 019.33-2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
-                      <path d="M12 7a5 5 0 01-9.33 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
-                      <path d="M11 2v3h-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                      <path d="M3 12v-3h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                    </svg>
+                <div className="bg-muted border-b p-3.5">
+                  <Button className="bg-green-600 hover:bg-green-700 text-white text-xs w-full" onClick={() => resumeWorkflow()} disabled={isRunning}>
+                    <span className="material-symbols-outlined text-sm">refresh</span>
                     从此步骤恢复运行
-                  </button>
-                  <div style={{ fontSize: 11, color: '#808080', marginTop: 6 }}>
+                  </Button>
+                  <div className="text-[11px] text-muted-foreground mt-1.5">
                     将跳过已完成的 {completedSteps.length} 个步骤，从「{selectedStep.name}」重新开始执行
                   </div>
                 </div>
               )}
               {/* Resume button when viewing crashed/stopped run without specific step selected */}
               {!selectedStep && !isRunning && (workflowStatus === 'failed' || workflowStatus === 'stopped') && (runId || selectedRun?.id) && (
-                <div className={styles.stepDetail}>
-                  <button onClick={() => resumeWorkflow()} disabled={isRunning}
-                    className={`${styles.btn} ${styles.btnSuccess}`} style={{ fontSize: 12, width: '100%' }}>
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ marginRight: 6, verticalAlign: -2 }}>
-                      <path d="M2 7a5 5 0 019.33-2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
-                      <path d="M12 7a5 5 0 01-9.33 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
-                      <path d="M11 2v3h-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                      <path d="M3 12v-3h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                    </svg>
+                <div className="bg-muted border-b p-3.5">
+                  <Button className="bg-green-600 hover:bg-green-700 text-white text-xs w-full" onClick={() => resumeWorkflow()} disabled={isRunning}>
+                    <span className="material-symbols-outlined text-sm">refresh</span>
                     恢复运行
-                  </button>
-                  <div style={{ fontSize: 11, color: '#808080', marginTop: 6 }}>
+                  </Button>
+                  <div className="text-[11px] text-muted-foreground mt-1.5">
                     已完成 {completedSteps.length} 步，将从中断处继续
                   </div>
                 </div>
               )}
               {/* Live stream button for currently running step */}
               {selectedStep && currentStep === selectedStep.name && isRunning && !stepResults[selectedStep.name] && (
-                <div className={styles.stepDetail}>
-                  <div className={styles.detailLabel}>🔄 正在执行中...</div>
-                  <button onClick={startLiveStream}
-                    className={`${styles.btn} ${styles.btnPrimary}`}
-                    style={{ marginTop: 6, fontSize: 12 }}>
-                    📡 查看实时输出
-                  </button>
+                <div className="bg-muted border-b p-3.5">
+                  <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider"><span className="material-symbols-outlined text-xs">sync</span> 正在执行中...</div>
+                  <div className="flex gap-2 mt-1.5">
+                    <Button size="sm" className="text-xs" onClick={startLiveStream}>
+                      <span className="material-symbols-outlined text-sm">cell_tower</span> 查看实时输出
+                    </Button>
+                    <Button size="sm" variant="secondary" className="text-xs" onClick={forceCompleteStep}>
+                      <span className="material-symbols-outlined text-sm">done</span> 完成
+                    </Button>
+                  </div>
                 </div>
               )}
               {/* Also show live stream button when step has no result and is running */}
               {isRunning && !selectedStep && currentStep && (
-                <div className={styles.stepDetail}>
-                  <div className={styles.detailLabel}>🔄 当前步骤: {currentStep}</div>
-                  <button onClick={startLiveStream}
-                    className={`${styles.btn} ${styles.btnPrimary}`}
-                    style={{ marginTop: 6, fontSize: 12 }}>
-                    📡 查看实时输出
-                  </button>
+                <div className="bg-muted border-b p-3.5">
+                  <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider"><span className="material-symbols-outlined text-xs">sync</span> 当前步骤: {currentStep}</div>
+                  <div className="flex gap-2 mt-1.5">
+                    <Button size="sm" className="text-xs" onClick={startLiveStream}>
+                      <span className="material-symbols-outlined text-sm">cell_tower</span> 查看实时输出
+                    </Button>
+                    <Button size="sm" variant="secondary" className="text-xs" onClick={forceCompleteStep}>
+                      <span className="material-symbols-outlined text-sm">done</span> 完成
+                    </Button>
+                  </div>
                 </div>
               )}
-              {selectedAgent ? (<AgentPanel agent={selectedAgent} logs={logs} onClearLogs={(name) => dispatch({ type: 'CLEAR_AGENT_LOGS', payload: name })} />
-              ) : (<div className={styles.emptyState}><span className={styles.emptyIcon}>🤖</span><p>选择一个 Agent 查看详情</p></div>)}
+              {selectedAgent ? (<AgentPanel agent={selectedAgent} logs={logs} onClearLogs={(name) => dispatch({ type: 'CLEAR_AGENT_LOGS', payload: name })}
+                stepSummary={selectedStep && stepResults[selectedStep.name]?.output ? stepResults[selectedStep.name].output : undefined} />
+              ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">smart_toy</span><p>选择一个 Agent 查看详情</p></div>)}
             </div>
           </div>
         </>)}
-        {viewMode === 'design' && editingConfig && (<div className={styles.designLayout}>
-          <div className={styles.designFlowArea}><div className={styles.panelHeader}><h2>工作流设计</h2></div>
-            <div className={styles.panelContent}><DesignFlowDiagram workflow={editingConfig.workflow}
-              onUpdateWorkflow={(wf: any) => dispatch({ type: 'SET_EDITING_CONFIG', payload: { ...editingConfig, workflow: wf } })}
-              onSelectNode={handleSelectNode} /></div></div>
-          <div className={styles.designConfigArea}><AgentConfigPanel agents={agentConfigs} onSaveAgent={handleSaveAgent} onDeleteAgent={handleDeleteAgent} /></div>
-        </div>)}
-        {viewMode === 'history' && (<div className={styles.mainContent} style={{ flex: 1 }}>
-          <div className={styles.sidebar}>
-            <div className={styles.panelHeader}><h2>运行记录</h2></div>
-            <div className={styles.sidebarContent}>
+        {viewMode === 'design' && editingConfig && (<>
+          <div className="flex flex-1 overflow-hidden">
+            <div className="flex-1 flex flex-col min-w-0">
+              <div className="h-10 bg-muted border-b flex items-center px-4 min-w-0 overflow-hidden">
+                <h2 className="text-sm font-semibold m-0 truncate min-w-0">工作流设计</h2>
+              </div>
+              <div className="flex-1 overflow-hidden"><DesignPanel workflow={editingConfig.workflow}
+                onSelectNode={handleSelectNode}
+                onAddPhase={handleAddPhase}
+                onAddStep={handleAddStep}
+                onAddStepAt={handleAddStepAt}
+                onDeletePhase={handleDeletePhase}
+                onDeleteStep={handleDeleteStep}
+                onMoveStep={handleMoveStep}
+                onToggleParallel={handleToggleParallel}
+                onUngroup={handleUngroup}
+                onCrossPhaseMove={handleCrossPhaseMove}
+                onMoveGroup={handleMoveGroup}
+                onJoinGroup={handleJoinGroup} /></div>
+            </div>
+          </div>
+          {/* Floating Agent config button */}
+          <button
+            className="fixed right-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:bg-primary/90 transition-colors"
+            onClick={() => setShowAgentDrawer(!showAgentDrawer)}
+            title="Agent 配置"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>smart_toy</span>
+          </button>
+          {/* Agent config drawer */}
+          {showAgentDrawer && (
+            <div className="fixed inset-0 z-40" onClick={() => setShowAgentDrawer(false)}>
+              <div className="absolute inset-0 bg-black/20" />
+              <div className="absolute top-0 right-0 h-full w-[400px] max-w-[90vw] bg-card border-l shadow-2xl flex flex-col animate-in slide-in-from-right duration-200"
+                onClick={(e) => e.stopPropagation()}>
+                <div className="h-10 bg-muted border-b flex items-center px-4 justify-between shrink-0">
+                  <h2 className="text-sm font-semibold m-0">Agent 配置</h2>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowAgentDrawer(false)}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>close</span>
+                  </Button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4">
+                  <AgentConfigPanel agents={agentConfigs} onSaveAgent={handleSaveAgent} onDeleteAgent={handleDeleteAgent} />
+                </div>
+              </div>
+            </div>
+          )}
+        </>)}
+        {viewMode === 'history' && (<div className="flex-1 flex overflow-hidden">
+          <div className="w-[280px] bg-card border-r flex flex-col">
+            <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">运行记录</h2></div>
+            <div className="flex-1 overflow-y-auto p-4">
               {historyRuns.length === 0 ? (
-                <div style={{ color: '#808080', fontSize: 13, textAlign: 'center', padding: 20 }}>暂无运行记录</div>
+                <div className="text-muted-foreground text-sm text-center p-5">暂无运行记录</div>
               ) : (
-                <div className={styles.agentsList}>
+                <div className="flex flex-col gap-2">
                   {historyRuns.map((run) => (
-                    <div key={run.id} className={`${styles.agentItem} ${selectedRun?.id === run.id ? styles.active : ''}`}
+                    <div key={run.id}
+                      className={`bg-muted p-3 rounded-md cursor-pointer transition-colors hover:bg-accent border-l-[3px] border-transparent ${selectedRun?.id === run.id ? 'border-l-primary bg-accent' : ''}`}
                       onClick={() => { setSelectedRun(run); viewHistoryRun(run.id); }}>
-                      <div className={styles.agentItemHeader}>
-                        <span className={styles.agentItemIcon}>
-                          {run.status === 'completed' ? '✅' : run.status === 'failed' || run.status === 'crashed' ? '❌' : run.status === 'stopped' ? '⏹️' : '🔄'}
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="material-symbols-outlined text-lg">
+                          {run.status === 'completed' ? 'check_circle' : run.status === 'failed' || run.status === 'crashed' ? 'error' : run.status === 'stopped' ? 'stop_circle' : 'sync'}
                         </span>
-                        <span className={styles.agentItemName}>{run.id}</span>
+                        <span className="text-sm font-medium">{run.id}</span>
                       </div>
-                      <div className={styles.agentItemStatus}>
-                        <span className={`${styles.statusDot}`} style={{
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="w-2 h-2 rounded-full" style={{
                           background: run.status === 'completed' ? '#6a8759' : run.status === 'failed' || run.status === 'crashed' ? '#c75450' : run.status === 'stopped' ? '#cc7832' : '#4a88c7',
-                          animation: 'none',
                         }}></span>
                         {run.status === 'crashed' ? '崩溃' : run.status === 'completed' ? '完成' : run.status === 'failed' ? '失败' : run.status === 'stopped' ? '已停止' : '运行中'}
                       </div>
-                      <div style={{ fontSize: 11, color: '#808080', marginTop: 4 }}>
+                      <div className="text-[11px] text-muted-foreground mt-1">
                         {new Date(run.startTime).toLocaleString()}
                       </div>
-                      <div style={{ fontSize: 11, color: '#808080', marginTop: 2 }}>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
                         {run.phaseReached ? `阶段: ${run.phaseReached}` : ''} · {run.completedSteps}/{run.totalSteps} 步
                       </div>
                     </div>
@@ -940,16 +1306,16 @@ export default function WorkbenchPage() {
               )}
             </div>
           </div>
-          <div className={styles.centerPanel}>
-            <div className={styles.panelHeader}><h2>{selectedRun ? `运行详情 - ${selectedRun.id}` : '运行历史'}</h2></div>
-            <div className={styles.panelContent}>
+          <div className="flex-1 flex flex-col border-r">
+            <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">{selectedRun ? `运行详情 - ${selectedRun.id}` : '运行历史'}</h2></div>
+            <div className="flex-1 overflow-auto">
               {!selectedRun ? (
-                <div className={styles.emptyState}><span className={styles.emptyIcon}>📜</span><p>选择一条运行记录查看详情</p></div>
+                <div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">history</span><p>选择一条运行记录查看详情</p></div>
               ) : !runDetail ? (
-                <div className={styles.emptyState}><span className={styles.emptyIcon}>📄</span><p>无详细状态数据</p></div>
+                <div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">description</span><p>无详细状态数据</p></div>
               ) : (
-                <div style={{ padding: 16 }}>
-                  <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+                <div className="p-4">
+                  <div className="flex gap-3 mb-4 flex-wrap">
                     {[
                       { label: '状态', value: runDetail.status, color: runDetail.status === 'completed' ? '#6a8759' : runDetail.status === 'failed' || runDetail.status === 'crashed' ? '#c75450' : '#cc7832' },
                       { label: '开始', value: new Date(runDetail.startTime).toLocaleString() },
@@ -957,55 +1323,48 @@ export default function WorkbenchPage() {
                       { label: '阶段', value: runDetail.currentPhase || '-' },
                       { label: '完成步骤', value: `${runDetail.completedSteps?.length || 0}` },
                     ].map((item, i) => (
-                      <div key={i} className={styles.stat} style={{ flex: 'none', minWidth: 120 }}>
-                        <span className={styles.statLabel}>{item.label}</span>
-                        <span className={styles.statValue} style={{ fontSize: 14, color: item.color || '#a9b7c6' }}>{item.value}</span>
+                      <div key={i} className="bg-muted p-3 rounded-md text-center min-w-[120px]">
+                        <span className="block text-xs text-muted-foreground mb-1">{item.label}</span>
+                        <span className="block text-sm font-semibold" style={{ color: item.color }}>{item.value}</span>
                       </div>
                     ))}
                   </div>
                   {(runDetail.status === 'crashed' || runDetail.status === 'failed' || runDetail.status === 'stopped') && (
-                    <div style={{ marginBottom: 16 }}>
+                    <div className="mb-4">
                       {runDetail.statusReason && (
-                        <div style={{
-                          background: runDetail.status === 'crashed' ? '#402020' : '#3a3020',
-                          border: `1px solid ${runDetail.status === 'crashed' ? '#c75450' : '#cc7832'}`,
-                          borderRadius: 6, padding: '10px 14px', marginBottom: 12,
-                        }}>
-                          <div style={{ color: runDetail.status === 'crashed' ? '#c75450' : '#cc7832', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                            {runDetail.status === 'crashed' ? '💥 崩溃原因' : runDetail.status === 'failed' ? '❌ 失败原因' : '⏹️ 停止原因'}
+                        <div className={`rounded-md p-3 mb-3 border-l-[3px] ${runDetail.status === 'crashed' ? 'bg-red-500/10 border-l-red-500' : 'bg-yellow-500/10 border-l-yellow-500'}`}>
+                          <div className={`text-sm font-semibold mb-1 ${runDetail.status === 'crashed' ? 'text-red-400' : 'text-yellow-400'}`}>
+                            <span className="material-symbols-outlined text-sm">{runDetail.status === 'crashed' ? 'explosion' : runDetail.status === 'failed' ? 'error' : 'stop_circle'}</span>
+                            {runDetail.status === 'crashed' ? ' 崩溃原因' : runDetail.status === 'failed' ? ' 失败原因' : ' 停止原因'}
                           </div>
-                          <div style={{ color: '#a9b7c6', fontSize: 12, lineHeight: 1.5 }}>{runDetail.statusReason}</div>
+                          <div className="text-xs leading-relaxed">{runDetail.statusReason}</div>
                         </div>
                       )}
                       {!runDetail.statusReason && runDetail.status === 'crashed' && (
-                        <div style={{
-                          background: '#402020', border: '1px solid #c75450',
-                          borderRadius: 6, padding: '10px 14px', marginBottom: 12,
-                        }}>
-                          <div style={{ color: '#c75450', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>💥 崩溃原因</div>
-                          <div style={{ color: '#a9b7c6', fontSize: 12 }}>服务重启或进程意外终止，运行被标记为崩溃。</div>
+                        <div className="bg-red-500/10 border-l-[3px] border-l-red-500 rounded-md p-3 mb-3">
+                          <div className="text-sm font-semibold mb-1 text-red-400"><span className="material-symbols-outlined text-sm">explosion</span> 崩溃原因</div>
+                          <div className="text-xs">服务重启或进程意外终止，运行被标记为崩溃。</div>
                         </div>
                       )}
-                      <button onClick={() => resumeWorkflow(selectedRun.id)} disabled={isRunning}
-                        className={`${styles.btn} ${styles.btnSuccess}`} style={{ fontSize: 13 }}>
-                        <span className={styles.btnIcon}>🔄</span>
+                      <Button className="bg-green-600 hover:bg-green-700 text-white text-sm" onClick={() => resumeWorkflow(selectedRun.id)} disabled={isRunning}>
+                        <span className="material-symbols-outlined text-sm">refresh</span>
                         从此处恢复运行 ({runDetail.completedSteps?.length || 0} 步已完成，跳过已完成步骤继续执行)
-                      </button>
+                      </Button>
                     </div>
                   )}
                   {runDetail.agents?.length > 0 && (<>
-                    <h3 style={{ color: '#a9b7c6', fontSize: 14, margin: '16px 0 8px' }}>Agent 状态</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <h3 className="text-sm font-semibold mt-4 mb-2">Agent 状态</h3>
+                    <div className="flex flex-col gap-1.5">
                       {runDetail.agents.map((agent: any, i: number) => (
-                        <div key={i} className={styles.phaseCard}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                            <span style={{ fontSize: 14 }}>
-                              {agent.status === 'completed' ? '✅' : agent.status === 'failed' ? '❌' : agent.status === 'running' ? '🔄' : '⏳'}
+                        <div key={i} className="bg-muted rounded-md p-2.5">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="material-symbols-outlined text-sm">
+                              {agent.status === 'completed' ? 'check_circle' : agent.status === 'failed' ? 'error' : agent.status === 'running' ? 'sync' : 'hourglass_empty'}
                             </span>
-                            <span style={{ color: '#a9b7c6', fontSize: 13, fontWeight: 500, flex: 1 }}>{agent.name}</span>
-                            <span className={`${styles.agentChip} ${styles[agent.team]}`}>{agent.team}</span>
+                            <span className="text-sm font-medium flex-1">{agent.name}</span>
+                            <Badge variant="outline" className={`text-[10px] ${agent.team === 'blue' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : agent.team === 'red' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'}`}>{agent.team}</Badge>
                           </div>
-                          <div style={{ display: 'flex', gap: 16, fontSize: 11, color: '#808080' }}>
+                          <div className="flex gap-4 text-[11px] text-muted-foreground">
                             <span>模型: {agent.model}</span>
                             <span>完成: {agent.completedTasks} 任务</span>
                             <span>迭代: {agent.iterationCount}</span>
@@ -1015,30 +1374,30 @@ export default function WorkbenchPage() {
                             )}
                           </div>
                           {agent.summary && (
-                            <div style={{ fontSize: 12, color: '#a9b7c6', marginTop: 4, lineHeight: 1.4 }}>{agent.summary}</div>
+                            <div className={`${styles.markdownContent} text-xs mt-1 leading-relaxed`}><Markdown>{agent.summary}</Markdown></div>
                           )}
                         </div>
                       ))}
                     </div>
                   </>)}
                   {runDetail.completedSteps?.length > 0 && (<>
-                    <h3 style={{ color: '#a9b7c6', fontSize: 14, margin: '16px 0 8px' }}>完成的步骤</h3>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    <h3 className="text-sm font-semibold mt-4 mb-2">完成的步骤</h3>
+                    <div className="flex flex-wrap gap-1">
                       {runDetail.completedSteps.map((step: string, i: number) => (
-                        <span key={i} className={styles.capabilityTag} style={{ background: '#2d4a2d', color: '#6a8759' }}>{step}</span>
+                        <Badge key={i} variant="secondary" className="text-xs bg-green-500/20 text-green-400">{step}</Badge>
                       ))}
                     </div>
                   </>)}
                   {Object.keys(runDetail.iterationStates || {}).length > 0 && (<>
-                    <h3 style={{ color: '#a9b7c6', fontSize: 14, margin: '16px 0 8px' }}>迭代状态</h3>
+                    <h3 className="text-sm font-semibold mt-4 mb-2">迭代状态</h3>
                     {Object.entries(runDetail.iterationStates).map(([phase, iter]: [string, any]) => (
-                      <div key={phase} className={styles.phaseCard} style={{ marginBottom: 6 }}>
-                        <div style={{ color: '#a9b7c6', fontSize: 13, fontWeight: 500 }}>{phase}</div>
-                        <div style={{ fontSize: 11, color: '#808080', marginTop: 4 }}>
+                      <div key={phase} className="bg-muted rounded-md p-2.5 mb-1.5">
+                        <div className="text-sm font-medium">{phase}</div>
+                        <div className="text-[11px] text-muted-foreground mt-1">
                           迭代: {iter.currentIteration}/{iter.maxIterations} · 连续无 Bug: {iter.consecutiveCleanRounds} 轮 · 状态: {iter.status}
                         </div>
                         {iter.bugsFoundPerRound?.length > 0 && (
-                          <div style={{ fontSize: 11, color: '#808080', marginTop: 2 }}>
+                          <div className="text-[11px] text-muted-foreground mt-0.5">
                             每轮 Bug 数: [{iter.bugsFoundPerRound.join(', ')}]
                           </div>
                         )}
@@ -1052,53 +1411,80 @@ export default function WorkbenchPage() {
         </div>)}
       </div>
 
-      {showProcessPanel && (<div className={styles.processOverlay}><div className={styles.processContainer}>
+      {showProcessPanel && (<div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50"><div className="bg-card rounded-lg w-[90%] max-w-[1200px] h-[80%] border relative overflow-hidden">
         <ProcessPanel onClose={() => dispatch({ type: 'SET_SHOW_PROCESS_PANEL', payload: false })} />
       </div></div>)}
       {editingNode && (<EditNodeModal isOpen={showEditNodeModal} type={editingNode.type} data={getEditingNodeData()} roles={agentConfigs}
-        onClose={() => { dispatch({ type: 'SET_SHOW_EDIT_NODE_MODAL', payload: false }); dispatch({ type: 'SET_EDITING_NODE', payload: null }); }}
+        isNew={isNewNode}
+        existingPhases={editingConfig?.workflow?.phases || []}
+        existingSteps={editingConfig?.workflow?.phases?.flatMap((p: any) => p.steps) || []}
+        onClose={() => { dispatch({ type: 'SET_SHOW_EDIT_NODE_MODAL', payload: false }); dispatch({ type: 'SET_EDITING_NODE', payload: null }); setIsNewNode(false); }}
         onSave={handleSaveNode} onDelete={handleDeleteNode} />)}
-      {showCheckpoint && (<div className={styles.modalOverlay} onClick={() => dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false })}>
-        <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-          <div className={styles.modalHeader}><h3>✋ 人工检查点</h3></div>
-          <div className={styles.modalBody}><p className={styles.checkpointMessage}>{checkpointMessage}</p>
-            <div className={styles.checkpointInfo}><p>当前阶段: <strong>{currentPhase}</strong></p><p>请审查工作成果，决定是否继续执行</p></div></div>
-          <div className={styles.modalFooter}>
-            <button onClick={approveCheckpoint} className={`${styles.btn} ${styles.btnSuccess}`}>✓ 批准继续</button>
-            <button onClick={rejectCheckpoint} className={`${styles.btn} ${styles.btnDanger}`}>✗ 拒绝并停止</button>
+      {showCheckpoint && (<div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false })}>
+        <div className="bg-card rounded-lg w-[500px] max-w-[90%] border" onClick={(e) => e.stopPropagation()}>
+          <div className="p-5 border-b"><h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">pan_tool</span>人工检查点</h3></div>
+          <div className="p-5"><p className="text-sm mb-4 leading-relaxed">{checkpointMessage}</p>
+            <div className="bg-muted p-4 rounded-md border-l-[3px] border-l-yellow-500"><p className="text-sm text-muted-foreground mb-2">当前阶段: <strong className="text-foreground">{currentPhase}</strong></p><p className="text-sm text-muted-foreground">请审查工作成果，决定是否继续执行</p></div></div>
+          <div className="p-5 border-t flex gap-3 justify-end">
+            <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={approveCheckpoint}><span className="material-symbols-outlined text-sm mr-1">check</span>批准继续</Button>
+            {checkpointIsIterative && (
+              <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={iterateCheckpoint}><span className="material-symbols-outlined text-sm mr-1">refresh</span>继续迭代</Button>
+            )}
+            <Button variant="destructive" onClick={rejectCheckpoint}><span className="material-symbols-outlined text-sm mr-1">close</span>拒绝并停止</Button>
           </div>
         </div>
       </div>)}
       {showLiveStream && (
-        <div className={styles.modalOverlay} onClick={stopLiveStream}>
-          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()} style={{ width: '80%', maxWidth: 800, maxHeight: '80vh' }}>
-            <div className={styles.modalHeader} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3>📡 实时输出 {currentStep ? `- ${currentStep}` : ''}</h3>
-              <button onClick={stopLiveStream} className={`${styles.btn} ${styles.btnSecondary}`} style={{ fontSize: 11, padding: '4px 10px' }}>关闭</button>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={stopLiveStream}>
+          <div className="bg-card rounded-lg border w-[80%] max-w-[800px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b flex justify-between items-center">
+              <h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">cell_tower</span>实时输出 {currentStep ? `- ${currentStep}` : ''}</h3>
+              <Button variant="secondary" size="sm" onClick={stopLiveStream}>关闭</Button>
             </div>
-            <div className={styles.modalBody} style={{ maxHeight: '60vh', overflow: 'auto' }}>
-              <pre className={styles.systemPromptContent} style={{ maxHeight: 'none', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>
-                {liveStream || '(等待输出...)'}
-              </pre>
+            <div className="p-5 flex-1 overflow-auto">
+              {liveStream.length === 0 ? (
+                <div className="text-muted-foreground text-sm text-center py-8">(等待输出...)</div>
+              ) : (
+                <div className="space-y-3">
+                  {liveStream.map((chunk, i) => (
+                    <div key={i} className={`${styles.markdownContent} text-sm border-b border-border/50 pb-3 last:border-0`}>
+                      <Markdown>{chunk}</Markdown>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
       {markdownModal && (
-        <div className={styles.modalOverlay} onClick={() => setMarkdownModal(null)}>
-          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()} style={{ width: '80%', maxWidth: 900, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
-            <div className={styles.modalHeader} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3>{markdownModal.title}</h3>
-              <button onClick={() => setMarkdownModal(null)} className={styles.btn} style={{ fontSize: 18, lineHeight: 1, padding: '4px 8px' }}>&times;</button>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setMarkdownModal(null)}>
+          <div className="bg-card rounded-lg border w-[80%] max-w-[900px] max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b flex justify-between items-center">
+              <h3 className="text-lg font-semibold">{markdownModal.title}</h3>
+              <Button variant="ghost" size="icon" onClick={() => setMarkdownModal(null)}>
+                <span className="material-symbols-outlined">close</span>
+              </Button>
             </div>
-            <div className={styles.modalBody} style={{ flex: 1, overflow: 'auto' }}>
-              <div className={styles.markdownContent}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdownModal.content}</ReactMarkdown>
-              </div>
+            <div className="p-5 flex-1 overflow-auto">
+              {markdownModal.chunks.length > 1 ? (
+                <div className="space-y-3">
+                  {markdownModal.chunks.map((chunk, i) => (
+                    <div key={i} className={`${styles.markdownContent} text-sm border-b border-border/50 pb-3 last:border-0`}>
+                      <Markdown>{chunk}</Markdown>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className={styles.markdownContent}>
+                  <Markdown>{markdownModal.chunks[0]}</Markdown>
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
+      {confirmDialogProps && <ConfirmDialog {...confirmDialogProps} />}
     </div>
   );
 }

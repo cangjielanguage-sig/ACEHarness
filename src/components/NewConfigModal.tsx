@@ -3,6 +3,7 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { newConfigFormSchema, type NewConfigForm } from '@/lib/schemas';
+import { useToast } from '@/components/ui/toast';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,7 @@ export default function NewConfigModal({
   onClose,
   onSuccess,
 }: NewConfigModalProps) {
+  const { toast } = useToast();
   const {
     register,
     handleSubmit,
@@ -45,18 +47,18 @@ export default function NewConfigModal({
       const result = await response.json();
       if (!response.ok) {
         if (result.details) {
-          alert('表单验证失败:\n' + result.details.map((e: any) => e.message).join('\n'));
+          toast('error', '表单验证失败:\n' + result.details.map((e: any) => e.message).join('\n'));
         } else {
-          alert(result.message || result.error);
+          toast('error', result.message || result.error);
         }
         return;
       }
-      alert('配置文件创建成功！');
+      toast('success', '配置文件创建成功！');
       reset();
       onSuccess(data.filename);
       onClose();
     } catch (error: any) {
-      alert('创建失败: ' + error.message);
+      toast('error', '创建失败: ' + error.message);
     }
   };
 

@@ -1,7 +1,7 @@
 .flowContainer {
   width: 100%;
   height: 100%;
-  background: #2b2b2b;
+  background: hsl(var(--flow-bg));
 }
 
 .phaseNode {
@@ -9,15 +9,28 @@
   flex-direction: row;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  position: relative;
+}
+
+.phaseNode .actionBtns {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.phaseNode:hover .actionBtns {
+  opacity: 1;
 }
 
 .phaseNumber {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: #4a88c7;
-  color: white;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -26,13 +39,13 @@
 }
 
 .phaseName {
-  color: #e8e8e8;
+  color: hsl(var(--foreground));
   font-weight: 700;
   font-size: 15px;
 }
 
 .checkpointBadge {
-  background: #cc7832;
+  background: hsl(var(--flow-warning));
   color: white;
   padding: 2px 8px;
   border-radius: 4px;
@@ -41,16 +54,19 @@
 }
 
 .iterLabel {
-  background: #4a88c7;
-  color: white;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 10px;
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .groupLabel {
-  color: #808080;
+  color: hsl(var(--muted-foreground));
   font-size: 12px;
   font-weight: 500;
   position: absolute;
@@ -61,7 +77,85 @@
 .stepNode {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  position: relative;
+}
+
+.stepNode .actionBtns {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.stepNode:hover .actionBtns {
+  opacity: 1;
+}
+
+.moveBtn {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  font-size: 0;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.moveBtn:hover {
+  background: hsl(var(--accent));
+}
+
+.mergeBtn {
+  background: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
+  border: 1px solid hsl(var(--primary) / 0.3);
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  font-size: 0;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.mergeBtn:hover {
+  background: hsl(var(--primary) / 0.25);
+}
+
+.insertBtn {
+  background: hsl(var(--muted));
+  border: 1px dashed hsl(var(--border));
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+  color: hsl(var(--muted-foreground));
+}
+
+.insertBtn:hover {
+  opacity: 1 !important;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
 }
 
 .stepHeader {
@@ -74,8 +168,8 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #515151;
-  color: #a9b7c6;
+  background: hsl(var(--flow-step-number));
+  color: hsl(var(--flow-step-text));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -85,7 +179,7 @@
 }
 
 .stepName {
-  color: #a9b7c6;
+  color: hsl(var(--flow-step-text));
   font-size: 13px;
   font-weight: 500;
   flex: 1;
@@ -95,7 +189,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #808080;
+  color: hsl(var(--flow-agent-text));
   font-size: 12px;
 }
 
@@ -109,23 +203,47 @@
 }
 
 .editBtn {
-  background: #4a88c7;
-  color: white;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
   border: none;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 11px;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  font-size: 0;
   cursor: pointer;
-  transition: background 0.2s;
-  margin-top: 4px;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .editBtn:hover {
-  background: #3a6ea5;
+  opacity: 0.85;
+}
+
+.deleteBtn {
+  background: hsl(var(--destructive));
+  color: hsl(var(--destructive-foreground));
+  border: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  font-size: 0;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.deleteBtn:hover {
+  opacity: 0.85;
 }
 
 .checkpointNode {
-  color: #cc7832;
+  color: hsl(var(--flow-warning));
   font-size: 12px;
   font-weight: 600;
   text-align: center;
