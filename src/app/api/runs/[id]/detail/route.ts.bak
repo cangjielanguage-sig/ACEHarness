@@ -6,8 +6,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = (await params).id;
-    const state = await loadRunState(id);
+    const state = await loadRunState(params.id);
     if (!state) {
       return NextResponse.json({ error: '运行详情不存在' }, { status: 404 });
     }

@@ -1,0 +1,57 @@
+{
+  "dashboard": {
+    "title": "AceFlow Control Center",
+    "subtitle": "AI Orchestration Platform",
+    "stats": {
+      "totalRuns": "Total Runs",
+      "successRate": "Success Rate",
+      "avgDuration": "Avg Duration",
+      "activeProcesses": "Active Processes"
+    },
+    "quickActions": {
+      "title": "Quick Actions",
+      "newWorkflow": "New Workflow",
+      "manageAgents": "Manage Agents",
+      "viewHistory": "View History",
+      "settings": "Settings",
+      "workflows": "Workflows"
+    },
+    "charts": {
+      "performanceTrends": "Performance Trends",
+      "weeklyActivity": "Weekly Activity"
+    },
+    "sections": {
+      "activeWorkflows": "Active Workflows",
+      "recentRuns": "Recent Runs",
+      "phases": "phases"
+    },
+    "status": {
+      "completed": "Completed",
+      "failed": "Failed",
+      "running": "Running",
+      "stopped": "Stopped"
+    }
+  },
+  "agents": {
+    "title": "Agent Management",
+    "new": "New Agent",
+    "search": "Search Agent...",
+    "team": "Team",
+    "category": "Category",
+    "tags": "Tags",
+    "all": "All",
+    "blue": "Blue Team",
+    "red": "Red Team",
+    "judge": "Judge",
+    "edit": "Edit",
+    "delete": "Delete",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "common": {
+    "back": "Back",
+    "close": "Close",
+    "loading": "Loading...",
+    "noData": "No data available"
+  }
+}

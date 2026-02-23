@@ -9,7 +9,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const runId = (await params).id;
+  const runId = params.id;
   const stepName = request.nextUrl.searchParams.get('step');
 
   try {

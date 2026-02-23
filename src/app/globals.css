@@ -225,3 +225,57 @@
   0%, 100% { opacity: 0.7; transform: translateX(0) scaleX(1); }
   50% { opacity: 0.25; transform: translateX(-20px) scaleX(1.1); }
 }
+
+/* Material Symbols - prevent text fallback during font load */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  /* Hide text content until font loads */
+  font-display: block;
+  /* Prevent layout shift */
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  line-height: 1;
+  text-align: center;
+  vertical-align: middle;
+  /* Hide text fallback */
+  color: transparent;
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+/* Show icon only when font is loaded */
+@supports (font-variation-settings: normal) {
+  .material-symbols-outlined {
+    color: inherit;
+  }
+}
+
+/* Dashboard animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes glow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow 3s ease-in-out infinite;
+}
+
+.delay-1000 {
+  animation-delay: 1s;
+}
+
+.delay-2000 {
+  animation-delay: 2s;
+}

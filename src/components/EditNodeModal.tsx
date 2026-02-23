@@ -40,6 +40,7 @@ const stepSchema = z.object({
   agent: z.string().min(1, 'Agent 名称不能为空'),
   task: z.string().min(1, '任务描述不能为空'),
   constraints: z.string().optional(),
+  enableReviewPanel: z.boolean().optional(),
 });
 
 type PhaseForm = z.infer<typeof phaseSchema>;
@@ -104,6 +105,7 @@ export default function EditNodeModal({
           agent: data?.agent || '',
           task: data?.task || '',
           constraints: data?.constraints?.join('\n') || '',
+          enableReviewPanel: data?.enableReviewPanel || false,
         },
   });
 
@@ -134,6 +136,7 @@ export default function EditNodeModal({
         agent: source.agent || '',
         task: source.task || '',
         constraints: source.constraints?.join('\n') || '',
+        enableReviewPanel: source.enableReviewPanel || false,
       });
     }
   };
@@ -175,6 +178,9 @@ export default function EditNodeModal({
           .split('\n')
           .filter((c: string) => c.trim());
       }
+      if (formData.enableReviewPanel !== undefined) {
+        stepData.enableReviewPanel = formData.enableReviewPanel;
+      }
       onSave(stepData);
     }
   };
@@ -182,11 +188,14 @@ export default function EditNodeModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col p-0">
+        <div className="flex items-center justify-between p-6 pb-4 flex-shrink-0">
           <DialogTitle>{isNew ? (isPhase ? '新建阶段' : '新建步骤') : (isPhase ? '编辑阶段' : '编辑步骤')}</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <Button type="button" variant="ghost" size="icon" onClick={onClose}>
+            <span className="material-symbols-outlined">close</span>
+          </Button>
+        </div>
+        <form id="edit-node-form" onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-auto px-6 space-y-4">
           {isNew && ((isPhase && existingPhases.length > 0) || (!isPhase && existingSteps.length > 0)) && (
             <div className="space-y-2">
               <Label>从现有复制</Label>
@@ -359,24 +368,38 @@ export default function EditNodeModal({
                   placeholder={"不得修改公共 API 接口\n必须保持向后兼容\n单个文件不超过 500 行"}
                 />
               </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <Label htmlFor="enableReviewPanel">启用专家模式</Label>
+                  <p className="text-xs text-muted-foreground">
+                    启用后将启动多个专家子 Agent 从不同角度进行分析
+                  </p>
+                </div>
+                <Switch
+                  id="enableReviewPanel"
+                  checked={watch('enableReviewPanel') as boolean}
+                  onCheckedChange={(v) => setValue('enableReviewPanel', v)}
+                />
+              </div>
             </>
           )}
 
-          <DialogFooter className="gap-2">
-            {onDelete && (
-              <Button type="button" variant="destructive" onClick={onDelete} className="mr-auto">
-                <span className="material-symbols-outlined text-base mr-1">delete</span>
-                删除
-              </Button>
-            )}
-            <Button type="button" variant="outline" onClick={onClose}>
-              取消
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? '保存中...' : '保存'}
-            </Button>
-          </DialogFooter>
         </form>
+        <div className="flex gap-2 justify-end p-6 pt-4 border-t flex-shrink-0">
+          {onDelete && (
+            <Button type="button" variant="destructive" onClick={onDelete} className="mr-auto">
+              <span className="material-symbols-outlined text-base mr-1">delete</span>
+              删除
+            </Button>
+          )}
+          <Button type="button" variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button type="submit" form="edit-node-form" disabled={isSubmitting}>
+            {isSubmitting ? '保存中...' : '保存'}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

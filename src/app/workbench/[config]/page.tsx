@@ -3,6 +3,7 @@
 import { useEffect, useCallback, useState, useRef } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { ClipLoader } from 'react-spinners';
 import { configApi, workflowApi, agentApi, runsApi, processApi, streamApi } from '@/lib/api';
 import { useWorkflowState } from '@/hooks/useWorkflowState';
 import type { ViewMode } from '@/hooks/useWorkflowState';
@@ -13,6 +14,7 @@ import AgentConfigPanel from '@/components/AgentConfigPanel';
 import EditNodeModal from '@/components/EditNodeModal';
 import ProcessPanel from '@/components/ProcessPanel';
 import Markdown from '@/components/Markdown';
+import ResizablePanels from '@/components/ResizablePanels';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -562,6 +564,19 @@ export default function WorkbenchPage() {
 
   // Chunk separator used in persisted stream files
   const CHUNK_SEP = '\n\n<!-- chunk-boundary -->\n\n';
+  const CHUNK_WITH_TIME_REGEX = /^<!-- timestamp: (.+?) -->\n/;
+
+  // Parse chunk with optional timestamp
+  const parseChunk = (chunk: string) => {
+    const match = chunk.match(CHUNK_WITH_TIME_REGEX);
+    if (match) {
+      return {
+        timestamp: match[1],
+        content: chunk.substring(match[0].length)
+      };
+    }
+    return { timestamp: null, content: chunk };
+  };
 
   // --- Live stream polling ---
   const startLiveStream = () => {
@@ -867,7 +882,7 @@ export default function WorkbenchPage() {
   if (pageLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground gap-4">
-        <span className="material-symbols-outlined text-4xl text-primary animate-spin">progress_activity</span>
+        <ClipLoader color="hsl(var(--primary))" size={40} />
         <p className="text-sm text-muted-foreground">加载工作流配置...</p>
       </div>
     );
@@ -915,7 +930,11 @@ export default function WorkbenchPage() {
         <div className="flex items-center gap-2 shrink-0">
           {viewMode === 'run' && (<>
             <Button size="sm" onClick={startWorkflow} disabled={starting || isRunning}>
-              <span className={`material-symbols-outlined text-sm mr-1 ${starting ? 'animate-spin' : ''}`}>{starting ? 'sync' : 'play_arrow'}</span>
+              {starting ? (
+                <ClipLoader color="currentColor" size={14} className="mr-1" />
+              ) : (
+                <span className="material-symbols-outlined text-sm mr-1">play_arrow</span>
+              )}
               <span className="hidden sm:inline">{starting ? '启动中...' : '启动工作流'}</span>
               <span className="sm:hidden">{starting ? '...' : '启动'}</span>
             </Button>
@@ -928,7 +947,11 @@ export default function WorkbenchPage() {
           </>)}
           {viewMode === 'design' && (
             <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={handleSaveConfig} disabled={saving}>
-              <span className={`material-symbols-outlined text-sm mr-1 ${saving ? 'animate-spin' : ''}`}>{saving ? 'sync' : 'save'}</span>
+              {saving ? (
+                <ClipLoader color="currentColor" size={14} className="mr-1" />
+              ) : (
+                <span className="material-symbols-outlined text-sm mr-1">save</span>
+              )}
               {saving ? '保存中...' : '保存配置'}
             </Button>
           )}
@@ -951,21 +974,22 @@ export default function WorkbenchPage() {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {viewMode === 'run' && (<>
-          <div className="w-[280px] bg-card border-r flex flex-col">
-            <Tabs value={activeTab} onValueChange={(val) => dispatch({ type: 'SET_ACTIVE_TAB', payload: val })}>
-              <TabsList className="w-full rounded-none border-b">
-                <TabsTrigger value="workflow" className="flex-1 flex items-center justify-center gap-1 text-xs">
-                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>monitoring</span>工作流
-                </TabsTrigger>
-                <TabsTrigger value="agents" className="flex-1 flex items-center justify-center gap-1 text-xs">
-                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>smart_toy</span>Agents
-                </TabsTrigger>
-                <TabsTrigger value="config" className="flex-1 flex items-center justify-center gap-1 text-xs">
-                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span>配置
-                </TabsTrigger>
-              </TabsList>
-              <div className="flex-1 overflow-y-auto p-4">
+        {viewMode === 'run' && (
+          <ResizablePanels
+            leftPanel={
+              <Tabs value={activeTab} onValueChange={(val) => dispatch({ type: 'SET_ACTIVE_TAB', payload: val })} className="flex flex-col h-full overflow-hidden">
+                <TabsList className="w-full rounded-none border-b flex-shrink-0">
+                  <TabsTrigger value="workflow" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                    <span className="material-symbols-outlined" style={{ fontSize: 14 }}>monitoring</span>工作流
+                  </TabsTrigger>
+                  <TabsTrigger value="agents" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                    <span className="material-symbols-outlined" style={{ fontSize: 14 }}>smart_toy</span>Agents
+                  </TabsTrigger>
+                  <TabsTrigger value="config" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                    <span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span>配置
+                  </TabsTrigger>
+                </TabsList>
+                <div className="flex-1 overflow-y-auto p-4 min-h-0">
                 <TabsContent value="workflow" className="mt-0">
                   {workflowConfig && (
                     <div>
@@ -995,15 +1019,27 @@ export default function WorkbenchPage() {
                             return { name: s.agent, team: role?.team || 'blue', role: s.role };
                           });
                           const iterState = iterationStates[phase.name];
-                          return (<div key={idx} className="bg-muted rounded-md p-2.5">
+                          const isActive = currentPhase === phase.name;
+                          const isDone = phase.steps.every((s: any) => completedSteps?.includes(s.name));
+                          return (<div key={idx}
+                            className={`bg-muted rounded-md p-2.5 cursor-pointer transition-colors hover:bg-accent border-l-[3px] ${
+                              isActive ? 'border-l-primary bg-accent' : isDone ? 'border-l-green-500' : 'border-transparent'
+                            }`}
+                            onClick={() => {
+                              // 点击阶段时，选择该阶段的第一个步骤
+                              if (phase.steps.length > 0) {
+                                selectStep(phase.steps[0]);
+                              }
+                            }}
+                          >
                             <div className="flex justify-between items-center mb-2">
                               <span className="text-sm font-medium">{phase.name}</span>
-                              {phase.iteration?.enabled && (<Badge><span className="material-symbols-outlined text-xs">loop</span> {iterState ? `${iterState.currentIteration}/${iterState.maxIterations}` : `max ${phase.iteration.maxIterations}`}</Badge>)}
+                              {phase.iteration?.enabled && (<Badge><span className="material-symbols-outlined" style={{ fontSize: 10 }}>loop</span> {iterState ? `${iterState.currentIteration}/${iterState.maxIterations}` : `max ${phase.iteration.maxIterations}`}</Badge>)}
                             </div>
                             <div className="flex flex-wrap gap-1">
                               {phaseAgents.map((a: any, i: number) => (
                                 <Badge key={i} variant="outline" className={`text-[10px] ${a.team === 'blue' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : a.team === 'red' ? 'bg-red-500/20 text-red-400 border-red-500/30' : a.team === 'judge' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' : ''}`}>
-                                  <span className="material-symbols-outlined text-xs">{a.role === 'attacker' ? 'swords' : a.role === 'judge' ? 'gavel' : 'shield'}</span> {a.name}
+                                  <span className="material-symbols-outlined" style={{ fontSize: 10 }}>{a.role === 'attacker' ? 'swords' : a.role === 'judge' ? 'gavel' : 'shield'}</span> {a.name}
                                 </Badge>
                               ))}
                             </div>
@@ -1029,24 +1065,31 @@ export default function WorkbenchPage() {
                   <div className="mb-4"><Label>步骤超时（分钟）</Label>
                     <Input value={timeoutMinutes} onChange={(e) => dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: Math.max(1, parseInt(e.target.value) || 1) })} type="number" min={1} /></div>
                   <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={saveConfig} disabled={saving}>
-                    <span className={`material-symbols-outlined text-sm mr-1 ${saving ? 'animate-spin' : ''}`}>{saving ? 'sync' : 'save'}</span>
+                    {saving ? (
+                      <ClipLoader color="currentColor" size={14} className="mr-1" />
+                    ) : (
+                      <span className="material-symbols-outlined text-sm mr-1">save</span>
+                    )}
                     {saving ? '保存中...' : '保存配置'}
                   </Button>
                 </div></TabsContent>
               </div>
             </Tabs>
-          </div>
-          <div className="flex-1 flex flex-col border-r">
-            <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">工作流可视化</h2></div>
-            <div className="flex-1 overflow-auto">
-              {workflowConfig ? (<FlowDiagram workflow={workflowConfig.workflow} currentPhase={currentPhase} currentStep={currentStep}
-                agents={agents} completedSteps={completedSteps} failedSteps={failedSteps} iterationStates={iterationStates} onSelectStep={selectStep} />
-              ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">monitoring</span><p>加载中...</p></div>)}
-            </div>
-          </div>
-          <div className="w-[400px] flex flex-col">
-            <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">{selectedStep ? selectedStep.name : selectedAgent ? selectedAgent.name : 'Agent 详情'}</h2></div>
-            <div className="flex-1 overflow-auto">
+            }
+            centerPanel={
+              <>
+                <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">工作流可视化</h2></div>
+                <div className="flex-1 overflow-auto">
+                  {workflowConfig ? (<FlowDiagram workflow={workflowConfig.workflow} currentPhase={currentPhase} currentStep={currentStep}
+                    agents={agents} completedSteps={completedSteps} failedSteps={failedSteps} iterationStates={iterationStates} onSelectStep={selectStep} />
+                  ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">monitoring</span><p>加载中...</p></div>)}
+                </div>
+              </>
+            }
+            rightPanel={
+              <>
+                <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">{selectedStep ? selectedStep.name : selectedAgent ? selectedAgent.name : 'Agent 详情'}</h2></div>
+                <div className="flex-1 overflow-auto">
               {selectedStep && (
                 <div className="bg-muted border-b p-3.5">
                   <div className="flex items-center gap-2 mb-2.5">
@@ -1118,15 +1161,35 @@ export default function WorkbenchPage() {
               )}
               {selectedStep && stepResults[selectedStep.name] && (
                 <div className="bg-muted border-b p-3.5">
-                  <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">
+                  <div className="text-xs text-muted-foreground font-medium mb-2 uppercase tracking-wider">
                     {stepResults[selectedStep.name].error ? (<><span className="material-symbols-outlined text-xs text-red-400">error</span> 执行错误</>) : (<><span className="material-symbols-outlined text-xs text-green-400">check_circle</span> 执行结果</>)}
                   </div>
-                  {stepResults[selectedStep.name].costUsd !== undefined && (
-                    <div className="text-[11px] text-muted-foreground mb-1.5">
-                      费用: ${stepResults[selectedStep.name].costUsd?.toFixed(4)}
-                      {stepResults[selectedStep.name].durationMs ? ` · 耗时: ${(stepResults[selectedStep.name].durationMs! / 1000).toFixed(1)}s` : ''}
-                    </div>
-                  )}
+                  <div className="flex gap-3 mb-2 flex-wrap">
+                    {stepResults[selectedStep.name].durationMs !== undefined && (
+                      <div className="bg-background px-2 py-1 rounded text-[11px]">
+                        <span className="text-muted-foreground">耗时: </span>
+                        <span className="font-semibold">{(stepResults[selectedStep.name].durationMs! / 1000).toFixed(2)}s</span>
+                      </div>
+                    )}
+                    {stepResults[selectedStep.name].costUsd !== undefined && (
+                      <div className="bg-background px-2 py-1 rounded text-[11px]">
+                        <span className="text-muted-foreground">费用: </span>
+                        <span className="font-semibold">${stepResults[selectedStep.name].costUsd?.toFixed(4)}</span>
+                      </div>
+                    )}
+                    {stepResults[selectedStep.name].startTime && (
+                      <div className="bg-background px-2 py-1 rounded text-[11px]">
+                        <span className="text-muted-foreground">开始: </span>
+                        <span className="font-mono">{new Date(stepResults[selectedStep.name].startTime!).toLocaleTimeString('zh-CN')}</span>
+                      </div>
+                    )}
+                    {stepResults[selectedStep.name].endTime && (
+                      <div className="bg-background px-2 py-1 rounded text-[11px]">
+                        <span className="text-muted-foreground">结束: </span>
+                        <span className="font-mono">{new Date(stepResults[selectedStep.name].endTime!).toLocaleTimeString('zh-CN')}</span>
+                      </div>
+                    )}
+                  </div>
                   {stepResults[selectedStep.name].error ? (
                     <pre className="bg-background border border-red-500 rounded p-2 text-xs leading-relaxed max-h-[200px] overflow-y-auto mt-1.5 whitespace-pre-wrap break-words font-mono text-red-400">
                       {stepResults[selectedStep.name].error}
@@ -1220,8 +1283,10 @@ export default function WorkbenchPage() {
                 stepSummary={selectedStep && stepResults[selectedStep.name]?.output ? stepResults[selectedStep.name].output : undefined} />
               ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">smart_toy</span><p>选择一个 Agent 查看详情</p></div>)}
             </div>
-          </div>
-        </>)}
+              </>
+            }
+          />
+        )}
         {viewMode === 'design' && editingConfig && (<>
           <div className="flex flex-1 overflow-hidden">
             <div className="flex-1 flex flex-col min-w-0">
@@ -1270,143 +1335,76 @@ export default function WorkbenchPage() {
             </div>
           )}
         </>)}
-        {viewMode === 'history' && (<div className="flex-1 flex overflow-hidden">
-          <div className="w-[280px] bg-card border-r flex flex-col">
-            <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">运行记录</h2></div>
-            <div className="flex-1 overflow-y-auto p-4">
-              {historyRuns.length === 0 ? (
-                <div className="text-muted-foreground text-sm text-center p-5">暂无运行记录</div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {historyRuns.map((run) => (
-                    <div key={run.id}
-                      className={`bg-muted p-3 rounded-md cursor-pointer transition-colors hover:bg-accent border-l-[3px] border-transparent ${selectedRun?.id === run.id ? 'border-l-primary bg-accent' : ''}`}
-                      onClick={() => { setSelectedRun(run); viewHistoryRun(run.id); }}>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className="material-symbols-outlined text-lg">
-                          {run.status === 'completed' ? 'check_circle' : run.status === 'failed' || run.status === 'crashed' ? 'error' : run.status === 'stopped' ? 'stop_circle' : 'sync'}
-                        </span>
-                        <span className="text-sm font-medium">{run.id}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <span className="w-2 h-2 rounded-full" style={{
-                          background: run.status === 'completed' ? '#6a8759' : run.status === 'failed' || run.status === 'crashed' ? '#c75450' : run.status === 'stopped' ? '#cc7832' : '#4a88c7',
-                        }}></span>
-                        {run.status === 'crashed' ? '崩溃' : run.status === 'completed' ? '完成' : run.status === 'failed' ? '失败' : run.status === 'stopped' ? '已停止' : '运行中'}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground mt-1">
-                        {new Date(run.startTime).toLocaleString()}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">
-                        {run.phaseReached ? `阶段: ${run.phaseReached}` : ''} · {run.completedSteps}/{run.totalSteps} 步
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex-1 flex flex-col border-r">
-            <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">{selectedRun ? `运行详情 - ${selectedRun.id}` : '运行历史'}</h2></div>
-            <div className="flex-1 overflow-auto">
-              {!selectedRun ? (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">history</span><p>选择一条运行记录查看详情</p></div>
-              ) : !runDetail ? (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">description</span><p>无详细状态数据</p></div>
-              ) : (
-                <div className="p-4">
-                  <div className="flex gap-3 mb-4 flex-wrap">
-                    {[
-                      { label: '状态', value: runDetail.status, color: runDetail.status === 'completed' ? '#6a8759' : runDetail.status === 'failed' || runDetail.status === 'crashed' ? '#c75450' : '#cc7832' },
-                      { label: '开始', value: new Date(runDetail.startTime).toLocaleString() },
-                      { label: '结束', value: runDetail.endTime ? new Date(runDetail.endTime).toLocaleString() : '-' },
-                      { label: '阶段', value: runDetail.currentPhase || '-' },
-                      { label: '完成步骤', value: `${runDetail.completedSteps?.length || 0}` },
-                    ].map((item, i) => (
-                      <div key={i} className="bg-muted p-3 rounded-md text-center min-w-[120px]">
-                        <span className="block text-xs text-muted-foreground mb-1">{item.label}</span>
-                        <span className="block text-sm font-semibold" style={{ color: item.color }}>{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {(runDetail.status === 'crashed' || runDetail.status === 'failed' || runDetail.status === 'stopped') && (
-                    <div className="mb-4">
-                      {runDetail.statusReason && (
-                        <div className={`rounded-md p-3 mb-3 border-l-[3px] ${runDetail.status === 'crashed' ? 'bg-red-500/10 border-l-red-500' : 'bg-yellow-500/10 border-l-yellow-500'}`}>
-                          <div className={`text-sm font-semibold mb-1 ${runDetail.status === 'crashed' ? 'text-red-400' : 'text-yellow-400'}`}>
-                            <span className="material-symbols-outlined text-sm">{runDetail.status === 'crashed' ? 'explosion' : runDetail.status === 'failed' ? 'error' : 'stop_circle'}</span>
-                            {runDetail.status === 'crashed' ? ' 崩溃原因' : runDetail.status === 'failed' ? ' 失败原因' : ' 停止原因'}
-                          </div>
-                          <div className="text-xs leading-relaxed">{runDetail.statusReason}</div>
-                        </div>
-                      )}
-                      {!runDetail.statusReason && runDetail.status === 'crashed' && (
-                        <div className="bg-red-500/10 border-l-[3px] border-l-red-500 rounded-md p-3 mb-3">
-                          <div className="text-sm font-semibold mb-1 text-red-400"><span className="material-symbols-outlined text-sm">explosion</span> 崩溃原因</div>
-                          <div className="text-xs">服务重启或进程意外终止，运行被标记为崩溃。</div>
-                        </div>
-                      )}
-                      <Button className="bg-green-600 hover:bg-green-700 text-white text-sm" onClick={() => resumeWorkflow(selectedRun.id)} disabled={isRunning}>
-                        <span className="material-symbols-outlined text-sm">refresh</span>
-                        从此处恢复运行 ({runDetail.completedSteps?.length || 0} 步已完成，跳过已完成步骤继续执行)
-                      </Button>
-                    </div>
-                  )}
-                  {runDetail.agents?.length > 0 && (<>
-                    <h3 className="text-sm font-semibold mt-4 mb-2">Agent 状态</h3>
-                    <div className="flex flex-col gap-1.5">
-                      {runDetail.agents.map((agent: any, i: number) => (
-                        <div key={i} className="bg-muted rounded-md p-2.5">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="material-symbols-outlined text-sm">
-                              {agent.status === 'completed' ? 'check_circle' : agent.status === 'failed' ? 'error' : agent.status === 'running' ? 'sync' : 'hourglass_empty'}
+        {viewMode === 'history' && (<div className="flex-1 flex flex-col overflow-hidden">
+          <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">运行历史</h2></div>
+          <div className="flex-1 overflow-auto p-4">
+            {historyRuns.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                <span className="material-symbols-outlined text-5xl mb-4">history</span>
+                <p>暂无运行记录</p>
+              </div>
+            ) : (
+              <div className="bg-card border rounded-lg overflow-hidden">
+                <table className="w-full">
+                  <thead className="bg-muted border-b">
+                    <tr>
+                      <th className="text-left p-3 text-sm font-semibold">运行ID</th>
+                      <th className="text-left p-3 text-sm font-semibold">状态</th>
+                      <th className="text-left p-3 text-sm font-semibold">开始时间</th>
+                      <th className="text-left p-3 text-sm font-semibold">结束时间</th>
+                      <th className="text-left p-3 text-sm font-semibold">阶段</th>
+                      <th className="text-left p-3 text-sm font-semibold">进度</th>
+                      <th className="text-left p-3 text-sm font-semibold">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyRuns.map((run) => (
+                      <tr key={run.id} className="border-b hover:bg-accent transition-colors">
+                        <td className="p-3 text-sm font-mono">{run.id}</td>
+                        <td className="p-3">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full" style={{
+                              background: run.status === 'completed' ? '#6a8759' : run.status === 'failed' || run.status === 'crashed' ? '#c75450' : run.status === 'stopped' ? '#cc7832' : '#4a88c7',
+                            }}></span>
+                            <span className="text-sm">
+                              {run.status === 'crashed' ? '崩溃' : run.status === 'completed' ? '完成' : run.status === 'failed' ? '失败' : run.status === 'stopped' ? '已停止' : '运行中'}
                             </span>
-                            <span className="text-sm font-medium flex-1">{agent.name}</span>
-                            <Badge variant="outline" className={`text-[10px] ${agent.team === 'blue' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : agent.team === 'red' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'}`}>{agent.team}</Badge>
                           </div>
-                          <div className="flex gap-4 text-[11px] text-muted-foreground">
-                            <span>模型: {agent.model}</span>
-                            <span>完成: {agent.completedTasks} 任务</span>
-                            <span>迭代: {agent.iterationCount}</span>
-                            {agent.costUsd > 0 && <span>费用: ${agent.costUsd.toFixed(4)}</span>}
-                            {(agent.tokenUsage?.inputTokens > 0 || agent.tokenUsage?.outputTokens > 0) && (
-                              <span>Token: {agent.tokenUsage.inputTokens}↓ {agent.tokenUsage.outputTokens}↑</span>
-                            )}
-                          </div>
-                          {agent.summary && (
-                            <div className={`${styles.markdownContent} text-xs mt-1 leading-relaxed`}><Markdown>{agent.summary}</Markdown></div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </>)}
-                  {runDetail.completedSteps?.length > 0 && (<>
-                    <h3 className="text-sm font-semibold mt-4 mb-2">完成的步骤</h3>
-                    <div className="flex flex-wrap gap-1">
-                      {runDetail.completedSteps.map((step: string, i: number) => (
-                        <Badge key={i} variant="secondary" className="text-xs bg-green-500/20 text-green-400">{step}</Badge>
-                      ))}
-                    </div>
-                  </>)}
-                  {Object.keys(runDetail.iterationStates || {}).length > 0 && (<>
-                    <h3 className="text-sm font-semibold mt-4 mb-2">迭代状态</h3>
-                    {Object.entries(runDetail.iterationStates).map(([phase, iter]: [string, any]) => (
-                      <div key={phase} className="bg-muted rounded-md p-2.5 mb-1.5">
-                        <div className="text-sm font-medium">{phase}</div>
-                        <div className="text-[11px] text-muted-foreground mt-1">
-                          迭代: {iter.currentIteration}/{iter.maxIterations} · 连续无 Bug: {iter.consecutiveCleanRounds} 轮 · 状态: {iter.status}
-                        </div>
-                        {iter.bugsFoundPerRound?.length > 0 && (
-                          <div className="text-[11px] text-muted-foreground mt-0.5">
-                            每轮 Bug 数: [{iter.bugsFoundPerRound.join(', ')}]
-                          </div>
-                        )}
-                      </div>
+                        </td>
+                        <td className="p-3 text-sm text-muted-foreground">
+                          {new Date(run.startTime).toLocaleString('zh-CN', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                          })}
+                        </td>
+                        <td className="p-3 text-sm text-muted-foreground">
+                          {run.endTime ? new Date(run.endTime).toLocaleString('zh-CN', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                          }) : '-'}
+                        </td>
+                        <td className="p-3 text-sm">{run.phaseReached || '-'}</td>
+                        <td className="p-3 text-sm">{run.completedSteps}/{run.totalSteps}</td>
+                        <td className="p-3">
+                          <Button size="sm" variant="outline" onClick={() => { setSelectedRun(run); viewHistoryRun(run.id); }}>
+                            <span className="material-symbols-outlined text-sm mr-1">visibility</span>
+                            查看
+                          </Button>
+                        </td>
+                      </tr>
                     ))}
-                  </>)}
-                </div>
-              )}
-            </div>
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>)}
       </div>
@@ -1446,11 +1444,25 @@ export default function WorkbenchPage() {
                 <div className="text-muted-foreground text-sm text-center py-8">(等待输出...)</div>
               ) : (
                 <div className="space-y-3">
-                  {liveStream.map((chunk, i) => (
-                    <div key={i} className={`${styles.markdownContent} text-sm border-b border-border/50 pb-3 last:border-0`}>
-                      <Markdown>{chunk}</Markdown>
-                    </div>
-                  ))}
+                  {liveStream.map((chunk, i) => {
+                    const parsed = parseChunk(chunk);
+                    return (
+                      <div key={i} className="border-b border-border/50 pb-3 last:border-0">
+                        {parsed.timestamp && (
+                          <div className="text-[10px] text-muted-foreground mb-1 font-mono">
+                            {new Date(parsed.timestamp).toLocaleString('zh-CN', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit'
+                            })}
+                          </div>
+                        )}
+                        <div className={`${styles.markdownContent} text-sm`}>
+                          <Markdown>{parsed.content}</Markdown>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

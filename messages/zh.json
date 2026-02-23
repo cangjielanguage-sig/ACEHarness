@@ -1,0 +1,57 @@
+{
+  "dashboard": {
+    "title": "AceFlow 控制中心",
+    "subtitle": "AI 协同编排平台",
+    "stats": {
+      "totalRuns": "总运行次数",
+      "successRate": "成功率",
+      "avgDuration": "平均耗时",
+      "activeProcesses": "活跃进程"
+    },
+    "quickActions": {
+      "title": "快速操作",
+      "newWorkflow": "新建工作流",
+      "manageAgents": "管理 Agent",
+      "viewHistory": "查看历史",
+      "settings": "设置",
+      "workflows": "工作流管理"
+    },
+    "charts": {
+      "performanceTrends": "性能趋势",
+      "weeklyActivity": "每周活动"
+    },
+    "sections": {
+      "activeWorkflows": "活跃工作流",
+      "recentRuns": "最近运行",
+      "phases": "个阶段"
+    },
+    "status": {
+      "completed": "已完成",
+      "failed": "失败",
+      "running": "运行中",
+      "stopped": "已停止"
+    }
+  },
+  "agents": {
+    "title": "Agent 管理",
+    "new": "新建 Agent",
+    "search": "搜索 Agent...",
+    "team": "团队",
+    "category": "分类",
+    "tags": "标签",
+    "all": "全部",
+    "blue": "蓝队",
+    "red": "红队",
+    "judge": "裁判",
+    "edit": "编辑",
+    "delete": "删除",
+    "save": "保存",
+    "cancel": "取消"
+  },
+  "common": {
+    "back": "返回",
+    "close": "关闭",
+    "loading": "加载中...",
+    "noData": "暂无数据"
+  }
+}

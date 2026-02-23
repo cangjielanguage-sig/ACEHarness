@@ -6,8 +6,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = (await params).id;
-    const run = await getRun(id);
+    const run = await getRun(params.id);
     if (!run) {
       return NextResponse.json({ error: '运行记录不存在' }, { status: 404 });
     }
@@ -25,9 +24,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = (await params).id;
     const patch = await request.json();
-    await updateRun(id, patch);
+    await updateRun(params.id, patch);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json(

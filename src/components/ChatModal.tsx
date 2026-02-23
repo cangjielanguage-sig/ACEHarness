@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
 import Markdown from '@/components/Markdown';
+import { ModelSelect } from '@/components/ModelSelect';
 
 interface Message {
   role: 'user' | 'assistant' | 'error';
@@ -19,7 +20,7 @@ export default function ChatModal() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [model, setModel] = useState('');
+  const [model, setModel] = useState('claude-sonnet-4-6');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -80,23 +81,20 @@ export default function ChatModal() {
 
       {isOpen && (
         <div className="fixed bottom-6 right-6 w-96 h-[600px] bg-background border rounded-lg shadow-2xl z-50 flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b bg-muted">
+          <div className="flex items-center justify-between px-4 py-3 border-b bg-muted flex-shrink-0">
             <span className="font-semibold text-sm">Claude 在线聊天</span>
             <div className="flex items-center gap-2">
-              <select
-                className="h-7 rounded border border-input bg-background px-2 text-xs"
-                value={model}
-                onChange={e => setModel(e.target.value)}
-              >
-                <option value="">默认模型</option>
-                <option value="claude-sonnet-4-5-20250929">Sonnet 4.5</option>
-                <option value="claude-opus-4-6">Opus 4.6</option>
-                <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-              </select>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={clearChat}>
+              <div className="w-48">
+                <ModelSelect
+                  value={model}
+                  onChange={setModel}
+                  className="h-7 text-xs"
+                />
+              </div>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={clearChat} title="清空对话">
                 <span className="material-symbols-outlined text-sm">delete_sweep</span>
               </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={closeChat}>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={closeChat} title="关闭">
                 <span className="material-symbols-outlined text-sm">close</span>
               </Button>
             </div>
@@ -139,7 +137,7 @@ export default function ChatModal() {
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="flex items-end gap-2 p-3 border-t">
+          <div className="flex items-end gap-2 p-3 border-t flex-shrink-0">
             <textarea
               ref={inputRef}
               className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"

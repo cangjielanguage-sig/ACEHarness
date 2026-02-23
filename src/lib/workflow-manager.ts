@@ -16,6 +16,7 @@ import {
   type PersistedRunState, type PersistedProcessInfo, type PersistedStepLog,
 } from './run-state-persistence';
 import type { WorkflowConfig, WorkflowPhase, WorkflowStep, RoleConfig, IterationConfig } from './schemas';
+import { formatTimestamp } from './utils';
 
 export interface TokenUsage {
   inputTokens: number;
@@ -211,7 +212,7 @@ class WorkflowManager extends EventEmitter {
       const totalSteps = workflowConfig.workflow.phases.reduce(
         (sum, p) => sum + p.steps.length, 0
       );
-      const runId = `run-${Date.now()}`;
+      const runId = `run-${formatTimestamp()}`;
       this.currentRunId = runId;
       try {
         await createRun({
@@ -633,7 +634,7 @@ class WorkflowManager extends EventEmitter {
 
       // Check exit conditions (legacy: consecutive clean rounds etc.)
       // Only auto-exit if judge explicitly passed; conditional_pass requires human checkpoint
-      if (!judgeVerdict || judgeVerdict.verdict === 'pass') {
+      if (!judgeVerdict || judgeVerdict.verdict !== 'fail') {
         const shouldExit = this.checkExitCondition(iterConfig, iterState);
         if (shouldExit) {
           iterState.status = 'completed';
@@ -874,6 +875,112 @@ class WorkflowManager extends EventEmitter {
       throw new Error(`未找到角色配置: ${step.agent}`);
     }
 
+    // Check if review panel mode is enabled
+    const enableReviewPanel = (step as any).enableReviewPanel && roleConfig.reviewPanel?.enabled;
+
+    if (enableReviewPanel && roleConfig.reviewPanel?.subAgents) {
+      // Execute review panel mode: run multiple sub-agents in parallel
+      return await this.executeReviewPanel(step, workflowConfig, roleConfig);
+    }
+
+    // Normal single-agent execution
+    return await this.executeSingleAgent(step, workflowConfig, roleConfig);
+  }
+
+  private async executeReviewPanel(
+    step: WorkflowStep,
+    workflowConfig: WorkflowConfig,
+    roleConfig: RoleConfig
+  ): Promise<ClaudeJsonResult> {
+    const subAgents = roleConfig.reviewPanel!.subAgents;
+    const subAgentNames = Object.keys(subAgents);
+
+    console.log(`[专家模式] 启动 ${subAgentNames.length} 个专家子 Agent 进行多角度分析...`);
+
+    // Load previous step outputs for context injection
+    let previousOutputs: Record<string, string> = {};
+    if (this.currentRunId) {
+      try {
+        const allOutputs = await loadStepOutputs(this.currentRunId);
+        const completedSet = new Set(this.completedStepNames);
+        for (const [name, content] of Object.entries(allOutputs)) {
+          if (completedSet.has(name)) {
+            previousOutputs[name] = content;
+          }
+        }
+      } catch { /* non-critical */ }
+    }
+
+    // Build agents JSON for claude --agents flag
+    const agentsJson: Record<string, any> = {};
+    for (const [name, config] of Object.entries(subAgents)) {
+      agentsJson[name] = {
+        description: config.description,
+        prompt: config.prompt,
+        tools: config.tools,
+        model: config.model,
+      };
+    }
+
+    // Build main prompt that coordinates sub-agents
+    const mainPrompt = this.buildPrompt(step, workflowConfig, roleConfig, previousOutputs);
+    const coordinatorPrompt = `${mainPrompt}\n\n# 专家模式说明\n你现在处于专家模式。你有 ${subAgentNames.length} 个专家子 Agent 可以调用：\n\n${subAgentNames.map(name => `- @${name}: ${subAgents[name].description}`).join('\n')}\n\n请使用 @agent-name 语法调用这些专家，收集他们的分析结果，最后汇总形成综合结论。`;
+
+    const processId = `${step.agent}-${step.name}-${Date.now()}`;
+    const existingSessionId = this.agentSessionIds.get(step.agent);
+    const isIterationStep = step.name.includes('-迭代');
+    const systemPromptToUse = isIterationStep && roleConfig.iterationPrompt
+      ? roleConfig.iterationPrompt
+      : roleConfig.systemPrompt;
+
+    // Set up stream content flushing
+    let lastFlush = 0;
+    const streamHandler = (data: { id: string; step: string; total: string }) => {
+      if (data.id !== processId) return;
+      const now = Date.now();
+      if (this.currentRunId && now - lastFlush > 3000) {
+        lastFlush = now;
+        saveStreamContent(this.currentRunId, step.name, data.total).catch(() => {});
+      }
+    };
+    processManager.on('stream', streamHandler);
+
+    try {
+      const result = await processManager.executeClaudeCli(
+        processId,
+        step.agent,
+        step.name,
+        coordinatorPrompt,
+        systemPromptToUse,
+        roleConfig.model,
+        {
+          workingDirectory: workflowConfig.context.projectRoot,
+          allowedTools: roleConfig.allowedTools,
+          resumeSessionId: existingSessionId,
+          appendSystemPrompt: !!existingSessionId,
+          timeoutMs: workflowConfig.context.timeoutMinutes
+            ? workflowConfig.context.timeoutMinutes * 60 * 1000
+            : undefined,
+          runId: this.currentRunId || undefined,
+          agents: agentsJson, // Pass sub-agents configuration
+        }
+      );
+
+      const proc = processManager.getProcess(processId);
+      if (this.currentRunId && proc?.streamContent) {
+        saveStreamContent(this.currentRunId, step.name, proc.streamContent).catch(() => {});
+      }
+      return result;
+    } finally {
+      processManager.off('stream', streamHandler);
+    }
+  }
+
+  private async executeSingleAgent(
+    step: WorkflowStep,
+    workflowConfig: WorkflowConfig,
+    roleConfig: RoleConfig
+  ): Promise<ClaudeJsonResult> {
     // Load previous step outputs for context injection — only completed steps
     let previousOutputs: Record<string, string> = {};
     if (this.currentRunId) {
@@ -894,6 +1001,12 @@ class WorkflowManager extends EventEmitter {
     // Check for existing session to resume (iterative phases)
     const existingSessionId = this.agentSessionIds.get(step.agent);
 
+    // Determine which system prompt to use: iterationPrompt for iteration steps, systemPrompt otherwise
+    const isIterationStep = step.name.includes('-迭代');
+    const systemPromptToUse = isIterationStep && roleConfig.iterationPrompt
+      ? roleConfig.iterationPrompt
+      : roleConfig.systemPrompt;
+
     // Set up stream content flushing to disk (with chunk separators)
     let lastFlush = 0;
     const streamHandler = (data: { id: string; step: string; total: string }) => {
@@ -913,7 +1026,7 @@ class WorkflowManager extends EventEmitter {
         step.agent,
         step.name,
         prompt,
-        roleConfig.systemPrompt,
+        systemPromptToUse,
         roleConfig.model,
         {
           workingDirectory: workflowConfig.context.projectRoot,

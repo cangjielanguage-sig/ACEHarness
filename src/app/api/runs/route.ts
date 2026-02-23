@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listRuns, createRun } from '@/lib/run-store';
 import type { RunRecord } from '@/lib/run-store';
+import { formatTimestamp } from '@/lib/utils';
 
 export async function GET() {
   try {
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const record: RunRecord = {
-      id: `run-${Date.now()}`,
+      id: `run-${formatTimestamp()}`,
       configFile: body.configFile,
       startTime: new Date().toISOString(),
       endTime: null,

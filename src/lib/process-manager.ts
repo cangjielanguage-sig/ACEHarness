@@ -65,6 +65,7 @@ interface ExecuteOptions {
   appendSystemPrompt?: boolean;
   timeoutMs?: number;
   runId?: string;
+  agents?: Record<string, any>; // For review panel mode
 }
 
 class ProcessManager extends EventEmitter {
@@ -182,6 +183,9 @@ class ProcessManager extends EventEmitter {
     }
     if (options.resumeSessionId) {
       cliArgs.push('--resume', options.resumeSessionId);
+    }
+    if (options.agents) {
+      cliArgs.push('--agents', JSON.stringify(options.agents));
     }
     cliArgs.push('--dangerously-skip-permissions');
 

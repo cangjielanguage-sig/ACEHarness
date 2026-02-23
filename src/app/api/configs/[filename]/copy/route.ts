@@ -6,7 +6,7 @@ import { parse, stringify } from 'yaml';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { filename: string } }
+  { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
     const { newFilename } = await request.json();
@@ -14,7 +14,8 @@ export async function POST(
       return NextResponse.json({ error: '无效的文件名' }, { status: 400 });
     }
 
-    const sourcePath = resolve(process.cwd(), 'configs', params.filename);
+    const filename = (await params).filename;
+    const sourcePath = resolve(process.cwd(), 'configs', filename);
     const destPath = resolve(process.cwd(), 'configs', newFilename);
 
     if (existsSync(destPath)) {

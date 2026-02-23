@@ -6,8 +6,7 @@ export async function GET(
   { params }: { params: Promise<{ config: string }> }
 ) {
   try {
-    const config = (await params).config;
-    const runs = await listRunsByConfig(decodeURIComponent(config));
+    const runs = await listRunsByConfig(decodeURIComponent(params.config));
     return NextResponse.json({ runs });
   } catch (error: any) {
     return NextResponse.json(

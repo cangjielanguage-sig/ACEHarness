@@ -2,259 +2,496 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useChat } from '@/contexts/ChatContext';
-import { configApi, runsApi } from '@/lib/api';
-import NewConfigModal from '@/components/NewConfigModal';
-import CopyConfigModal from '@/components/CopyConfigModal';
-import DeleteConfirmModal from '@/components/DeleteConfirmModal';
+import { motion } from 'framer-motion';
+import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Activity, Zap, Cpu, Database, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, History, Play } from 'lucide-react';
+import { configApi, runsApi, agentApi } from '@/lib/api';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { LanguageToggle } from '@/components/language-toggle';
+import { useTranslations } from '@/hooks/useTranslations';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { useToast } from '@/components/ui/toast';
+import NewConfigModal from '@/components/NewConfigModal';
 
-interface ConfigSummary {
-  filename: string;
-  name: string;
-  description: string;
-  phaseCount: number;
-  stepCount: number;
-  agentCount: number;
+interface DashboardStats {
+  totalRuns: number;
+  successRate: number;
+  avgDuration: number;
+  activeWorkflows: number;
+  totalAgents: number;
+  runningProcesses: number;
 }
 
-interface RunRecord {
-  id: string;
-  configFile: string;
-  startTime: string;
-  endTime: string | null;
-  status: string;
-  phaseReached: string;
-  totalSteps: number;
-  completedSteps: number;
-}
-
-export default function HomePage() {
+export default function DashboardPage() {
   const router = useRouter();
-  const { openChat } = useChat();
-  const { toast } = useToast();
-  const [configs, setConfigs] = useState<ConfigSummary[]>([]);
-  const [configsLoading, setConfigsLoading] = useState(true);
-  const [selectedConfig, setSelectedConfig] = useState<string | null>(null);
-  const [runs, setRuns] = useState<RunRecord[]>([]);
+  const { t } = useTranslations();
+  const [stats, setStats] = useState<DashboardStats>({
+    totalRuns: 0,
+    successRate: 0,
+    avgDuration: 0,
+    activeWorkflows: 0,
+    totalAgents: 0,
+    runningProcesses: 0,
+  });
+  const [configs, setConfigs] = useState<any[]>([]);
+  const [recentRuns, setRecentRuns] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
-  const [copySource, setCopySource] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [renamingConfig, setRenamingConfig] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [navigating, setNavigating] = useState<string | null>(null);
+  const [performanceData, setPerformanceData] = useState<any[]>([]);
+  const [activityData, setActivityData] = useState<any[]>([]);
 
-  useEffect(() => { loadConfigs(); }, []);
   useEffect(() => {
-    if (selectedConfig) loadRuns(selectedConfig);
-  }, [selectedConfig]);
+    loadDashboardData();
+  }, []);
 
-  const loadConfigs = async () => {
-    setConfigsLoading(true);
+  const loadDashboardData = async () => {
     try {
-      const { configs: list } = await configApi.listConfigs();
-      setConfigs(list);
-    } catch (error) {
-      console.error('加载配置列表失败:', error);
-    } finally {
-      setConfigsLoading(false);
-    }
-  };
+      setLoading(true);
+      const configsData = await configApi.listConfigs();
+      setConfigs(configsData.configs || []);
 
-  const loadRuns = async (configFile: string) => {
-    try {
-      const { runs: list } = await runsApi.listByConfig(configFile);
-      setRuns(list);
-    } catch (error) {
-      console.error('加载运行记录失败:', error);
-      setRuns([]);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    try {
-      await configApi.deleteConfig(deleteTarget);
-      setDeleteTarget(null);
-      if (selectedConfig === deleteTarget) {
-        setSelectedConfig(null);
-        setRuns([]);
+      // Load agent count
+      let agentCount = 0;
+      try {
+        const agentsData = await agentApi.listAgents();
+        agentCount = agentsData.agents?.length || 0;
+      } catch (e) {
+        console.error('Failed to load agents:', e);
       }
-      loadConfigs();
-    } catch (error: any) {
-      toast('error', '删除失败: ' + error.message);
+
+      // Load runs from all configs
+      const allRuns: any[] = [];
+      for (const config of (configsData.configs || [])) {
+        try {
+          const runsData = await runsApi.listByConfig(config.filename);
+          allRuns.push(...(runsData.runs || []));
+        } catch (e) {
+          // Ignore errors for individual configs
+        }
+      }
+
+      // Sort runs by start time
+      allRuns.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+      setRecentRuns(allRuns.slice(-5).reverse());
+
+      // Calculate stats
+      const completed = allRuns.filter((r: any) => r.status === 'completed').length;
+      const failed = allRuns.filter((r: any) => r.status === 'failed').length;
+      const successRate = allRuns.length > 0 ? (completed / allRuns.length) * 100 : 0;
+      const avgDuration = allRuns.length > 0
+        ? allRuns.reduce((acc: number, r: any) => {
+            if (r.endTime) {
+              return acc + (new Date(r.endTime).getTime() - new Date(r.startTime).getTime());
+            }
+            return acc;
+          }, 0) / allRuns.length / 1000 / 60
+        : 0;
+
+      setStats({
+        totalRuns: allRuns.length,
+        successRate: Math.round(successRate),
+        avgDuration: Math.round(avgDuration),
+        activeWorkflows: configsData.configs?.length || 0,
+        totalAgents: agentCount,
+        runningProcesses: allRuns.filter((r: any) => r.status === 'running').length,
+      });
+
+      // Generate performance trend data (last 24 hours, grouped by 4-hour intervals)
+      const now = Date.now();
+      const intervals = 6; // 24 hours / 4 hours
+      const perfData = [];
+
+      for (let i = 0; i < intervals; i++) {
+        const startTime = now - (intervals - i) * 4 * 60 * 60 * 1000;
+        const endTime = now - (intervals - i - 1) * 4 * 60 * 60 * 1000;
+        const hour = new Date(startTime).getHours();
+
+        const runsInInterval = allRuns.filter((r: any) => {
+          const runTime = new Date(r.startTime).getTime();
+          return runTime >= startTime && runTime < endTime;
+        });
+
+        const successCount = runsInInterval.filter((r: any) => r.status === 'completed').length;
+        const failCount = runsInInterval.filter((r: any) => r.status === 'failed').length;
+
+        perfData.push({
+          time: `${hour.toString().padStart(2, '0')}:00`,
+          success: successCount,
+          failed: failCount,
+        });
+      }
+
+      setPerformanceData(perfData);
+
+      // Generate weekly activity data (last 7 days)
+      const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+      const actData = [];
+
+      for (let i = 6; i >= 0; i--) {
+        const dayStart = new Date();
+        dayStart.setDate(dayStart.getDate() - i);
+        dayStart.setHours(0, 0, 0, 0);
+
+        const dayEnd = new Date(dayStart);
+        dayEnd.setHours(23, 59, 59, 999);
+
+        const runsInDay = allRuns.filter((r: any) => {
+          const runTime = new Date(r.startTime).getTime();
+          return runTime >= dayStart.getTime() && runTime <= dayEnd.getTime();
+        });
+
+        actData.push({
+          name: weekDays[dayStart.getDay()],
+          runs: runsInDay.length,
+        });
+      }
+
+      setActivityData(actData);
+
+    } catch (error) {
+      console.error('Failed to load dashboard data:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleRename = async (filename: string, newName: string) => {
-    if (!newName.trim()) { setRenamingConfig(null); return; }
-    try {
-      const { config } = await configApi.getConfig(filename);
-      config.workflow.name = newName.trim();
-      await configApi.saveConfig(filename, config);
-      loadConfigs();
-    } catch (error: any) {
-      toast('error', '重命名失败: ' + error.message);
-    }
-    setRenamingConfig(null);
-  };
+  const StatCard = ({ icon: Icon, label, value, trend, color }: any) => (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ scale: 1.02, boxShadow: '0 0 30px rgba(59, 130, 246, 0.3)' }}
+      className="relative bg-gradient-to-br from-card/80 to-card/40 backdrop-blur-xl border border-border/50 rounded-xl p-6 overflow-hidden group"
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+      <div className="relative z-10">
+        <div className="flex items-center justify-between mb-4">
+          <div className={`p-3 rounded-lg bg-gradient-to-br ${color}`}>
+            <Icon className="w-6 h-6 text-white" />
+          </div>
+          {trend && (
+            <Badge variant="secondary" className="text-xs">
+              <TrendingUp className="w-3 h-3 mr-1" />
+              {trend}
+            </Badge>
+          )}
+        </div>
+        <div className="text-3xl font-bold mb-1">{value}</div>
+        <div className="text-sm text-muted-foreground">{label}</div>
+      </div>
+      <div className="absolute -right-8 -bottom-8 w-32 h-32 bg-primary/5 rounded-full blur-2xl" />
+    </motion.div>
+  );
 
-  const formatDuration = (start: string, end: string | null) => {
-    if (!end) return '进行中';
-    const ms = new Date(end).getTime() - new Date(start).getTime();
-    const s = Math.floor(ms / 1000);
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    return `${m}m ${s % 60}s`;
-  };
-
-  const statusVariant = (status: string) => {
-    if (status === 'completed') return 'default' as const;
-    if (status === 'failed') return 'destructive' as const;
-    return 'secondary' as const;
-  };
-  const statusLabel: Record<string, string> = {
-    running: '运行中', completed: '已完成', failed: '失败', stopped: '已停止',
-  };
-  /* PLACEHOLDER_RETURN */
+  const QuickAction = ({ icon: Icon, label, onClick, color }: any) => (
+    <motion.button
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.95 }}
+      onClick={onClick}
+      className={`relative bg-gradient-to-br ${color} p-6 rounded-xl border border-white/10 overflow-hidden group`}
+    >
+      <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+      <div className="relative z-10 flex flex-col items-center gap-3">
+        <Icon className="w-8 h-8 text-white" />
+        <span className="text-sm font-medium text-white">{label}</span>
+      </div>
+      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+    </motion.button>
+  );
 
   return (
-    <div className="min-h-screen bg-background/80 text-foreground">
-      <div className="flex items-center justify-between px-8 py-6 border-b">
-        <div className="flex items-center gap-3">
-          <span className="material-symbols-outlined text-3xl text-primary">bolt</span>
-          <div>
-            <h1 className="text-2xl font-bold">AceFlow</h1>
-            <p className="text-sm text-muted-foreground">AI 协同工作调度系统</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <ThemeToggle />
-          <Button variant="outline" onClick={openChat}>
-            <span className="material-symbols-outlined text-sm mr-1">chat</span>
-            Claude 聊天
-          </Button>
-          <Button onClick={() => setShowNewModal(true)}>
-            <span className="material-symbols-outlined text-sm mr-1">add</span>
-            新建配置
-          </Button>
-        </div>
+    <div className="min-h-screen bg-background relative overflow-hidden">
+      {/* Animated background */}
+      <div className="fixed inset-0 z-0">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-background to-background" />
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse delay-1000" />
+        <div className="absolute top-1/2 left-1/2 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse delay-2000" />
       </div>
 
-      <div className="max-w-7xl mx-auto px-8 py-8">
-        <h2 className="text-lg font-semibold mb-4">工作流配置</h2>
-        {configsLoading ? (
-          <div className="flex items-center justify-center py-16 gap-3 text-muted-foreground">
-            <span className="material-symbols-outlined text-2xl animate-spin">progress_activity</span>
-            <span className="text-sm">加载配置列表...</span>
-          </div>
-        ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {configs.map((cfg) => (
-            <div
-              key={cfg.filename}
-              className={`rounded-lg border p-4 cursor-pointer transition-colors hover:bg-accent/50 ${
-                selectedConfig === cfg.filename ? 'border-primary bg-accent/30' : ''
-              }`}
-              onClick={() => setSelectedConfig(cfg.filename)}
-            >
-              <div className="text-xs text-muted-foreground font-mono mb-1">{cfg.filename}</div>
-              {renamingConfig === cfg.filename ? (
-                <Input autoFocus className="h-7 text-sm font-medium mb-1" value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => handleRename(cfg.filename, renameValue)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleRename(cfg.filename, renameValue); if (e.key === 'Escape') setRenamingConfig(null); }}
-                  onClick={(e) => e.stopPropagation()} />
-              ) : (
-                <div className="font-medium mb-1 cursor-text hover:underline decoration-dashed underline-offset-4"
-                  onDoubleClick={(e) => { e.stopPropagation(); setRenamingConfig(cfg.filename); setRenameValue(cfg.name); }}
-                  title="双击编辑名称">{cfg.name}</div>
-              )}
-              {cfg.description && <p className="text-sm text-muted-foreground mb-3">{cfg.description}</p>}
-              <div className="flex gap-4 text-sm text-muted-foreground mb-3">
-                <span><span className="font-semibold text-foreground">{cfg.phaseCount}</span> 阶段</span>
-                <span><span className="font-semibold text-foreground">{cfg.stepCount}</span> 步骤</span>
-                <span><span className="font-semibold text-foreground">{cfg.agentCount}</span> Agent</span>
+      {/* Grid overlay */}
+      <div className="fixed inset-0 z-0 opacity-20">
+        <div className="absolute inset-0" style={{
+          backgroundImage: 'linear-gradient(hsl(var(--primary) / 0.1) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--primary) / 0.1) 1px, transparent 1px)',
+          backgroundSize: '50px 50px',
+        }} />
+      </div>
+
+      <div className="relative z-10">
+        {/* Header */}
+        <motion.header
+          initial={{ y: -100 }}
+          animate={{ y: 0 }}
+          className="border-b border-border/50 bg-card/30 backdrop-blur-xl sticky top-0 z-50"
+        >
+          <div className="container mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+                  className="p-2 bg-gradient-to-br from-primary to-blue-600 rounded-lg"
+                >
+                  <Zap className="w-6 h-6 text-white" />
+                </motion.div>
+                <div>
+                  <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-blue-600 bg-clip-text text-transparent">
+                    {t('dashboard.title')}
+                  </h1>
+                  <p className="text-xs text-muted-foreground">{t('dashboard.subtitle')}</p>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button size="sm" disabled={navigating === cfg.filename} onClick={(e) => { e.stopPropagation(); setNavigating(cfg.filename); router.push(`/workbench/${encodeURIComponent(cfg.filename)}?mode=run`); }}>
-                  <span className={`material-symbols-outlined text-sm mr-1 ${navigating === cfg.filename ? 'animate-spin' : ''}`}>{navigating === cfg.filename ? 'progress_activity' : 'login'}</span>
-                  {navigating === cfg.filename ? '加载中...' : '进入'}
+              <div className="flex items-center gap-3">
+                <LanguageToggle />
+                <ThemeToggle />
+                <Button variant="outline" size="sm" onClick={() => router.push('/agents')}>
+                  <Bot className="w-4 h-4 mr-2" />
+                  {t('agents.title')}
                 </Button>
-                <Button size="sm" variant="outline" disabled={!!navigating} onClick={(e) => { e.stopPropagation(); setNavigating(cfg.filename + ':design'); router.push(`/workbench/${encodeURIComponent(cfg.filename)}?mode=design`); }}>
-                  <span className={`material-symbols-outlined text-sm mr-1 ${navigating === cfg.filename + ':design' ? 'animate-spin' : ''}`}>{navigating === cfg.filename + ':design' ? 'progress_activity' : 'edit'}</span>
-                  {navigating === cfg.filename + ':design' ? '加载中...' : '设计'}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setCopySource(cfg.filename); }}>
-                  <span className="material-symbols-outlined text-sm">content_copy</span>
-                </Button>
-                <Button size="sm" variant="ghost" className="text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget(cfg.filename); }}>
-                  <span className="material-symbols-outlined text-sm">delete</span>
+                <Button size="sm" onClick={() => setShowNewModal(true)}>
+                  <Play className="w-4 h-4 mr-2" />
+                  {t('dashboard.quickActions.newWorkflow')}
                 </Button>
               </div>
             </div>
-          ))}
-          <div
-            className="rounded-lg border border-dashed p-4 flex flex-col items-center justify-center cursor-pointer hover:bg-accent/50 transition-colors min-h-[160px]"
-            onClick={() => setShowNewModal(true)}
+          </div>
+        </motion.header>
+
+        <div className="container mx-auto px-6 py-8 space-y-8">
+          {/* Stats Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <StatCard
+              icon={Activity}
+              label={t('dashboard.stats.totalRuns')}
+              value={stats.totalRuns}
+              trend="+12%"
+              color="from-blue-500 to-blue-600"
+            />
+            <StatCard
+              icon={CheckCircle2}
+              label={t('dashboard.stats.successRate')}
+              value={`${stats.successRate}%`}
+              trend="+5%"
+              color="from-green-500 to-green-600"
+            />
+            <StatCard
+              icon={Clock}
+              label={t('dashboard.stats.avgDuration')}
+              value={`${stats.avgDuration}m`}
+              trend="-8%"
+              color="from-purple-500 to-purple-600"
+            />
+            <StatCard
+              icon={Cpu}
+              label={t('dashboard.stats.activeProcesses')}
+              value={stats.runningProcesses}
+              color="from-orange-500 to-orange-600"
+            />
+          </div>
+
+          {/* Quick Actions */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
           >
-            <span className="material-symbols-outlined text-3xl text-muted-foreground mb-2">add_circle</span>
-            <span className="text-sm text-muted-foreground">新建配置</span>
+            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+              <Zap className="w-5 h-5 text-primary" />
+              {t('dashboard.quickActions.title')}
+            </h2>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <QuickAction
+                icon={Play}
+                label={t('dashboard.quickActions.newWorkflow')}
+                onClick={() => setShowNewModal(true)}
+                color="from-blue-600 to-blue-700"
+              />
+              <QuickAction
+                icon={Workflow}
+                label={t('dashboard.quickActions.workflows')}
+                onClick={() => router.push('/workflows')}
+                color="from-cyan-600 to-cyan-700"
+              />
+              <QuickAction
+                icon={Bot}
+                label={t('dashboard.quickActions.manageAgents')}
+                onClick={() => router.push('/agents')}
+                color="from-purple-600 to-purple-700"
+              />
+              <QuickAction
+                icon={History}
+                label={t('dashboard.quickActions.viewHistory')}
+                onClick={() => router.push('/workbench/workflow.yaml?mode=history')}
+                color="from-green-600 to-green-700"
+              />
+              <QuickAction
+                icon={Settings}
+                label={t('dashboard.quickActions.settings')}
+                onClick={() => {}}
+                color="from-orange-600 to-orange-700"
+              />
+            </div>
+          </motion.div>
+
+          {/* Charts Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Performance Chart */}
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.3 }}
+              className="bg-card/50 backdrop-blur-xl border border-border/50 rounded-xl p-6"
+            >
+              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-primary" />
+                {t('dashboard.charts.performanceTrends')}
+              </h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <AreaChart data={performanceData}>
+                  <defs>
+                    <linearGradient id="colorSuccess" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorFailed" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+                  <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'hsl(var(--card))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                    }}
+                  />
+                  <Area type="monotone" dataKey="success" stroke="#10b981" fillOpacity={1} fill="url(#colorSuccess)" />
+                  <Area type="monotone" dataKey="failed" stroke="#ef4444" fillOpacity={1} fill="url(#colorFailed)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </motion.div>
+
+            {/* Activity Chart */}
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.4 }}
+              className="bg-card/50 backdrop-blur-xl border border-border/50 rounded-xl p-6"
+            >
+              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                <Activity className="w-5 h-5 text-primary" />
+                {t('dashboard.charts.weeklyActivity')}
+              </h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={activityData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+                  <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'hsl(var(--card))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                    }}
+                  />
+                  <Bar dataKey="runs" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </motion.div>
+          </div>
+
+          {/* Workflows and Recent Runs */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Workflows */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              className="bg-card/50 backdrop-blur-xl border border-border/50 rounded-xl p-6"
+            >
+              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                <Workflow className="w-5 h-5 text-primary" />
+                {t('dashboard.sections.activeWorkflows')}
+              </h3>
+              <div className="space-y-3">
+                {configs.slice(0, 5).map((config, i) => (
+                  <motion.div
+                    key={config.filename}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.6 + i * 0.1 }}
+                    whileHover={{ x: 5 }}
+                    className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border/30 cursor-pointer hover:border-primary/50 transition-colors"
+                    onClick={() => router.push(`/workbench/${encodeURIComponent(config.filename)}?mode=run`)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                      <span className="font-medium">{config.name}</span>
+                    </div>
+                    <Badge variant="secondary">{config.phases} {t('dashboard.sections.phases')}</Badge>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+
+            {/* Recent Runs */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6 }}
+              className="bg-card/50 backdrop-blur-xl border border-border/50 rounded-xl p-6"
+            >
+              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                <History className="w-5 h-5 text-primary" />
+                {t('dashboard.sections.recentRuns')}
+              </h3>
+              <div className="space-y-3">
+                {recentRuns.map((run, i) => (
+                  <motion.div
+                    key={run.id}
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.7 + i * 0.1 }}
+                    className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border/30"
+                  >
+                    <div className="flex items-center gap-3">
+                      {run.status === 'completed' ? (
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                      ) : run.status === 'failed' ? (
+                        <XCircle className="w-4 h-4 text-red-500" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-yellow-500" />
+                      )}
+                      <div>
+                        <div className="text-sm font-medium">{run.id}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(run.startTime).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                    <Badge variant={run.status === 'completed' ? 'default' : 'secondary'}>
+                      {t(`dashboard.status.${run.status}`)}
+                    </Badge>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
           </div>
         </div>
-        )}
-        {selectedConfig && (
-          <div className="mt-8">
-            <h3 className="text-base font-semibold mb-3">运行历史 — {selectedConfig}</h3>
-            {runs.length > 0 ? (
-              <div className="rounded-lg border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-muted text-muted-foreground text-left">
-                      <th className="px-4 py-2 font-medium">运行 ID</th>
-                      <th className="px-4 py-2 font-medium">状态</th>
-                      <th className="px-4 py-2 font-medium">开始时间</th>
-                      <th className="px-4 py-2 font-medium">耗时</th>
-                      <th className="px-4 py-2 font-medium">到达阶段</th>
-                      <th className="px-4 py-2 font-medium">进度</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {runs.map((run) => (
-                      <tr key={run.id} className="border-t hover:bg-accent/30 transition-colors">
-                        <td className="px-4 py-2 font-mono text-xs">{run.id}</td>
-                        <td className="px-4 py-2">
-                          <Badge variant={statusVariant(run.status)}>{statusLabel[run.status] || run.status}</Badge>
-                        </td>
-                        <td className="px-4 py-2">{new Date(run.startTime).toLocaleString('zh-CN')}</td>
-                        <td className="px-4 py-2">{formatDuration(run.startTime, run.endTime)}</td>
-                        <td className="px-4 py-2">{run.phaseReached || '-'}</td>
-                        <td className="px-4 py-2">{run.completedSteps}/{run.totalSteps}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="text-center text-muted-foreground py-8">暂无运行记录</div>
-            )}
-          </div>
-        )}
       </div>
-      <NewConfigModal isOpen={showNewModal} onClose={() => setShowNewModal(false)}
-        onSuccess={(filename) => { loadConfigs(); setShowNewModal(false); }} />
-      {copySource && (
-        <CopyConfigModal isOpen={true} sourceFilename={copySource}
-          onClose={() => setCopySource(null)}
-          onSuccess={() => { setCopySource(null); loadConfigs(); }} />
-      )}
-      {deleteTarget && (
-        <DeleteConfirmModal isOpen={true} filename={deleteTarget}
-          onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} />
+
+      {showNewModal && (
+        <NewConfigModal
+          isOpen={showNewModal}
+          onClose={() => setShowNewModal(false)}
+          onSuccess={(filename) => {
+            setShowNewModal(false);
+            router.push(`/workbench/${encodeURIComponent(filename)}?mode=design`);
+          }}
+        />
       )}
     </div>
   );

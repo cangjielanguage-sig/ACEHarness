@@ -125,11 +125,12 @@ interface FlowDiagramProps {
   failedSteps?: string[];
   iterationStates?: Record<string, IterationStateInfo>;
   onSelectStep: (step: Step) => void;
+  onSelectPhase?: (phase: Phase) => void;
 }
 
 export default function FlowDiagram({
   workflow, currentPhase, currentStep, agents, completedSteps,
-  failedSteps = [], iterationStates = {}, onSelectStep,
+  failedSteps = [], iterationStates = {}, onSelectStep, onSelectPhase,
 }: FlowDiagramProps) {
   const getAgentTeam = (agentName: string) => {
     return agents?.find((a) => a.name === agentName)?.team || 'blue';
@@ -245,6 +246,7 @@ export default function FlowDiagram({
               )}
             </div>
           ),
+          phase,
         },
         style: {
           background: isActive ? 'hsl(var(--primary) / 0.2)' : isDone ? 'hsl(var(--flow-success) / 0.2)' : 'hsl(var(--flow-node-bg))',
@@ -254,6 +256,7 @@ export default function FlowDiagram({
           padding: '10px 14px',
           width: stepNodeW,
           minHeight: 50,
+          cursor: 'pointer',
         },
         zIndex: 2,
       });
@@ -634,9 +637,13 @@ export default function FlowDiagram({
 
   const onNodeClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      if (node.data.step) onSelectStep(node.data.step);
+      if (node.data.step) {
+        onSelectStep(node.data.step);
+      } else if (node.data.phase && onSelectPhase) {
+        onSelectPhase(node.data.phase);
+      }
     },
-    [onSelectStep]
+    [onSelectStep, onSelectPhase]
   );
 
   return (

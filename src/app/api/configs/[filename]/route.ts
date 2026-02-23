@@ -6,10 +6,10 @@ import { workflowConfigSchema } from '@/lib/schemas';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { filename: string } }
+  { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
-    const filename = params.filename;
+    const filename = (await params).filename;
     const filepath = resolve(process.cwd(), 'configs', filename);
     const content = await readFile(filepath, 'utf-8');
     const config = parse(content);
@@ -39,10 +39,10 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { filename: string } }
+  { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
-    const filename = params.filename;
+    const filename = (await params).filename;
     const body = await request.json();
     const { config } = body;
 
@@ -76,10 +76,10 @@ export async function POST(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { filename: string } }
+  { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
-    const filename = params.filename;
+    const filename = (await params).filename;
     if (filename.includes('..') || filename.includes('/')) {
       return NextResponse.json({ error: '无效文件名' }, { status: 400 });
     }

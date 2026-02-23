@@ -1,0 +1,323 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { agentApi } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { ThemeToggle } from '@/components/theme-toggle';
+import AgentEditModal from '@/components/AgentEditModal';
+import { ClipLoader } from 'react-spinners';
+
+interface AgentConfig {
+  name: string;
+  team: 'blue' | 'red' | 'judge';
+  category?: string;
+  tags?: string[];
+  model: string;
+  temperature?: number;
+  systemPrompt?: string;
+  iterationPrompt?: string;
+  capabilities?: string[];
+  constraints?: string[];
+}
+
+const TEAM_COLORS = {
+  blue: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  red: 'bg-red-500/20 text-red-400 border-red-500/30',
+  judge: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+};
+
+const CATEGORIES = ['测试', '编码', '设计', '压力测试', '审查', '文档', '其他'];
+
+export default function AgentsPage() {
+  const router = useRouter();
+  const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTeam, setSelectedTeam] = useState<string>('all');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
+  const [isNewAgent, setIsNewAgent] = useState(false);
+
+  useEffect(() => {
+    loadAgents();
+  }, []);
+
+  const loadAgents = async () => {
+    try {
+      setLoading(true);
+      const data = await agentApi.listAgents();
+      setAgents(data.agents || []);
+    } catch (error) {
+      console.error('Failed to load agents:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateAgent = () => {
+    setEditingAgent({
+      name: '',
+      team: 'blue',
+      model: 'gpt-4',
+      tags: [],
+    });
+    setIsNewAgent(true);
+  };
+
+  const handleEditAgent = (agent: AgentConfig) => {
+    setEditingAgent(agent);
+    setIsNewAgent(false);
+  };
+
+  const handleSaveAgent = async (agent: AgentConfig) => {
+    try {
+      await agentApi.saveAgent(agent.name, agent);
+      await loadAgents();
+      setEditingAgent(null);
+    } catch (error) {
+      console.error('Failed to save agent:', error);
+    }
+  };
+
+  const handleDeleteAgent = async (name: string) => {
+    if (!confirm(`确定要删除 Agent "${name}" 吗？`)) return;
+    try {
+      await agentApi.deleteAgent(name);
+      await loadAgents();
+    } catch (error) {
+      console.error('Failed to delete agent:', error);
+    }
+  };
+
+  // Get all unique tags
+  const allTags = Array.from(new Set(agents.flatMap(a => a.tags || [])));
+
+  // Filter agents
+  const filteredAgents = agents.filter(agent => {
+    if (searchQuery && !agent.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+      return false;
+    }
+    if (selectedTeam !== 'all' && agent.team !== selectedTeam) {
+      return false;
+    }
+    if (selectedCategory !== 'all' && agent.category !== selectedCategory) {
+      return false;
+    }
+    if (selectedTags.length > 0 && !selectedTags.some(tag => agent.tags?.includes(tag))) {
+      return false;
+    }
+    return true;
+  });
+
+  const toggleTag = (tag: string) => {
+    setSelectedTags(prev =>
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Header */}
+      <div className="h-14 border-b bg-card flex items-center justify-between px-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" onClick={() => router.push('/')}>
+            <span className="material-symbols-outlined text-lg">arrow_back</span>
+          </Button>
+          <h1 className="text-lg font-semibold">Agent 管理</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={handleCreateAgent}>
+            <span className="material-symbols-outlined text-sm mr-1">add</span>
+            新建 Agent
+          </Button>
+          <ThemeToggle />
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="border-b bg-card p-4">
+        <div className="flex flex-wrap gap-3 items-center">
+          <Input
+            placeholder="搜索 Agent..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-64"
+          />
+
+          <div className="flex gap-2 items-center">
+            <span className="text-sm text-muted-foreground">团队:</span>
+            <Button
+              size="sm"
+              variant={selectedTeam === 'all' ? 'default' : 'outline'}
+              onClick={() => setSelectedTeam('all')}
+            >
+              全部
+            </Button>
+            <Button
+              size="sm"
+              variant={selectedTeam === 'blue' ? 'default' : 'outline'}
+              onClick={() => setSelectedTeam('blue')}
+              className={selectedTeam === 'blue' ? TEAM_COLORS.blue : ''}
+            >
+              蓝队
+            </Button>
+            <Button
+              size="sm"
+              variant={selectedTeam === 'red' ? 'default' : 'outline'}
+              onClick={() => setSelectedTeam('red')}
+              className={selectedTeam === 'red' ? TEAM_COLORS.red : ''}
+            >
+              红队
+            </Button>
+            <Button
+              size="sm"
+              variant={selectedTeam === 'judge' ? 'default' : 'outline'}
+              onClick={() => setSelectedTeam('judge')}
+              className={selectedTeam === 'judge' ? TEAM_COLORS.judge : ''}
+            >
+              裁判
+            </Button>
+          </div>
+
+          <div className="flex gap-2 items-center">
+            <span className="text-sm text-muted-foreground">分类:</span>
+            <Button
+              size="sm"
+              variant={selectedCategory === 'all' ? 'default' : 'outline'}
+              onClick={() => setSelectedCategory('all')}
+            >
+              全部
+            </Button>
+            {CATEGORIES.map(cat => (
+              <Button
+                key={cat}
+                size="sm"
+                variant={selectedCategory === cat ? 'default' : 'outline'}
+                onClick={() => setSelectedCategory(cat)}
+              >
+                {cat}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        {allTags.length > 0 && (
+          <div className="flex gap-2 items-center mt-3">
+            <span className="text-sm text-muted-foreground">标签:</span>
+            <div className="flex flex-wrap gap-1">
+              {allTags.map(tag => (
+                <Badge
+                  key={tag}
+                  variant={selectedTags.includes(tag) ? 'default' : 'outline'}
+                  className="cursor-pointer"
+                  onClick={() => toggleTag(tag)}
+                >
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-auto p-6">
+        {loading ? (
+          <div className="flex items-center justify-center h-64">
+            <ClipLoader color="hsl(var(--primary))" size={40} />
+          </div>
+        ) : filteredAgents.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+            <span className="material-symbols-outlined text-5xl mb-4">smart_toy</span>
+            <p>没有找到匹配的 Agent</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {filteredAgents.map(agent => (
+              <div
+                key={agent.name}
+                className="bg-card border rounded-lg p-4 hover:shadow-lg transition-shadow"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-base mb-1">{agent.name}</h3>
+                    <Badge className={TEAM_COLORS[agent.team]}>
+                      {agent.team === 'blue' ? '蓝队' : agent.team === 'red' ? '红队' : '裁判'}
+                    </Badge>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleEditAgent(agent)}
+                    >
+                      <span className="material-symbols-outlined text-sm">edit</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleDeleteAgent(agent.name)}
+                    >
+                      <span className="material-symbols-outlined text-sm">delete</span>
+                    </Button>
+                  </div>
+                </div>
+
+                {agent.category && (
+                  <div className="mb-2">
+                    <Badge variant="secondary">{agent.category}</Badge>
+                  </div>
+                )}
+
+                <div className="text-sm text-muted-foreground mb-2">
+                  <div>模型: {agent.model}</div>
+                  {agent.temperature !== undefined && (
+                    <div>Temperature: {agent.temperature}</div>
+                  )}
+                </div>
+
+                {agent.tags && agent.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {agent.tags.map(tag => (
+                      <Badge key={tag} variant="outline" className="text-xs">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+
+                {agent.capabilities && agent.capabilities.length > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    能力: {agent.capabilities.join(', ')}
+                  </div>
+                )}
+
+                {agent.iterationPrompt && (
+                  <div className="mt-2 pt-2 border-t">
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <span className="material-symbols-outlined text-xs">loop</span>
+                      已配置迭代提示词
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {editingAgent && (
+        <AgentEditModal
+          agent={editingAgent}
+          isNew={isNewAgent}
+          onSave={handleSaveAgent}
+          onClose={() => setEditingAgent(null)}
+        />
+      )}
+    </div>
+  );
+}

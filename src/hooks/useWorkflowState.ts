@@ -46,7 +46,7 @@ export interface WorkflowState {
   logs: Log[];
   completedSteps: string[];
   failedSteps: string[];
-  stepResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }>;
+  stepResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number; startTime?: string; endTime?: string }>;
   showCheckpoint: boolean;
   checkpointMessage: string;
   checkpointIsIterative: boolean;

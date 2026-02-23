@@ -64,11 +64,14 @@ export default function NewConfigModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <DialogHeader>
+      <DialogContent className="max-w-lg flex flex-col p-0">
+        <div className="flex items-center justify-between p-6 pb-4 flex-shrink-0">
           <DialogTitle>新建工作流配置</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <Button type="button" variant="ghost" size="icon" onClick={onClose}>
+            <span className="material-symbols-outlined">close</span>
+          </Button>
+        </div>
+        <form id="new-config-form" onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-auto px-6 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="filename">
               文件名 <span className="text-destructive">*</span>
@@ -111,16 +114,16 @@ export default function NewConfigModal({
               {...register('description')}
             />
           </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              取消
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? '创建中...' : '创建'}
-            </Button>
-          </DialogFooter>
         </form>
+
+        <div className="flex gap-2 justify-end p-6 pt-4 border-t flex-shrink-0">
+          <Button type="button" variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button type="submit" form="new-config-form" disabled={isSubmitting}>
+            {isSubmitting ? '创建中...' : '创建'}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

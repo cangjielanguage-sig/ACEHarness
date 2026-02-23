@@ -2,10 +2,6 @@
 const nextConfig = {
   reactStrictMode: true,
 
-  experimental: {
-    instrumentationHook: true,
-  },
-
   // 开发服务器配置
   devIndicators: {
     buildActivity: true,

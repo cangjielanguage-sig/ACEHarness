@@ -18,6 +18,7 @@ export const workflowStepSchema = z.object({
   role: z.enum(['attacker', 'defender', 'judge']).optional(),
   constraints: z.array(z.string()).optional(),
   parallelGroup: z.string().optional(),
+  enableReviewPanel: z.boolean().optional(), // 是否启用会审模式
 });
 
 // 检查点 Schema
@@ -44,8 +45,21 @@ export const roleConfigSchema = z.object({
   temperature: z.number().optional(),
   capabilities: z.array(z.string()).min(1, '至少需要一个能力'),
   systemPrompt: z.string().min(1, '系统提示不能为空'),
+  iterationPrompt: z.string().optional(),
   constraints: z.array(z.string()).optional(),
   allowedTools: z.array(z.string()).optional(),
+  category: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  reviewPanel: z.object({
+    enabled: z.boolean(),
+    description: z.string().optional(),
+    subAgents: z.record(z.object({
+      description: z.string(),
+      prompt: z.string(),
+      tools: z.array(z.string()),
+      model: z.string(),
+    })),
+  }).optional(),
 });
 
 // 上下文配置 Schema
