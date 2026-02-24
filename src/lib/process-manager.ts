@@ -338,10 +338,11 @@ class ProcessManager extends EventEmitter {
         console.log(`[ProcessManager] ${id} 退出 code=${code}, 耗时 ${fmtMs(elapsed)}`);
 
         if (proc.status === 'timeout' || proc.status === 'killed') {
-          // Already handled
+          // Already handled — reject so the caller can proceed
           this.running--;
           this.flushLog(proc, cliArgs);
           this.processNext();
+          rejectPromise(new Error(`进程被${proc.status === 'timeout' ? '超时终止' : '手动终止'}`));
           return;
         }
 

@@ -71,6 +71,8 @@ export interface PersistedRunState {
     message: string;
     isIterativePhase: boolean;
   };
+  globalContext?: string;
+  phaseContexts?: Record<string, string>;
 }
 
 function runDir(runId: string): string {
@@ -213,6 +215,27 @@ export async function saveStreamContent(
   if (!existsSync(dir)) await mkdir(dir, { recursive: true });
   const safeName = stepName.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
   await writeFile(resolve(dir, `${safeName}.stream.md`), content, 'utf-8');
+}
+
+/** Append a human feedback marker to the stream file for the current step */
+export async function appendFeedbackToStream(
+  runId: string,
+  stepName: string,
+  message: string
+): Promise<void> {
+  const dir = resolve(runDir(runId), 'streams');
+  if (!existsSync(dir)) await mkdir(dir, { recursive: true });
+  const safeName = stepName.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+  const filepath = resolve(dir, `${safeName}.stream.md`);
+  const timestamp = new Date().toISOString();
+  const feedbackChunk = `${STREAM_CHUNK_SEPARATOR}<!-- human-feedback: ${timestamp} -->\n${message}`;
+  try {
+    const { appendFile } = await import('fs/promises');
+    await appendFile(filepath, feedbackChunk, 'utf-8');
+  } catch {
+    // File may not exist yet — write it
+    await writeFile(filepath, feedbackChunk, 'utf-8');
+  }
 }
 
 /** Load live stream content for a step */

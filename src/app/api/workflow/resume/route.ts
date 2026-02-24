@@ -4,7 +4,7 @@ import { workflowManager } from '@/lib/workflow-manager';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { runId, action } = body;
+    const { runId, action, feedback } = body;
 
     if (!runId) {
       return NextResponse.json(
@@ -24,6 +24,10 @@ export async function POST(request: NextRequest) {
     // If action specified, queue it so waitForApproval resolves immediately
     if (action === 'iterate' || action === 'approve') {
       workflowManager.setQueuedApprovalAction(action);
+      // If iterate action with feedback, store it
+      if (action === 'iterate' && feedback) {
+        workflowManager.setIterationFeedback(feedback);
+      }
     }
 
     // Fire-and-forget: kick off resume without awaiting completion.

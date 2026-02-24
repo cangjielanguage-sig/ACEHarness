@@ -60,6 +60,8 @@ export interface WorkflowState {
   showEditNodeModal: boolean;
   editingNode: { type: 'phase' | 'step'; phaseIndex: number; stepIndex?: number } | null;
   iterationStates: Record<string, IterationStateInfo>;
+  globalContext: string;
+  phaseContexts: Record<string, string>;
 }
 
 type WorkflowAction =
@@ -94,6 +96,9 @@ type WorkflowAction =
   | { type: 'SET_AGENTS_CONFIG'; payload: any[] }
   | { type: 'SET_ITERATION_STATE'; payload: { phase: string; state: IterationStateInfo } }
   | { type: 'UPDATE_AGENT_TOKEN_USAGE'; payload: { agent: string; usage: { inputTokens: number; outputTokens: number } } }
+  | { type: 'SET_GLOBAL_CONTEXT'; payload: string }
+  | { type: 'SET_PHASE_CONTEXT'; payload: { phase: string; context: string } }
+  | { type: 'SET_PHASE_CONTEXTS'; payload: Record<string, string> }
   | { type: 'RESET_RUN' };
 
 function createInitialState(initialViewMode: ViewMode = 'run'): WorkflowState {
@@ -124,6 +129,8 @@ function createInitialState(initialViewMode: ViewMode = 'run'): WorkflowState {
     showEditNodeModal: false,
     editingNode: null,
     iterationStates: {},
+    globalContext: '',
+    phaseContexts: {},
   };
 }
 
@@ -177,6 +184,12 @@ function workflowReducer(state: WorkflowState, action: WorkflowAction): Workflow
     }
     case 'RESET_RUN':
       return { ...state, runId: null, logs: [], completedSteps: [], failedSteps: [], stepResults: {}, iterationStates: {} };
+    case 'SET_GLOBAL_CONTEXT':
+      return { ...state, globalContext: action.payload };
+    case 'SET_PHASE_CONTEXT':
+      return { ...state, phaseContexts: { ...state.phaseContexts, [action.payload.phase]: action.payload.context } };
+    case 'SET_PHASE_CONTEXTS':
+      return { ...state, phaseContexts: action.payload };
     default:
       return state;
   }

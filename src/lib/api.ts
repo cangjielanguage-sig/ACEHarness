@@ -196,11 +196,11 @@ export const workflowApi = {
     return response.json();
   },
 
-  async resume(runId: string, action?: 'approve' | 'iterate'): Promise<ApiResponse> {
+  async resume(runId: string, action?: 'approve' | 'iterate', feedback?: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runId, action }),
+      body: JSON.stringify({ runId, action, feedback }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -217,11 +217,26 @@ export const workflowApi = {
     return response.json();
   },
 
-  async iterate(): Promise<ApiResponse> {
+  async iterate(feedback: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/iterate`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback }),
     });
     if (!response.ok) throw new Error('请求继续迭代失败');
+    return response.json();
+  },
+
+  async injectFeedback(message: string): Promise<ApiResponse> {
+    const response = await fetch(`${API_BASE}/workflow/inject-feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || '注入反馈失败');
+    }
     return response.json();
   },
 
@@ -239,6 +254,38 @@ export const workflowApi = {
   async getStatus(): Promise<WorkflowStatusResponse> {
     const response = await fetch(`${API_BASE}/workflow/status`);
     if (!response.ok) throw new Error('获取状态失败');
+    return response.json();
+  },
+
+  async setContext(scope: 'global' | 'phase', context: string, phase?: string): Promise<ApiResponse> {
+    const response = await fetch(`${API_BASE}/workflow/context`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, phase, context }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || '设置上下文失败');
+    }
+    return response.json();
+  },
+
+  async getContexts(): Promise<{ globalContext: string; phaseContexts: Record<string, string> }> {
+    const response = await fetch(`${API_BASE}/workflow/context`);
+    if (!response.ok) throw new Error('获取上下文失败');
+    return response.json();
+  },
+
+  async rerunFromStep(runId: string, stepName: string): Promise<ApiResponse> {
+    const response = await fetch(`${API_BASE}/workflow/rerun-from-step`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId, stepName }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || '重新运行失败');
+    }
     return response.json();
   },
 

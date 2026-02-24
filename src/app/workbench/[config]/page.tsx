@@ -68,6 +68,14 @@ export default function WorkbenchPage() {
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
   const [showAgentDrawer, setShowAgentDrawer] = useState(false);
+  const [iterationFeedback, setIterationFeedback] = useState('');
+  const [liveStreamFeedback, setLiveStreamFeedback] = useState('');
+  const [sendingFeedback, setSendingFeedback] = useState(false);
+  const [inlineFeedbacks, setInlineFeedbacks] = useState<{ message: string; timestamp: string; streamIndex: number }[]>([]);
+  const [showContextEditor, setShowContextEditor] = useState(false);
+  const [editingContextScope, setEditingContextScope] = useState<'global' | 'phase'>('global');
+  const [editingContextPhase, setEditingContextPhase] = useState('');
+  const [editingContextValue, setEditingContextValue] = useState('');
   const liveStreamRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveStreamLenRef = useRef(0);
   const {
@@ -76,6 +84,7 @@ export default function WorkbenchPage() {
     showCheckpoint, checkpointMessage, checkpointIsIterative, activeTab, selectedAgent, selectedStep,
     projectRoot, requirements, timeoutMinutes, showProcessPanel,
     showEditNodeModal, editingNode, iterationStates, stepResults,
+    globalContext, phaseContexts,
   } = state;
 
   const isRunning = workflowStatus === 'running';
@@ -94,15 +103,17 @@ export default function WorkbenchPage() {
         if (status.agents?.length) dispatch({ type: 'SET_AGENTS', payload: status.agents });
         if (status.completedSteps) dispatch({ type: 'SET_COMPLETED_STEPS', payload: status.completedSteps });
         dispatch({ type: 'SET_FAILED_STEPS', payload: status.failedSteps || [] });
-        if (status.stepLogs?.length) {
+        {
           const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
-          for (const log of status.stepLogs) {
-            restoredResults[log.stepName] = {
-              output: log.output || '',
-              error: log.error || undefined,
-              costUsd: log.costUsd || undefined,
-              durationMs: log.durationMs || undefined,
-            };
+          if (status.stepLogs?.length) {
+            for (const log of status.stepLogs) {
+              restoredResults[log.stepName] = {
+                output: log.output || '',
+                error: log.error || undefined,
+                costUsd: log.costUsd || undefined,
+                durationMs: log.durationMs || undefined,
+              };
+            }
           }
           dispatch({ type: 'SET_STEP_RESULTS', payload: restoredResults });
         }
@@ -363,6 +374,22 @@ export default function WorkbenchPage() {
           payload: { agent: event.data.agent, usage: event.data.delta },
         });
         break;
+      case 'feedback-injected':
+        addLog('system', 'info', `反馈已接收: ${event.data.message.substring(0, 50)}${event.data.message.length > 50 ? '...' : ''}`);
+        setInlineFeedbacks(prev => [...prev, {
+          message: event.data.message,
+          timestamp: event.data.timestamp,
+          streamIndex: liveStreamLenRef.current,
+        }]);
+        break;
+      case 'context-updated':
+        if (event.data.scope === 'global') {
+          dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: event.data.context });
+        } else if (event.data.phase) {
+          dispatch({ type: 'SET_PHASE_CONTEXT', payload: { phase: event.data.phase, context: event.data.context } });
+        }
+        addLog('system', 'info', `上下文已更新: ${event.data.scope === 'global' ? '全局' : event.data.phase}`);
+        break;
     }
   }, [selectedAgent, addLog]);
 
@@ -472,6 +499,7 @@ export default function WorkbenchPage() {
         }
       }
       dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
+      setIterationFeedback(''); // 清空反馈
       addLog('system', 'success', '✓ 检查点已批准，继续执行');
     } catch (error: any) {
       addLog('system', 'error', `批准失败: ${error.message}`);
@@ -480,6 +508,7 @@ export default function WorkbenchPage() {
 
   const rejectCheckpoint = async () => {
     dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
+    setIterationFeedback(''); // 清空反馈
     if (isRunning) {
       await stopWorkflow();
     }
@@ -487,9 +516,13 @@ export default function WorkbenchPage() {
   };
 
   const iterateCheckpoint = async () => {
+    if (!iterationFeedback.trim()) {
+      toast('error', '请输入迭代意见');
+      return;
+    }
     try {
       if (isRunning) {
-        await workflowApi.iterate();
+        await workflowApi.iterate(iterationFeedback);
       } else {
         // Workflow not running — resume with iterate action
         const rid = runId || selectedRun?.id;
@@ -497,12 +530,13 @@ export default function WorkbenchPage() {
           setViewingHistoryRun(false);
           dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'running' });
           dispatch({ type: 'SET_FAILED_STEPS', payload: [] });
-          await workflowApi.resume(rid, 'iterate');
+          await workflowApi.resume(rid, 'iterate', iterationFeedback);
           dispatch({ type: 'SET_VIEW_MODE', payload: 'run' });
           fetchCurrentStatus();
         }
       }
       dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
+      setIterationFeedback('');
       addLog('system', 'info', '↻ 继续迭代，重新执行当前阶段');
     } catch (error: any) {
       addLog('system', 'error', `请求迭代失败: ${error.message}`);
@@ -567,42 +601,53 @@ export default function WorkbenchPage() {
   const CHUNK_WITH_TIME_REGEX = /^<!-- timestamp: (.+?) -->\n/;
 
   // Parse chunk with optional timestamp
+  const HUMAN_FEEDBACK_REGEX = /^<!-- human-feedback: (.+?) -->\n/;
+
   const parseChunk = (chunk: string) => {
+    // Check for human feedback marker first
+    const fbMatch = chunk.match(HUMAN_FEEDBACK_REGEX);
+    if (fbMatch) {
+      return {
+        timestamp: fbMatch[1],
+        content: chunk.substring(fbMatch[0].length),
+        isHumanFeedback: true,
+      };
+    }
     const match = chunk.match(CHUNK_WITH_TIME_REGEX);
     if (match) {
       return {
         timestamp: match[1],
-        content: chunk.substring(match[0].length)
+        content: chunk.substring(match[0].length),
+        isHumanFeedback: false,
       };
     }
-    return { timestamp: null, content: chunk };
+    return { timestamp: null, content: chunk, isHumanFeedback: false };
   };
 
   // --- Live stream polling ---
   const startLiveStream = () => {
     setShowLiveStream(true);
     setLiveStream([]);
+    setLiveStreamFeedback('');
+    setInlineFeedbacks([]);
     liveStreamLenRef.current = 0;
     if (liveStreamRef.current) clearInterval(liveStreamRef.current);
     liveStreamRef.current = setInterval(async () => {
       try {
-        // Try in-memory process first
         const { processes } = await processApi.list();
-        const running = processes.find((p: any) => p.status === 'running');
+        // Prefer persisted stream file (contains accumulated content across feedback rounds)
         let content: string | null = null;
-        let fromPersisted = false;
-        if (running?.streamContent) {
-          content = running.streamContent;
-        } else {
-          // Fallback: read from persisted stream file (contains chunk separators)
-          const rid = runId || selectedRun?.id;
-          const step = currentStep || selectedStep?.name;
-          if (rid && step) {
-            content = await streamApi.getStreamContent(rid, step);
-            if (content) fromPersisted = true;
-          }
-          if (!content) {
-            // Check latest completed process
+        const rid = runId || selectedRun?.id;
+        const step = currentStep || selectedStep?.name;
+        if (rid && step) {
+          content = await streamApi.getStreamContent(rid, step);
+        }
+        if (!content) {
+          // Fallback: try in-memory process
+          const running = processes.find((p: any) => p.status === 'running');
+          if (running?.streamContent) {
+            content = running.streamContent;
+          } else {
             const latest = processes.sort((a: any, b: any) =>
               new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
             )[0];
@@ -631,6 +676,68 @@ export default function WorkbenchPage() {
       liveStreamRef.current = null;
     }
     setShowLiveStream(false);
+  };
+
+  const sendLiveFeedback = async () => {
+    if (!liveStreamFeedback.trim() || sendingFeedback) return;
+    setSendingFeedback(true);
+    try {
+      await workflowApi.injectFeedback(liveStreamFeedback.trim());
+      setLiveStreamFeedback('');
+    } catch (error: any) {
+      toast('error', `发送反馈失败: ${error.message}`);
+    }
+    setSendingFeedback(false);
+  };
+
+  const openContextEditor = (scope: 'global' | 'phase', phase?: string) => {
+    setEditingContextScope(scope);
+    setEditingContextPhase(phase || '');
+    setEditingContextValue(
+      scope === 'global' ? globalContext : (phase ? phaseContexts[phase] || '' : '')
+    );
+    setShowContextEditor(true);
+  };
+
+  const saveContext = async () => {
+    try {
+      await workflowApi.setContext(editingContextScope, editingContextValue, editingContextPhase || undefined);
+      if (editingContextScope === 'global') {
+        dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: editingContextValue });
+      } else if (editingContextPhase) {
+        dispatch({ type: 'SET_PHASE_CONTEXT', payload: { phase: editingContextPhase, context: editingContextValue } });
+      }
+      setShowContextEditor(false);
+      toast('success', '上下文已保存');
+    } catch (error: any) {
+      toast('error', `保存失败: ${error.message}`);
+    }
+  };
+
+  const handleRerunFromStep = async (stepName: string) => {
+    const rid = runId || selectedRun?.id;
+    if (!rid) return;
+    const ok = await confirm({
+      title: '从此步骤重新运行',
+      description: `将从步骤 "${stepName}" 开始重新运行，该步骤及之后的所有步骤结果将被清除。`,
+      confirmLabel: '重新运行',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    try {
+      setViewingHistoryRun(false);
+      dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'running' });
+      dispatch({ type: 'SET_FAILED_STEPS', payload: [] });
+      dispatch({ type: 'SET_STEP_RESULTS', payload: {} });
+      dispatch({ type: 'SET_RUN_ID', payload: rid });
+      addLog('system', 'info', `正在从步骤 "${stepName}" 重新运行...`);
+      await workflowApi.rerunFromStep(rid, stepName);
+      dispatch({ type: 'SET_VIEW_MODE', payload: 'run' });
+      fetchCurrentStatus();
+    } catch (error: any) {
+      dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'failed' });
+      addLog('system', 'error', `重新运行失败: ${error.message}`);
+    }
   };
 
   // Cleanup on unmount
@@ -944,6 +1051,9 @@ export default function WorkbenchPage() {
             <Button variant="secondary" size="sm" onClick={() => dispatch({ type: 'SET_SHOW_PROCESS_PANEL', payload: !showProcessPanel })}>
               <span className="material-symbols-outlined text-sm">settings</span><span className="hidden sm:inline">进程</span>
             </Button>
+            <Button variant="secondary" size="sm" onClick={() => openContextEditor('global')} title="全局上下文">
+              <span className="material-symbols-outlined text-sm">edit_note</span><span className="hidden sm:inline">上下文</span>
+            </Button>
           </>)}
           {viewMode === 'design' && (
             <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={handleSaveConfig} disabled={saving}>
@@ -1034,7 +1144,15 @@ export default function WorkbenchPage() {
                           >
                             <div className="flex justify-between items-center mb-2">
                               <span className="text-sm font-medium">{phase.name}</span>
-                              {phase.iteration?.enabled && (<Badge><span className="material-symbols-outlined" style={{ fontSize: 10 }}>loop</span> {iterState ? `${iterState.currentIteration}/${iterState.maxIterations}` : `max ${phase.iteration.maxIterations}`}</Badge>)}
+                              <div className="flex items-center gap-1">
+                                {phaseContexts[phase.name] && (
+                                  <Badge variant="outline" className="text-[10px]"><span className="material-symbols-outlined" style={{ fontSize: 10 }}>edit_note</span></Badge>
+                                )}
+                                {phase.iteration?.enabled && (<Badge><span className="material-symbols-outlined" style={{ fontSize: 10 }}>loop</span> {iterState ? `${iterState.currentIteration}/${iterState.maxIterations}` : `max ${phase.iteration.maxIterations}`}</Badge>)}
+                                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => { e.stopPropagation(); openContextEditor('phase', phase.name); }} title="设置阶段上下文">
+                                  <span className="material-symbols-outlined" style={{ fontSize: 12 }}>edit_note</span>
+                                </Button>
+                              </div>
                             </div>
                             <div className="flex flex-wrap gap-1">
                               {phaseAgents.map((a: any, i: number) => (
@@ -1239,6 +1357,18 @@ export default function WorkbenchPage() {
                   </div>
                 </div>
               )}
+              {/* Rerun from step button — for completed or failed steps when not running */}
+              {selectedStep && !isRunning && (runId || selectedRun?.id) && (completedSteps.includes(selectedStep.name) || failedSteps.includes(selectedStep.name)) && (
+                <div className="bg-muted border-b p-3.5">
+                  <Button variant="secondary" size="sm" className="text-xs w-full" onClick={() => handleRerunFromStep(selectedStep.name)}>
+                    <span className="material-symbols-outlined text-sm">replay</span>
+                    从此步骤重新运行
+                  </Button>
+                  <div className="text-[11px] text-muted-foreground mt-1.5">
+                    该步骤及之后的所有步骤将被重新执行
+                  </div>
+                </div>
+              )}
               {/* Resume button when viewing crashed/stopped run without specific step selected */}
               {!selectedStep && !isRunning && (workflowStatus === 'failed' || workflowStatus === 'stopped') && (runId || selectedRun?.id) && (
                 <div className="bg-muted border-b p-3.5">
@@ -1419,12 +1549,30 @@ export default function WorkbenchPage() {
         onClose={() => { dispatch({ type: 'SET_SHOW_EDIT_NODE_MODAL', payload: false }); dispatch({ type: 'SET_EDITING_NODE', payload: null }); setIsNewNode(false); }}
         onSave={handleSaveNode} onDelete={handleDeleteNode} />)}
       {showCheckpoint && (<div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false })}>
-        <div className="bg-card rounded-lg w-[500px] max-w-[90%] border" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-card rounded-lg w-[600px] max-w-[90%] border" onClick={(e) => e.stopPropagation()}>
           <div className="p-5 border-b"><h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">pan_tool</span>人工检查点</h3></div>
           <div className="p-5"><p className="text-sm mb-4 leading-relaxed">{checkpointMessage}</p>
-            <div className="bg-muted p-4 rounded-md border-l-[3px] border-l-yellow-500"><p className="text-sm text-muted-foreground mb-2">当前阶段: <strong className="text-foreground">{currentPhase}</strong></p><p className="text-sm text-muted-foreground">请审查工作成果，决定是否继续执行</p></div></div>
+            <div className="bg-muted p-4 rounded-md border-l-[3px] border-l-yellow-500 mb-4">
+              <p className="text-sm text-muted-foreground mb-2">当前阶段: <strong className="text-foreground">{currentPhase}</strong></p>
+              <p className="text-sm text-muted-foreground">请审查工作成果，决定是否继续执行</p>
+            </div>
+            {checkpointIsIterative && (
+              <div className="mb-4">
+                <Label htmlFor="iteration-feedback" className="text-sm font-medium mb-2 block">迭代意见（继续迭代时必填）</Label>
+                <Textarea
+                  id="iteration-feedback"
+                  value={iterationFeedback}
+                  onChange={(e) => setIterationFeedback(e.target.value)}
+                  placeholder="请输入本轮迭代的评审意见，这些意见将作为下一轮迭代的检查项..."
+                  rows={4}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground mt-1">提示：评审意见将作为AI的检查项，指导下一轮迭代的改进方向</p>
+              </div>
+            )}
+          </div>
           <div className="p-5 border-t flex gap-3 justify-end">
-            <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={approveCheckpoint}><span className="material-symbols-outlined text-sm mr-1">check</span>批准继续</Button>
+            <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={approveCheckpoint}><span className="material-symbols-outlined text-sm mr-1">check</span>通过</Button>
             {checkpointIsIterative && (
               <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={iterateCheckpoint}><span className="material-symbols-outlined text-sm mr-1">refresh</span>继续迭代</Button>
             )}
@@ -1444,27 +1592,93 @@ export default function WorkbenchPage() {
                 <div className="text-muted-foreground text-sm text-center py-8">(等待输出...)</div>
               ) : (
                 <div className="space-y-3">
-                  {liveStream.map((chunk, i) => {
-                    const parsed = parseChunk(chunk);
-                    return (
-                      <div key={i} className="border-b border-border/50 pb-3 last:border-0">
-                        {parsed.timestamp && (
-                          <div className="text-[10px] text-muted-foreground mb-1 font-mono">
-                            {new Date(parsed.timestamp).toLocaleString('zh-CN', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              second: '2-digit'
-                            })}
+                  {(() => {
+                    // Merge stream chunks and inline feedbacks by position
+                    type Item = { type: 'chunk'; content: string; index: number } | { type: 'feedback'; message: string; timestamp: string };
+                    const items: Item[] = [];
+                    // Collect feedback messages already embedded in stream chunks to avoid duplicates
+                    const streamFeedbackMessages = new Set<string>();
+                    for (const chunk of liveStream) {
+                      const parsed = parseChunk(chunk);
+                      if (parsed.isHumanFeedback) {
+                        streamFeedbackMessages.add(parsed.content.trim());
+                      }
+                    }
+                    let fbIdx = 0;
+                    for (let i = 0; i < liveStream.length; i++) {
+                      // Insert any feedbacks that were sent before this chunk (skip if already in stream)
+                      while (fbIdx < inlineFeedbacks.length && inlineFeedbacks[fbIdx].streamIndex <= i) {
+                        if (!streamFeedbackMessages.has(inlineFeedbacks[fbIdx].message.trim())) {
+                          items.push({ type: 'feedback', message: inlineFeedbacks[fbIdx].message, timestamp: inlineFeedbacks[fbIdx].timestamp });
+                        }
+                        fbIdx++;
+                      }
+                      items.push({ type: 'chunk', content: liveStream[i], index: i });
+                    }
+                    // Remaining feedbacks after all chunks (skip if already in stream)
+                    while (fbIdx < inlineFeedbacks.length) {
+                      if (!streamFeedbackMessages.has(inlineFeedbacks[fbIdx].message.trim())) {
+                        items.push({ type: 'feedback', message: inlineFeedbacks[fbIdx].message, timestamp: inlineFeedbacks[fbIdx].timestamp });
+                      }
+                      fbIdx++;
+                    }
+                    return items.map((item, i) => {
+                      if (item.type === 'feedback') {
+                        return (
+                          <div key={`fb-${i}`} className="flex justify-end">
+                            <div className="bg-primary/15 border border-primary/30 rounded-lg px-3 py-2 max-w-[80%]">
+                              <div className="text-[10px] text-muted-foreground mb-0.5 text-right font-mono">
+                                {new Date(item.timestamp).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              </div>
+                              <div className="text-sm">{item.message}</div>
+                            </div>
                           </div>
-                        )}
-                        <div className={`${styles.markdownContent} text-sm`}>
-                          <Markdown>{parsed.content}</Markdown>
+                        );
+                      }
+                      const parsed = parseChunk(item.content);
+                      if (parsed.isHumanFeedback) {
+                        return (
+                          <div key={`c-${i}`} className="flex justify-end">
+                            <div className="bg-primary/15 border border-primary/30 rounded-lg px-3 py-2 max-w-[80%]">
+                              {parsed.timestamp && (
+                                <div className="text-[10px] text-muted-foreground mb-0.5 text-right font-mono">
+                                  {new Date(parsed.timestamp).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                </div>
+                              )}
+                              <div className="text-sm">{parsed.content}</div>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={`c-${i}`} className="border-b border-border/50 pb-3 last:border-0">
+                          {parsed.timestamp && (
+                            <div className="text-[10px] text-muted-foreground mb-1 font-mono">
+                              {new Date(parsed.timestamp).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </div>
+                          )}
+                          <div className={`${styles.markdownContent} text-sm`}>
+                            <Markdown>{parsed.content}</Markdown>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
                 </div>
               )}
+            </div>
+            <div className="p-3 border-t flex gap-2">
+              <Input
+                value={liveStreamFeedback}
+                onChange={(e) => setLiveStreamFeedback(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendLiveFeedback(); } }}
+                placeholder="输入反馈意见，当前步骤完成后 agent 将基于反馈继续处理..."
+                className="flex-1"
+                disabled={sendingFeedback}
+              />
+              <Button size="sm" onClick={sendLiveFeedback} disabled={sendingFeedback || !liveStreamFeedback.trim()}>
+                <span className="material-symbols-outlined text-sm">send</span>
+              </Button>
             </div>
           </div>
         </div>
@@ -1497,6 +1711,36 @@ export default function WorkbenchPage() {
         </div>
       )}
       {confirmDialogProps && <ConfirmDialog {...confirmDialogProps} />}
+      {showContextEditor && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setShowContextEditor(false)}>
+          <div className="bg-card rounded-lg w-[600px] max-w-[90%] border" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b">
+              <h3 className="text-lg font-semibold">
+                <span className="material-symbols-outlined text-lg mr-2 align-middle">edit_note</span>
+                {editingContextScope === 'global' ? '全局上下文' : `阶段上下文 — ${editingContextPhase}`}
+              </h3>
+            </div>
+            <div className="p-5">
+              <p className="text-sm text-muted-foreground mb-3">
+                {editingContextScope === 'global'
+                  ? '全局上下文将注入到所有步骤的 prompt 中'
+                  : `此上下文将注入到「${editingContextPhase}」阶段所有步骤的 prompt 中`}
+              </p>
+              <Textarea
+                value={editingContextValue}
+                onChange={(e) => setEditingContextValue(e.target.value)}
+                placeholder="输入上下文信息，例如：注意代码风格要符合项目规范..."
+                rows={6}
+                className="w-full"
+              />
+            </div>
+            <div className="p-5 border-t flex gap-3 justify-end">
+              <Button variant="secondary" onClick={() => setShowContextEditor(false)}>取消</Button>
+              <Button onClick={saveContext}>保存</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

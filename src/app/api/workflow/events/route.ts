@@ -25,6 +25,8 @@ export async function GET(request: NextRequest) {
         'iteration-complete': (data: any) => sendEvent({ type: 'iteration-complete', data }),
         escalation: (data: any) => sendEvent({ type: 'escalation', data }),
         'token-usage': (data: any) => sendEvent({ type: 'token-usage', data }),
+        'feedback-injected': (data: any) => sendEvent({ type: 'feedback-injected', data }),
+        'context-updated': (data: any) => sendEvent({ type: 'context-updated', data }),
       };
 
       Object.entries(handlers).forEach(([event, handler]) => {

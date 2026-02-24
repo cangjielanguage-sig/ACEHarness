@@ -12,7 +12,7 @@ import type { ClaudeJsonResult } from './process-manager';
 import { createRun, updateRun } from './run-store';
 import type { RunRecord } from './run-store';
 import {
-  saveRunState, saveProcessOutput, saveOutputToWorkspace, saveStreamContent, loadStepOutputs, loadRunState, findRunningRuns, isProcessAlive,
+  saveRunState, saveProcessOutput, saveOutputToWorkspace, saveStreamContent, loadStreamContent, loadStepOutputs, loadRunState, findRunningRuns, isProcessAlive,
   type PersistedRunState, type PersistedProcessInfo, type PersistedStepLog,
 } from './run-state-persistence';
 import type { WorkflowConfig, WorkflowPhase, WorkflowStep, RoleConfig, IterationConfig } from './schemas';
@@ -78,6 +78,14 @@ class WorkflowManager extends EventEmitter {
   private pendingCheckpoint: { phase: string; checkpoint: string; message: string; isIterativePhase: boolean } | null = null;
   /** Pre-queued action for the next waitForApproval call (set by resume with action) */
   private queuedApprovalAction: 'approve' | 'iterate' | null = null;
+  /** Iteration feedback from human review */
+  private iterationFeedback: string = '';
+  /** Live feedback queued by user during execution, consumed after current step completes */
+  private liveFeedback: string[] = [];
+  /** Global context injected into all steps */
+  private globalContext: string = '';
+  /** Per-phase context injected into steps of that phase */
+  private phaseContexts: Map<string, string> = new Map();
 
   private async loadAgentConfigs(): Promise<RoleConfig[]> {
     const agentsDir = resolve(process.cwd(), 'configs', 'agents');
@@ -140,6 +148,8 @@ class WorkflowManager extends EventEmitter {
         iterationStates: Object.fromEntries(this.iterationStates),
         processes: this.getActiveProcessPids(),
         pendingCheckpoint: this.pendingCheckpoint || undefined,
+        globalContext: this.globalContext || undefined,
+        phaseContexts: this.phaseContexts.size > 0 ? Object.fromEntries(this.phaseContexts) : undefined,
       };
       await saveRunState(state);
     } catch { /* non-critical */ }
@@ -191,6 +201,9 @@ class WorkflowManager extends EventEmitter {
     this.runEndTime = null;
     this.currentRunId = null;
     this.agentSessionIds.clear();
+    this.liveFeedback = [];
+    this.globalContext = '';
+    this.phaseContexts.clear();
     this.emit('status', { status: 'running', message: '开始执行工作流...' });
 
     // Reset process manager counters in case previous run left stale state
@@ -485,9 +498,23 @@ class WorkflowManager extends EventEmitter {
     let iterState = this.iterationStates.get(phase.name);
     // Detect if this is a subsequent iteration call (from checkpoint "iterate" action)
     // In that case, skipCompletedSteps is undefined and iterState already has currentIteration >= 1
-    const isSubsequentIteration = !skipCompletedSteps && iterState && iterState.currentIteration >= 1 && iterState.status === 'running';
+    const isSubsequentIteration = !skipCompletedSteps && iterState && iterState.currentIteration >= 1;
 
-    if (!iterState || iterState.status === 'completed') {
+    if (!iterState) {
+      iterState = {
+        phaseName: phase.name,
+        currentIteration: 0,
+        maxIterations: iterConfig.maxIterations,
+        consecutiveCleanRounds: 0,
+        status: 'running',
+        bugsFoundPerRound: [],
+      };
+      this.iterationStates.set(phase.name, iterState);
+    } else if (isSubsequentIteration) {
+      // Coming from checkpoint "iterate" — keep all history, just resume
+      iterState.status = 'running';
+    } else if (iterState.status === 'completed') {
+      // Fresh start (no prior iterations)
       iterState = {
         phaseName: phase.name,
         currentIteration: 0,
@@ -531,7 +558,18 @@ class WorkflowManager extends EventEmitter {
       }
 
       // Determine starting iteration (resume from where we left off)
-      startIter = Math.max(1, iterState.currentIteration);
+      // currentIteration is set at the START of each iteration (before steps run),
+      // so we need to check if the current iteration actually completed all its steps.
+      if (iterState.currentIteration >= 1) {
+        // Check if all steps of the current iteration are in completedSteps
+        const curIter = iterState.currentIteration;
+        const allSteps = [...attackerSteps, ...judgeSteps, ...(curIter >= 2 ? defenderSteps : [])];
+        const iterStepNames = allSteps.map(s => curIter >= 2 ? `${s.name}-迭代${curIter}` : s.name);
+        const allCompleted = iterStepNames.every(n => this.completedStepNames.includes(n));
+        startIter = allCompleted ? curIter + 1 : curIter;
+      } else {
+        startIter = 1;
+      }
     }
 
     // Iterative attacker → judge → (defender fix) loop
@@ -552,7 +590,7 @@ class WorkflowManager extends EventEmitter {
         for (const step of defenderSteps) {
           if (this.shouldStop) return;
           const namedStep = iterStep(step, iter);
-          if (skipSet?.has(namedStep.name)) {
+          if (skipSet?.has(namedStep.name) || this.completedStepNames.includes(namedStep.name)) {
             this.emit('step', { step: namedStep.name, agent: namedStep.agent, message: `跳过已完成: ${namedStep.name}`, skipped: true });
             continue;
           }
@@ -568,7 +606,7 @@ class WorkflowManager extends EventEmitter {
       for (const step of attackerSteps) {
         if (this.shouldStop) return;
         const namedStep = iterStep(step, iter);
-        if (skipSet?.has(namedStep.name)) {
+        if (skipSet?.has(namedStep.name) || this.completedStepNames.includes(namedStep.name)) {
           this.emit('step', { step: namedStep.name, agent: namedStep.agent, message: `跳过已完成: ${namedStep.name}`, skipped: true });
           continue;
         }
@@ -585,7 +623,7 @@ class WorkflowManager extends EventEmitter {
       for (const step of judgeSteps) {
         if (this.shouldStop) return;
         const namedStep = iterStep(step, iter);
-        if (skipSet?.has(namedStep.name)) {
+        if (skipSet?.has(namedStep.name) || this.completedStepNames.includes(namedStep.name)) {
           this.emit('step', { step: namedStep.name, agent: namedStep.agent, message: `跳过已完成: ${namedStep.name}`, skipped: true });
           continue;
         }
@@ -669,6 +707,9 @@ class WorkflowManager extends EventEmitter {
           bugsPerRound: iterState.bugsFoundPerRound,
         });
       }
+
+      // Clear iteration feedback after each round (will be set again if user provides new feedback)
+      this.iterationFeedback = '';
     }
   }
 
@@ -778,11 +819,13 @@ class WorkflowManager extends EventEmitter {
       // If force-complete was triggered, treat as success with stream content
       if (this.forceCompleteFlag) {
         this.forceCompleteFlag = false;
+        console.log(`[runStep] forceCompleteFlag caught for step "${step.name}"`);
         // Find the process to get its stream content
         const allProcs = processManager.getAllProcesses();
         const proc = allProcs.find((p: any) => p.step === step.name);
         const procInfo = proc ? processManager.getProcess(proc.id) : null;
         const resultText = procInfo?.streamContent || procInfo?.output || '(强制完成，无输出)';
+        console.log(`[runStep] force-complete resultText length: ${resultText.length}`);
 
         this.updateAgentStatus(step.agent, 'completed');
         this.completedStepNames.push(step.name);
@@ -1009,42 +1052,103 @@ class WorkflowManager extends EventEmitter {
 
     // Set up stream content flushing to disk (with chunk separators)
     let lastFlush = 0;
+    let activeProcessId = processId;
+    let accumulatedStream = ''; // Accumulate stream content across feedback rounds
     const streamHandler = (data: { id: string; step: string; total: string }) => {
-      if (data.id !== processId) return;
+      if (data.id !== activeProcessId) return;
       const now = Date.now();
-      // Flush to disk every 3 seconds (streamContent already contains chunk-boundary separators)
+      // Flush to disk every 3 seconds
       if (this.currentRunId && now - lastFlush > 3000) {
         lastFlush = now;
-        saveStreamContent(this.currentRunId, step.name, data.total).catch(() => {});
+        const fullStream = accumulatedStream
+          ? accumulatedStream + '\n\n<!-- chunk-boundary -->\n\n' + data.total
+          : data.total;
+        saveStreamContent(this.currentRunId, step.name, fullStream).catch(() => {});
       }
     };
     processManager.on('stream', streamHandler);
 
+    let currentProcessId = processId;
+    let currentPrompt = prompt;
+    let currentSessionId = existingSessionId;
+    let lastResult: ClaudeJsonResult;
+    let accumulatedOutput = ''; // Accumulate result output across feedback rounds
+
     try {
-      const result = await processManager.executeClaudeCli(
-        processId,
-        step.agent,
-        step.name,
-        prompt,
-        systemPromptToUse,
-        roleConfig.model,
-        {
-          workingDirectory: workflowConfig.context.projectRoot,
-          allowedTools: roleConfig.allowedTools,
-          resumeSessionId: existingSessionId,
-          appendSystemPrompt: !!existingSessionId,
-          timeoutMs: workflowConfig.context.timeoutMinutes
-            ? workflowConfig.context.timeoutMinutes * 60 * 1000
-            : undefined,
-          runId: this.currentRunId || undefined,
+      // Execute loop: run agent, then check for pending feedback and resume if any
+      while (true) {
+        const result = await processManager.executeClaudeCli(
+          currentProcessId,
+          step.agent,
+          step.name,
+          currentPrompt,
+          systemPromptToUse,
+          roleConfig.model,
+          {
+            workingDirectory: workflowConfig.context.projectRoot,
+            allowedTools: roleConfig.allowedTools,
+            resumeSessionId: currentSessionId,
+            appendSystemPrompt: !!currentSessionId,
+            timeoutMs: workflowConfig.context.timeoutMinutes
+              ? workflowConfig.context.timeoutMinutes * 60 * 1000
+              : undefined,
+            runId: this.currentRunId || undefined,
+          }
+        );
+
+        // Save session ID for potential resume
+        if (result.session_id) {
+          this.agentSessionIds.set(step.agent, result.session_id);
         }
-      );
-      // Final flush of stream content (already contains chunk-boundary separators)
-      const proc = processManager.getProcess(processId);
-      if (this.currentRunId && proc?.streamContent) {
-        saveStreamContent(this.currentRunId, step.name, proc.streamContent).catch(() => {});
+
+        // Accumulate stream content from this round
+        const proc = processManager.getProcess(currentProcessId);
+        if (proc?.streamContent) {
+          accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
+        }
+        // Save the full accumulated stream
+        if (this.currentRunId) {
+          saveStreamContent(this.currentRunId, step.name, accumulatedStream).catch(() => {});
+        }
+
+        lastResult = result;
+        accumulatedOutput += (accumulatedOutput ? '\n\n---\n\n' : '') + (result.result || '');
+
+        // Check for pending live feedback
+        if (this.liveFeedback.length > 0 && !this.shouldStop) {
+          const feedbackPrompt = this.liveFeedback.map((fb, i) => `${i + 1}. ${fb}`).join('\n');
+          this.liveFeedback = [];
+
+          const sessionId = result.session_id;
+          if (!sessionId) break; // Can't resume without session ID
+
+          // Append feedback marker to accumulated stream so it shows inline
+          const feedbackTimestamp = new Date().toISOString();
+          accumulatedStream += `\n\n<!-- chunk-boundary -->\n\n<!-- human-feedback: ${feedbackTimestamp} -->\n${feedbackPrompt}`;
+          if (this.currentRunId) {
+            saveStreamContent(this.currentRunId, step.name, accumulatedStream).catch(() => {});
+          }
+
+          // Resume the same session with feedback
+          currentSessionId = sessionId;
+          currentPrompt = `## 人工实时反馈\n以下是用户在你执行过程中提供的反馈意见，请基于这些反馈继续处理当前任务：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
+          currentProcessId = `${step.agent}-${step.name}-feedback-${Date.now()}`;
+          activeProcessId = currentProcessId;
+
+          this.emit('step', {
+            step: step.name,
+            agent: step.agent,
+            message: `收到人工反馈，继续执行: ${step.name}`,
+            role: step.role,
+          });
+          continue;
+        }
+
+        break;
       }
-      return result;
+
+      // Return result with accumulated output from all rounds
+      return { ...lastResult!, result: accumulatedOutput };
     } finally {
       processManager.off('stream', streamHandler);
     }
@@ -1060,6 +1164,19 @@ class WorkflowManager extends EventEmitter {
 
     if (workflowConfig.context.requirements) {
       prompt += `## 需求背景\n${workflowConfig.context.requirements}\n\n`;
+    }
+
+    // Inject global context
+    if (this.globalContext) {
+      prompt += `## 全局上下文\n${this.globalContext}\n\n`;
+    }
+
+    // Inject phase-specific context
+    if (this.currentPhase) {
+      const phaseCtx = this.phaseContexts.get(this.currentPhase);
+      if (phaseCtx) {
+        prompt += `## 阶段上下文（${this.currentPhase}）\n${phaseCtx}\n\n`;
+      }
     }
 
     if (workflowConfig.context.projectRoot) {
@@ -1136,6 +1253,23 @@ class WorkflowManager extends EventEmitter {
       prompt += `- \`summary\`: 一句话总结你的评估结论\n\n`;
     }
 
+    // Inject human iteration feedback as check items
+    if (this.iterationFeedback && step.name.includes('-迭代')) {
+      prompt += `## 人工评审意见（本轮迭代的检查项）\n`;
+      prompt += `以下是人工审阅者对上一轮迭代的评审意见，请将这些意见作为本轮迭代的重点检查项：\n\n`;
+      prompt += `${this.iterationFeedback}\n\n`;
+      prompt += `请确保在本轮迭代中重点关注和解决上述评审意见中提到的问题。\n\n`;
+    }
+
+    // For defender steps in iteration rounds, require a complete final deliverable
+    if (step.role === 'defender' && step.name.includes('-迭代')) {
+      prompt += `## 完整产出要求\n`;
+      prompt += `重要：你必须产出两份独立文档，严格分开：\n\n`;
+      prompt += `1. **迭代改进分析**（单独文件，如 \`迭代改进分析-迭代N.md\`）：本轮发现的问题、改进点对比、修复方案选择等分析过程。\n`;
+      prompt += `2. **最终完整方案**（单独文件，如 \`最终设计方案.md\` 或 \`最终代码.md\`）：融合所有历史迭代改进后的完整最终产出。这份文档中不得出现任何"补丁"、"增量修改"、"相比上一轮"等措辞，它必须是一份从零可读的、独立完整的最终文档，读者无需了解迭代历史即可理解全貌。\n\n`;
+      prompt += `最终方案文档是你最重要的交付物，请确保它的质量和完整性。\n\n`;
+    }
+
     return prompt;
   }
 
@@ -1161,7 +1295,8 @@ class WorkflowManager extends EventEmitter {
     this.emit('approve');
   }
 
-  requestIteration(): void {
+  requestIteration(feedback: string): void {
+    this.iterationFeedback = feedback;
     this.emit('iterate');
   }
 
@@ -1169,20 +1304,101 @@ class WorkflowManager extends EventEmitter {
     this.queuedApprovalAction = action;
   }
 
+  setIterationFeedback(feedback: string): void {
+    this.iterationFeedback = feedback;
+  }
+
+  injectLiveFeedback(message: string): void {
+    const entry = { message, timestamp: new Date().toISOString() };
+    this.liveFeedback.push(message);
+    this.emit('feedback-injected', entry);
+  }
+
+  setContext(scope: 'global' | 'phase', context: string, phase?: string): void {
+    if (scope === 'global') {
+      this.globalContext = context;
+    } else if (phase) {
+      if (context) {
+        this.phaseContexts.set(phase, context);
+      } else {
+        this.phaseContexts.delete(phase);
+      }
+    }
+    this.emit('context-updated', {
+      scope,
+      phase: phase || null,
+      context,
+    });
+    this.persistState().catch(() => {});
+  }
+
+  getContexts(): { globalContext: string; phaseContexts: Record<string, string> } {
+    return {
+      globalContext: this.globalContext,
+      phaseContexts: Object.fromEntries(this.phaseContexts),
+    };
+  }
+
   /**
    * Force-complete the currently running step.
    * Kills the process and uses accumulated stream content as the step output.
    */
   async forceCompleteStep(): Promise<{ step: string; output: string } | null> {
-    const stepName = this.currentStep;
-    if (!stepName || this.status !== 'running') return null;
+    let stepName = this.currentStep;
 
-    // Find the running process for this step
+    // If in-memory state is empty (e.g. after server restart), try to recover from persisted state
+    if (!stepName || this.status !== 'running') {
+      const runningRuns = await findRunningRuns();
+      if (runningRuns.length > 0) {
+        const runState = runningRuns[0];
+        stepName = runState.currentStep;
+        if (!stepName) return null;
+        // Restore minimal state so we can operate
+        this.status = 'running';
+        this.currentStep = stepName;
+        this.currentRunId = runState.runId;
+        this.currentConfigFile = runState.configFile;
+        this.completedStepNames = runState.completedSteps || [];
+        this.failedStepNames = runState.failedSteps || [];
+        this.stepLogs = runState.stepLogs || [];
+        this.currentPhase = runState.currentPhase;
+      } else {
+        return null;
+      }
+    }
+
+    // Find the running process for this step (check both step field and id prefix)
     const allProcs = processManager.getAllProcesses();
     const running = allProcs.find(
-      (p: any) => p.status === 'running' && p.step === stepName
+      (p: any) => p.status === 'running' && (p.step === stepName || p.id.startsWith(stepName!.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_')))
     );
-    if (!running) return null;
+
+    // Also try to find and kill any orphaned Claude CLI processes for this step
+    if (!running) {
+      // Try to get output from persisted stream file
+      if (this.currentRunId && stepName) {
+        const streamContent = await loadStreamContent(this.currentRunId, stepName);
+        if (streamContent) {
+          // Kill any orphaned claude processes
+          try {
+            const { execSync } = await import('child_process');
+            execSync('pkill -f "claude.*--output-format json" 2>/dev/null || true', { timeout: 5000 });
+          } catch { /* ignore */ }
+
+          // Mark step as completed with stream content
+          return { step: stepName, output: streamContent };
+        }
+      }
+
+      // Check for most recent process for this step
+      const recent = allProcs
+        .filter((p: any) => p.step === stepName)
+        .sort((a: any, b: any) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
+      if (recent?.streamContent || recent?.output) {
+        return { step: stepName, output: recent.streamContent || recent.output || '(已完成)' };
+      }
+      return null;
+    }
 
     const proc = processManager.getProcess(running.id);
     if (!proc) return null;
@@ -1280,6 +1496,9 @@ class WorkflowManager extends EventEmitter {
     this.statusReason = null;
     this.pendingCheckpoint = runState.pendingCheckpoint || null;
     this.agentSessionIds.clear();
+    this.liveFeedback = [];
+    this.globalContext = runState.globalContext || '';
+    this.phaseContexts = new Map(Object.entries(runState.phaseContexts || {}));
 
     console.log(`[WorkflowManager.resume] runId=${runId}`);
     console.log(`[WorkflowManager.resume] completedSteps=`, this.completedStepNames);
@@ -1349,6 +1568,81 @@ class WorkflowManager extends EventEmitter {
       }
       throw error;
     }
+  }
+
+  async rerunFromStep(runId: string, stepName: string): Promise<void> {
+    if (this.status === 'running') {
+      throw new Error('已有工作流正在运行');
+    }
+
+    const runState = await loadRunState(runId);
+    if (!runState) {
+      throw new Error(`找不到运行记录: ${runId}`);
+    }
+
+    // Normalize: strip iteration suffix to get the base step name
+    const baseStepName = stepName.replace(/-迭代\d+$/, '');
+
+    // Find the step index in stepLogs execution order (try exact name first, then base name)
+    let logIndex = runState.stepLogs.findIndex(l => l.stepName === stepName);
+    if (logIndex === -1) {
+      logIndex = runState.stepLogs.findIndex(l => l.stepName === baseStepName);
+    }
+
+    const inCompleted = runState.completedSteps.includes(stepName) || runState.completedSteps.includes(baseStepName);
+    const inFailed = runState.failedSteps?.includes(stepName) || runState.failedSteps?.includes(baseStepName);
+
+    if (logIndex === -1 && !inCompleted && !inFailed) {
+      throw new Error(`步骤 "${stepName}" 未在运行记录中找到`);
+    }
+
+    // Remove target step and all subsequent steps from completed list
+    if (logIndex >= 0) {
+      const stepsToRemove = new Set(
+        runState.stepLogs.slice(logIndex).map(l => l.stepName)
+      );
+      // Also add the base name variants
+      for (const s of [...stepsToRemove]) {
+        stepsToRemove.add(s.replace(/-迭代\d+$/, ''));
+      }
+      runState.completedSteps = runState.completedSteps.filter(s => !stepsToRemove.has(s));
+      runState.stepLogs = runState.stepLogs.slice(0, logIndex);
+    } else {
+      // Step was failed or only in completedSteps — remove both exact and base name
+      runState.completedSteps = runState.completedSteps.filter(s => s !== stepName && s !== baseStepName);
+    }
+    runState.failedSteps = (runState.failedSteps || []).filter(s => s !== stepName && s !== baseStepName);
+
+    // Adjust iteration state for the phase containing this step
+    const configPath = resolve(process.cwd(), 'configs', runState.configFile);
+    const content = await readFile(configPath, 'utf-8');
+    const workflowConfig: WorkflowConfig = parse(content);
+    for (const phase of workflowConfig.workflow.phases) {
+      const phaseHasStep = phase.steps.some(s => s.name === baseStepName);
+      if (phaseHasStep && phase.iteration?.enabled && runState.iterationStates[phase.name]) {
+        // Extract iteration number from step name (e.g. "提出设计方案-迭代2" → 2)
+        const iterMatch = stepName.match(/-迭代(\d+)$/);
+        const targetIter = iterMatch ? parseInt(iterMatch[1], 10) : 1;
+        // Roll back iteration state to just before the target iteration
+        const iterState = runState.iterationStates[phase.name];
+        iterState.currentIteration = targetIter - 1;
+        iterState.status = 'running';
+        // Trim bugsFoundPerRound to only keep rounds before target
+        if (iterState.bugsFoundPerRound) {
+          iterState.bugsFoundPerRound = iterState.bugsFoundPerRound.slice(0, targetIter - 1);
+        }
+        // Reset consecutive clean rounds count
+        iterState.consecutiveCleanRounds = 0;
+      }
+    }
+
+    // Mark as stopped so resume() accepts it
+    runState.status = 'stopped';
+    runState.pendingCheckpoint = undefined;
+    await saveRunState(runState);
+
+    // Now delegate to normal resume
+    await this.resume(runId);
   }
 
   private async executeWorkflowResume(workflowConfig: WorkflowConfig): Promise<void> {
@@ -1446,6 +1740,9 @@ class WorkflowManager extends EventEmitter {
       }
     }
   }
+
+  getInternalStatus(): string { return this.status; }
+  getCurrentStep(): string | null { return this.currentStep; }
 
   getStatus(): any {
     return {

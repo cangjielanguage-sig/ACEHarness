@@ -192,6 +192,7 @@ export default function FlowDiagram({
     };
 
     // Pre-calculate group heights for checkpoint vertical centering
+    // Full heights include all iteration rounds (for group background boxes)
     const groupHeights: number[] = workflow.phases.map((phase) => {
       const stepGroups = getStepGroups(phase);
       const rowCount = stepGroups.length;
@@ -201,6 +202,16 @@ export default function FlowDiagram({
       const separators = rounds > 1 ? rounds - 1 : 0;
       const lastStepBottom = totalRows > 0
         ? stepsStartY + (totalRows - 1) * (stepNodeH + stepGap) + stepNodeH + separators * roundSeparatorH
+        : stepsStartY;
+      return lastStepBottom + 15;
+    });
+
+    // Base heights (first round only) for checkpoint positioning — not stretched by iterations
+    const baseGroupHeights: number[] = workflow.phases.map((phase) => {
+      const stepGroups = getStepGroups(phase);
+      const rowCount = stepGroups.length;
+      const lastStepBottom = rowCount > 0
+        ? stepsStartY + (rowCount - 1) * (stepNodeH + stepGap) + stepNodeH
         : stepsStartY;
       return lastStepBottom + 15;
     });
@@ -250,7 +261,9 @@ export default function FlowDiagram({
         },
         style: {
           background: isActive ? 'hsl(var(--primary) / 0.2)' : isDone ? 'hsl(var(--flow-success) / 0.2)' : 'hsl(var(--flow-node-bg))',
-          border: isActive ? '2px solid hsl(var(--primary))' : isDone ? '2px solid hsl(var(--flow-success))' : '2px solid hsl(var(--flow-node-border))',
+          borderTop: isActive ? '2px solid hsl(var(--primary))' : isDone ? '2px solid hsl(var(--flow-success))' : '2px solid hsl(var(--flow-node-border))',
+          borderRight: isActive ? '2px solid hsl(var(--primary))' : isDone ? '2px solid hsl(var(--flow-success))' : '2px solid hsl(var(--flow-node-border))',
+          borderBottom: isActive ? '2px solid hsl(var(--primary))' : isDone ? '2px solid hsl(var(--flow-success))' : '2px solid hsl(var(--flow-node-border))',
           borderLeft: isActive ? '4px solid hsl(var(--primary))' : isDone ? '4px solid hsl(var(--flow-success))' : '4px solid hsl(var(--primary))',
           borderRadius: '6px',
           padding: '10px 14px',
@@ -265,8 +278,8 @@ export default function FlowDiagram({
       if (phase.checkpoint && pi < workflow.phases.length - 1) {
         const cpId = `checkpoint-${pi}`;
         const cpX = colX + stepNodeW + checkpointGap;
-        const maxGroupH = Math.max(groupHeights[pi], groupHeights[pi + 1] || 0);
-        const anchorCenterY = (maxGroupH - 10) / 2; // vertical center of group area
+        const maxGroupH = Math.max(baseGroupHeights[pi], baseGroupHeights[pi + 1] || 0);
+        const anchorCenterY = (maxGroupH - 10) / 2; // vertical center based on first-round height
 
         // Invisible anchor on right edge of current group
         const anchorLeftId = `anchor-left-${pi}`;
@@ -626,13 +639,17 @@ export default function FlowDiagram({
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const rfInstance = useRef<ReactFlowInstance | null>(null);
+  // Track structural changes (node count) to only fitView when layout changes, not on status updates
+  const prevNodeCountRef = useRef(initialNodes.length);
 
   useEffect(() => {
     setNodes(initialNodes);
     setEdges(initialEdges);
-    if (rfInstance.current) {
+    // Only fitView when the number of nodes changes (new steps/rounds added), not on status updates
+    if (rfInstance.current && initialNodes.length !== prevNodeCountRef.current) {
       setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 50);
     }
+    prevNodeCountRef.current = initialNodes.length;
   }, [initialNodes, initialEdges, setNodes, setEdges]);
 
   const onNodeClick = useCallback(
