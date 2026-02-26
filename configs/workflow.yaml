@@ -102,6 +102,6 @@ context:
   projectRoot: ../cangjie_compiler
   requirements: AST 阶段结束后，释放该阶段使用的内存
   codebase: ../cangjie_compiler/src
-  timeoutMinutes: 30
+  timeoutMinutes: 300
 judgeConfig:
   regressionThreshold: 0.1

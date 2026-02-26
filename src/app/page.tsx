@@ -431,7 +431,7 @@ export default function DashboardPage() {
                       <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                       <span className="font-medium">{config.name}</span>
                     </div>
-                    <Badge variant="secondary">{config.phases} {t('dashboard.sections.phases')}</Badge>
+                    <Badge variant="secondary">{config.phaseCount || 0} {t('dashboard.sections.phases')}</Badge>
                   </motion.div>
                 ))}
               </div>

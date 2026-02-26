@@ -21,6 +21,131 @@ function fmtMs(ms: number): string {
   return `${(ms / 60000).toFixed(1)}min`;
 }
 
+/**
+ * Format a tool_use block into a human-readable summary for the live stream.
+ * Shows file paths, commands, and code snippets depending on the tool type.
+ */
+function formatToolUseSummary(toolName: string, inputJson: string): string {
+  try {
+    const input = JSON.parse(inputJson);
+    switch (toolName) {
+      case 'Write':
+      case 'write': {
+        const wPath = input.file_path || '';
+        const wContent = input.content || '';
+        const wLines = wContent ? wContent.split('\n').length : 0;
+        let wBlock = `\n📝 写入文件: \`${wPath}\` (${wLines} 行)\n`;
+        if (wContent) {
+          const ext = wPath.split('.').pop() || '';
+          wBlock += `\n<details><summary>查看内容 (${wLines} 行)</summary>\n\n`;
+          wBlock += `\`\`\`${ext}\n${wContent}\n\`\`\`\n`;
+          wBlock += `\n</details>\n`;
+        }
+        return wBlock;
+      }
+      case 'Edit':
+      case 'edit': {
+        const filePath = input.file_path || '';
+        const oldStr = input.old_string || '';
+        const newStr = input.new_string || '';
+        const oldLines = oldStr.split('\n').length;
+        const newLines = newStr.split('\n').length;
+        const added = Math.max(0, newLines - oldLines);
+        const removed = Math.max(0, oldLines - newLines);
+        const changed = Math.min(oldLines, newLines);
+        let stats = `${changed} 行修改`;
+        if (added > 0) stats += `, +${added} 行`;
+        if (removed > 0) stats += `, -${removed} 行`;
+        let diffBlock = `\n✏️ 编辑文件: \`${filePath}\` (${stats})\n`;
+        if (oldStr || newStr) {
+          diffBlock += `\n<details><summary>查看变更 (${stats})</summary>\n\n`;
+          if (oldStr) {
+            diffBlock += `\`\`\`diff\n${oldStr.split('\n').map((l: string) => '- ' + l).join('\n')}\n`;
+            diffBlock += `${newStr.split('\n').map((l: string) => '+ ' + l).join('\n')}\n\`\`\`\n`;
+          } else {
+            diffBlock += `\`\`\`diff\n${newStr.split('\n').map((l: string) => '+ ' + l).join('\n')}\n\`\`\`\n`;
+          }
+          diffBlock += `\n</details>\n`;
+        }
+        return diffBlock;
+      }
+      case 'Read':
+      case 'read':
+        return `\n📖 读取文件: \`${input.file_path || ''}\`\n`;
+      case 'Bash':
+      case 'bash': {
+        const cmd = input.command || '';
+        const cmdLines = cmd.split('\n');
+        if (cmdLines.length <= 1 && cmd.length <= 120) {
+          return `\n💻 执行命令: \`${cmd}\`\n`;
+        }
+        let block = `\n💻 执行命令 (${cmdLines.length} 行)\n`;
+        block += `\n<details><summary>查看命令</summary>\n\n`;
+        block += `\`\`\`bash\n${cmd}\n\`\`\`\n`;
+        block += `\n</details>\n`;
+        return block;
+      }
+      case 'Glob':
+      case 'glob':
+        return `\n🔍 搜索文件: \`${input.pattern || ''}\`\n`;
+      case 'Grep':
+      case 'grep':
+        return `\n🔍 搜索内容: \`${input.pattern || ''}\`\n`;
+      case 'Task':
+      case 'task':
+        return `\n🤖 启动子任务: ${input.description || ''}\n`;
+      case 'TaskOutput':
+      case 'taskoutput':
+        return `\n📋 获取任务输出: \`${input.task_id || ''}\`\n`;
+      case 'TodoWrite':
+      case 'todowrite':
+      case 'mcp__TodoWrite':
+      case 'TodoRead': {
+        // Render a visual todo list — handle various parameter shapes from Claude Code
+        // Claude Code TodoWrite uses { todos: [...] } with fields: id, content, status, priority
+        // Also handle: top-level array, { items: [...] }, or single-todo wrapper
+        let todos: Array<{ id?: string; content?: string; status?: string; priority?: string }> = [];
+        if (Array.isArray(input)) {
+          todos = input;
+        } else if (Array.isArray(input.todos)) {
+          todos = input.todos;
+        } else if (Array.isArray(input.items)) {
+          todos = input.items;
+        } else if (input.content || input.id) {
+          // Single todo item passed as flat object
+          todos = [input];
+        }
+        if (!todos.length) return `\n📋 任务列表 (空)\n`;
+        const done = todos.filter(t => t.status === 'completed' || t.status === 'done').length;
+        const inProg = todos.filter(t => t.status === 'in_progress' || t.status === 'in-progress').length;
+        const pending = todos.length - done - inProg;
+        const header = `📋 任务列表 (${done}/${todos.length} 完成${inProg ? `, ${inProg} 进行中` : ''})`;
+        let block = `\n<!-- todo-list-marker -->\n`;
+        block += `<div class="ace-todo-list">\n`;
+        block += `<div class="ace-todo-header">${header}</div>\n`;
+        block += `<div class="ace-todo-progress"><div class="ace-todo-progress-bar" style="width:${todos.length ? Math.round(((done + inProg * 0.5) / todos.length) * 100) : 0}%"></div></div>\n`;
+        for (const t of todos) {
+          const st = t.status || 'pending';
+          const icon = st === 'completed' || st === 'done' ? '✅' : st === 'in_progress' || st === 'in-progress' ? '🔄' : '⬜';
+          const cls = st === 'completed' || st === 'done' ? 'ace-todo-done' : st === 'in_progress' || st === 'in-progress' ? 'ace-todo-active' : 'ace-todo-pending';
+          block += `<div class="ace-todo-item ${cls}">${icon} ${t.content || t.id || ''}</div>\n`;
+        }
+        block += `</div>\n`;
+        return block;
+      }
+      default:
+        return `\n⚙️ ${toolName}\n`;
+    }
+  } catch {
+    // inputJson wasn't valid JSON (partial or empty) — try to extract useful info
+    const lowerName = toolName.toLowerCase();
+    if (lowerName === 'todowrite' || lowerName === 'todoread' || lowerName === 'mcp__todowrite') {
+      return `\n📋 任务列表更新中...\n`;
+    }
+    return `\n⚙️ ${toolName}\n`;
+  }
+}
+
 export interface ClaudeJsonResult {
   result: string;
   session_id: string;
@@ -189,8 +314,8 @@ class ProcessManager extends EventEmitter {
     }
     cliArgs.push('--dangerously-skip-permissions');
 
-    proc.logLines.push(`[${ts()}] 命令: claude ${cliArgs.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`);
-    console.log(`[ProcessManager] 启动 ${id}: claude ${cliArgs.slice(0, 6).join(' ')}...`);
+    proc.logLines.push(`[${ts()}] 命令: claude ${cliArgs.map(a => a.length > 100 ? a.substring(0, 100) + '...' : a.includes(' ') ? `"${a}"` : a).join(' ')}`);
+    console.log(`[ProcessManager] 启动 ${id}: claude -p [prompt ${prompt.length} chars] ${cliArgs.filter(a => a !== '-p' && a !== prompt).slice(0, 6).join(' ')}...`);
 
     // Flush log immediately so .tmp has a file right away
     await this.flushLog(proc, cliArgs);
@@ -229,6 +354,12 @@ class ProcessManager extends EventEmitter {
 
       let buffer = '';
       let resultObj: ClaudeJsonResult | null = null;
+      // Track current tool_use block being streamed
+      let currentToolUse: { name: string; inputJson: string } | null = null;
+      // Track whether the last content block was a tool_use (to insert separator before text)
+      let lastBlockWasTool = false;
+      // Track the last tool name for formatting tool results
+      let lastToolName = '';
 
       const processLine = (line: string) => {
         if (!line.trim()) return;
@@ -242,11 +373,95 @@ class ProcessManager extends EventEmitter {
               proc.logLines.push(`[${ts()}] 可用工具: ${obj.tools.length} 个`);
             }
           } else if (obj.type === 'stream_event') {
-            // Token-by-token streaming via --include-partial-messages
-            const delta = obj.event?.delta;
-            if (delta?.type === 'text_delta' && delta.text) {
+            const evt = obj.event;
+            const delta = evt?.delta;
+
+            if (evt?.type === 'content_block_start' && evt.content_block?.type === 'text') {
+              // Text block starting — if previous block was a tool, insert a visual separator
+              if (lastBlockWasTool) {
+                const sep = '\n\n<!-- chunk-boundary -->\n\n';
+                proc.streamContent += sep;
+                this.emit('stream', { id, step, delta: sep, total: proc.streamContent });
+              }
+              lastBlockWasTool = false;
+            } else if (delta?.type === 'text_delta' && delta.text) {
+              // Regular text output — insert separator if coming right after a tool block
+              if (lastBlockWasTool) {
+                const sep = '\n\n<!-- chunk-boundary -->\n\n';
+                proc.streamContent += sep;
+                this.emit('stream', { id, step, delta: sep, total: proc.streamContent });
+                lastBlockWasTool = false;
+              }
               proc.streamContent += delta.text;
               this.emit('stream', { id, step, delta: delta.text, total: proc.streamContent });
+            } else if (evt?.type === 'content_block_start' && evt.content_block?.type === 'tool_use') {
+              // Tool call started — show tool name
+              const toolName = evt.content_block.name || 'unknown';
+              currentToolUse = { name: toolName, inputJson: '' };
+              const header = `\n\n**🔧 ${toolName}**\n`;
+              proc.streamContent += header;
+              this.emit('stream', { id, step, delta: header, total: proc.streamContent });
+            } else if (delta?.type === 'input_json_delta' && delta.partial_json && currentToolUse) {
+              // Accumulate tool input JSON for rendering
+              currentToolUse.inputJson += delta.partial_json;
+            } else if (evt?.type === 'content_block_stop' && currentToolUse) {
+              // Tool input complete — render a summary of what the tool is doing
+              const toolBlock = formatToolUseSummary(currentToolUse.name, currentToolUse.inputJson);
+              if (toolBlock) {
+                proc.streamContent += toolBlock;
+                this.emit('stream', { id, step, delta: toolBlock, total: proc.streamContent });
+              }
+              lastToolName = currentToolUse.name;
+              currentToolUse = null;
+              lastBlockWasTool = true;
+            }
+          } else if (obj.type === 'user') {
+            // Tool result from CLI — display the output
+            const toolResult = obj.tool_use_result;
+            const msgContent = obj.message?.content;
+            if (toolResult || msgContent) {
+              let resultBlock = '';
+              // Format based on tool type
+              const tn = lastToolName.toLowerCase();
+              if (toolResult) {
+                const stdout = toolResult.stdout || '';
+                const stderr = toolResult.stderr || '';
+                const output = stdout + (stderr ? (stdout ? '\n' : '') + stderr : '');
+                if (output) {
+                  const lines = output.split('\n');
+                  if (tn === 'bash' || tn === 'glob' || tn === 'grep') {
+                    if (lines.length <= 5 && output.length <= 500) {
+                      resultBlock = `\n\`\`\`\n${output}\n\`\`\`\n`;
+                    } else {
+                      resultBlock = `\n<details><summary>执行结果 (${lines.length} 行)</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>\n`;
+                    }
+                  } else {
+                    if (lines.length <= 3 && output.length <= 200) {
+                      resultBlock = `\n> ${lines.join('\n> ')}\n`;
+                    } else {
+                      resultBlock = `\n<details><summary>返回结果 (${lines.length} 行)</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>\n`;
+                    }
+                  }
+                }
+              } else if (Array.isArray(msgContent)) {
+                // Fallback: extract content from message
+                for (const block of msgContent) {
+                  if (block.type === 'tool_result' && block.content) {
+                    const content = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+                    const lines = content.split('\n');
+                    if (lines.length <= 5 && content.length <= 500) {
+                      resultBlock = `\n\`\`\`\n${content}\n\`\`\`\n`;
+                    } else {
+                      resultBlock = `\n<details><summary>返回结果 (${lines.length} 行)</summary>\n\n\`\`\`\n${content}\n\`\`\`\n\n</details>\n`;
+                    }
+                    break;
+                  }
+                }
+              }
+              if (resultBlock) {
+                proc.streamContent += resultBlock;
+                this.emit('stream', { id, step, delta: resultBlock, total: proc.streamContent });
+              }
             }
           } else if (obj.type === 'assistant') {
             // Insert chunk boundary so live stream viewers see visual separation between turns
@@ -282,6 +497,9 @@ class ProcessManager extends EventEmitter {
             };
             proc.jsonResult = resultObj;
             proc.logLines.push(`[${ts()}] result 事件: cost=$${resultObj.cost_usd.toFixed(4)}, turns=${resultObj.num_turns}`);
+          } else {
+            // Log unhandled event types for debugging
+            proc.logLines.push(`[${ts()}] 未处理事件: type=${obj.type}, subtype=${obj.subtype || ''}, keys=${Object.keys(obj).join(',')}`);
           }
         } catch {
           // Not valid JSON — might be partial line or stderr leak

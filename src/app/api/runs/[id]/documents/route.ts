@@ -22,7 +22,11 @@ export async function GET(
     // Read config to get projectRoot
     let projectRoot = '';
     try {
-      const configPath = resolve(process.cwd(), state.configFile);
+      // Try direct path first, then with configs/ prefix
+      let configPath = resolve(process.cwd(), state.configFile);
+      if (!existsSync(configPath)) {
+        configPath = resolve(process.cwd(), 'configs', state.configFile);
+      }
       const configContent = await readFile(configPath, 'utf-8');
       const config = parse(configContent);
       projectRoot = config?.context?.projectRoot || '';

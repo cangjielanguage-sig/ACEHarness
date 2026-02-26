@@ -81,6 +81,7 @@ export default function WorkbenchPage() {
   const [editingContextValue, setEditingContextValue] = useState('');
   const liveStreamRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveStreamLenRef = useRef(0);
+  const liveStreamScrollRef = useRef<HTMLDivElement | null>(null);
   const {
     viewMode, workflowConfig, editingConfig, agentConfigs,
     workflowStatus, runId, currentPhase, currentStep, agents, logs, completedSteps, failedSteps,
@@ -385,6 +386,16 @@ export default function WorkbenchPage() {
           streamIndex: liveStreamLenRef.current,
         }]);
         break;
+      case 'feedback-recalled':
+        addLog('system', 'info', `反馈已撤回: ${event.data.message.substring(0, 50)}${event.data.message.length > 50 ? '...' : ''}`);
+        setInlineFeedbacks(prev => {
+          const idx = prev.findIndex(f => f.message === event.data.message);
+          if (idx === -1) return prev;
+          const next = [...prev];
+          next.splice(idx, 1);
+          return next;
+        });
+        break;
       case 'context-updated':
         if (event.data.scope === 'global') {
           dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: event.data.context });
@@ -681,16 +692,27 @@ export default function WorkbenchPage() {
     setShowLiveStream(false);
   };
 
-  const sendLiveFeedback = async () => {
+  const sendLiveFeedback = async (interrupt?: boolean) => {
     if (!liveStreamFeedback.trim() || sendingFeedback) return;
     setSendingFeedback(true);
     try {
-      await workflowApi.injectFeedback(liveStreamFeedback.trim());
+      await workflowApi.injectFeedback(liveStreamFeedback.trim(), interrupt);
       setLiveStreamFeedback('');
+      if (interrupt) {
+        toast('success', '已打断当前执行，反馈将立即处理');
+      }
     } catch (error: any) {
       toast('error', `发送反馈失败: ${error.message}`);
     }
     setSendingFeedback(false);
+  };
+
+  const recallFeedback = async (message: string) => {
+    try {
+      await workflowApi.recallFeedback(message);
+    } catch (error: any) {
+      toast('error', `撤回失败: ${error.message}`);
+    }
   };
 
   const openContextEditor = (scope: 'global' | 'phase', phase?: string) => {
@@ -747,6 +769,13 @@ export default function WorkbenchPage() {
   useEffect(() => {
     return () => { if (liveStreamRef.current) clearInterval(liveStreamRef.current); };
   }, []);
+
+  // Auto-scroll live stream to bottom when content updates
+  useEffect(() => {
+    if (liveStreamScrollRef.current) {
+      liveStreamScrollRef.current.scrollTop = liveStreamScrollRef.current.scrollHeight;
+    }
+  }, [liveStream]);
 
   const selectedRoleConfig = selectedStep
     ? agentConfigs.find((r: any) => r.name === selectedStep.agent)
@@ -1140,8 +1169,8 @@ export default function WorkbenchPage() {
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>description</span>文档
                   </TabsTrigger>
                 </TabsList>
-                <div className="flex-1 overflow-y-auto p-4 min-h-0">
-                <TabsContent value="workflow" className="mt-0">
+                <div className="flex-1 overflow-hidden min-h-0">
+                <TabsContent value="workflow" className="mt-0 overflow-y-auto h-full p-4">
                   {workflowConfig && (
                     <div>
                       <div>
@@ -1208,7 +1237,7 @@ export default function WorkbenchPage() {
                     </div>
                   )}
                 </TabsContent>
-                <TabsContent value="agents" className="mt-0"><div className="flex flex-col gap-2">
+                <TabsContent value="agents" className="mt-0 overflow-y-auto h-full p-4"><div className="flex flex-col gap-2">
                   {agents.map((agent) => (<div key={agent.name}
                     className={`bg-muted p-3 rounded-md cursor-pointer transition-colors hover:bg-accent border-l-[3px] border-transparent ${selectedAgent?.name === agent.name ? 'border-l-primary bg-accent' : ''}`}
                     onClick={() => dispatch({ type: 'SET_SELECTED_AGENT', payload: agent })}>
@@ -1216,9 +1245,9 @@ export default function WorkbenchPage() {
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className={`w-2 h-2 rounded-full ${agent.status === 'running' ? 'bg-blue-500 animate-pulse' : agent.status === 'completed' ? 'bg-green-500' : agent.status === 'failed' ? 'bg-red-500' : 'bg-gray-400'}`} />{agent.status}</div>
                   </div>))}
                 </div></TabsContent>
-                <TabsContent value="config" className="mt-0"><div><h4 className="text-sm font-semibold mb-4">高级配置</h4>
+                <TabsContent value="config" className="mt-0 overflow-y-auto h-full p-4"><div><h4 className="text-sm font-semibold mb-4">高级配置</h4>
                 </div></TabsContent>
-                <TabsContent value="documents" className="mt-0 -mx-4 -mb-4 h-[calc(100%+2rem)]">
+                <TabsContent value="documents" className="mt-0 h-full">
                   <DocumentsPanel runId={runId || selectedRun?.id || null} />
                 </TabsContent>
               </div>
@@ -1349,11 +1378,24 @@ export default function WorkbenchPage() {
                       ? raw.substring(0, 2000) + '\n\n...(已截断)'
                       : raw;
                     const chunks = displayText.split(CHUNK_SEP).filter(Boolean);
+                    // Deduplicate TodoWrite: only keep the latest todo-list chunk
+                    const TODO_MK2 = '<!-- todo-list-marker -->';
+                    let lastTodo2 = -1;
+                    for (let k = chunks.length - 1; k >= 0; k--) {
+                      if (chunks[k].includes(TODO_MK2)) { lastTodo2 = k; break; }
+                    }
+                    const dedupedChunks = chunks.filter((c, idx) => {
+                      if (c.includes(TODO_MK2) && idx !== lastTodo2) return false;
+                      // Filter out filler chunks (e.g. lone "." between tool calls)
+                      const stripped = c.replace(/\*\*🔧 .+?\*\*/g, '').replace(/<!--.*?-->/gs, '').trim();
+                      if (stripped.length <= 1) return false;
+                      return true;
+                    });
                     return (
                       <>
                         <div className={`${styles.markdownContent} bg-background border rounded p-2 text-sm leading-relaxed max-h-[200px] overflow-y-auto mt-1.5`}>
-                          {chunks.map((chunk, i) => (
-                            <div key={i} className={i < chunks.length - 1 ? 'border-b border-border/50 pb-3 mb-3' : ''}>
+                          {dedupedChunks.map((chunk, i) => (
+                            <div key={i} className={i < dedupedChunks.length - 1 ? 'border-b border-border/50 pb-3 mb-3' : ''}>
                               <Markdown>{chunk}</Markdown>
                             </div>
                           ))}
@@ -1652,7 +1694,7 @@ export default function WorkbenchPage() {
               <h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">cell_tower</span>实时输出 {currentStep ? `- ${currentStep}` : ''}</h3>
               <Button variant="secondary" size="sm" onClick={stopLiveStream}>关闭</Button>
             </div>
-            <div className="p-5 flex-1 overflow-auto">
+            <div ref={liveStreamScrollRef} className="p-5 flex-1 overflow-auto">
               {liveStream.length === 0 ? (
                 <div className="text-muted-foreground text-sm text-center py-8">(等待输出...)</div>
               ) : (
@@ -1687,13 +1729,41 @@ export default function WorkbenchPage() {
                       }
                       fbIdx++;
                     }
-                    return items.map((item, i) => {
+                    // Deduplicate TodoWrite: only keep the latest todo-list chunk
+                    const TODO_MARKER = '<!-- todo-list-marker -->';
+                    let lastTodoIdx = -1;
+                    for (let j = items.length - 1; j >= 0; j--) {
+                      if (items[j].type === 'chunk' && (items[j] as any).content.includes(TODO_MARKER)) {
+                        if (lastTodoIdx === -1) { lastTodoIdx = j; } else {
+                          // Remove older todo chunks — replace content with empty
+                          (items[j] as any).content = '';
+                        }
+                      }
+                    }
+                    return items.filter(it => {
+                      if (it.type === 'feedback') return true;
+                      const c = (it as any).content as string;
+                      if (!c) return false;
+                      // Filter out chunks that are just filler text between tool calls (e.g. lone ".")
+                      const stripped = c.replace(/\*\*🔧 .+?\*\*/g, '').replace(/<!--.*?-->/gs, '').trim();
+                      if (stripped.length <= 1) return false;
+                      return true;
+                    }).map((item, i) => {
                       if (item.type === 'feedback') {
                         return (
-                          <div key={`fb-${i}`} className="flex justify-end">
-                            <div className="bg-primary/15 border border-primary/30 rounded-lg px-3 py-2 max-w-[80%]">
-                              <div className="text-[10px] text-muted-foreground mb-0.5 text-right font-mono">
+                          <div key={`fb-${i}`} className="flex justify-end group">
+                            <div className="bg-primary/15 border border-primary/30 rounded-lg px-3 py-2 max-w-[80%] relative">
+                              <div className="text-[10px] text-muted-foreground mb-0.5 text-right font-mono flex items-center justify-end gap-1">
                                 {new Date(item.timestamp).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                {isRunning && (
+                                  <button
+                                    onClick={() => recallFeedback(item.message)}
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                                    title="撤回"
+                                  >
+                                    <span className="material-symbols-outlined" style={{ fontSize: '12px' }}>undo</span>
+                                  </button>
+                                )}
                               </div>
                               <div className="text-sm">{item.message}</div>
                             </div>
@@ -1729,6 +1799,11 @@ export default function WorkbenchPage() {
                       );
                     });
                   })()}
+                  {isRunning && (
+                    <div className="flex items-center gap-1 pt-1">
+                      <span className={styles.typingCursor} />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1737,12 +1812,15 @@ export default function WorkbenchPage() {
                 value={liveStreamFeedback}
                 onChange={(e) => setLiveStreamFeedback(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendLiveFeedback(); } }}
-                placeholder="输入反馈意见，当前步骤完成后 agent 将基于反馈继续处理..."
+                placeholder="输入反馈意见..."
                 className="flex-1"
                 disabled={sendingFeedback}
               />
-              <Button size="sm" onClick={sendLiveFeedback} disabled={sendingFeedback || !liveStreamFeedback.trim()}>
+              <Button size="sm" onClick={() => sendLiveFeedback()} disabled={sendingFeedback || !liveStreamFeedback.trim()} title="发送反馈（等待当前执行完成后处理）">
                 <span className="material-symbols-outlined text-sm">send</span>
+              </Button>
+              <Button size="sm" variant="destructive" onClick={() => sendLiveFeedback(true)} disabled={sendingFeedback || !liveStreamFeedback.trim()} title="打断当前执行，立即处理反馈">
+                <span className="material-symbols-outlined text-sm">bolt</span>
               </Button>
             </div>
           </div>
@@ -1760,11 +1838,29 @@ export default function WorkbenchPage() {
             <div className="p-5 flex-1 overflow-auto">
               {markdownModal.chunks.length > 1 ? (
                 <div className="space-y-3">
-                  {markdownModal.chunks.map((chunk, i) => (
-                    <div key={i} className={`${styles.markdownContent} text-sm border-b border-border/50 pb-3 last:border-0`}>
-                      <Markdown>{chunk}</Markdown>
-                    </div>
-                  ))}
+                  {(() => {
+                    // Deduplicate TodoWrite: only keep the latest todo-list chunk
+                    const TODO_MK = '<!-- todo-list-marker -->';
+                    let lastIdx = -1;
+                    const filtered = markdownModal.chunks.filter((chunk, idx) => {
+                      // Filter out filler chunks (e.g. lone "." between tool calls)
+                      const stripped = chunk.replace(/\*\*🔧 .+?\*\*/g, '').replace(/<!--.*?-->/gs, '').trim();
+                      if (stripped.length <= 1) return false;
+                      if (!chunk.includes(TODO_MK)) return true;
+                      if (lastIdx === -1) {
+                        // Scan forward to find the last one
+                        for (let k = markdownModal.chunks.length - 1; k >= 0; k--) {
+                          if (markdownModal.chunks[k].includes(TODO_MK)) { lastIdx = k; break; }
+                        }
+                      }
+                      return idx === lastIdx;
+                    });
+                    return filtered.map((chunk, i) => (
+                      <div key={i} className={`${styles.markdownContent} text-sm border-b border-border/50 pb-3 last:border-0`}>
+                        <Markdown>{chunk}</Markdown>
+                      </div>
+                    ));
+                  })()}
                 </div>
               ) : (
                 <div className={styles.markdownContent}>

@@ -7,6 +7,13 @@ const nextConfig = {
     buildActivity: true,
     buildActivityPosition: 'bottom-right',
   },
+
+  // 抑制开发模式下的 fetch 日志
+  logging: {
+    fetches: {
+      fullUrl: false,
+    },
+  },
 };
 
 module.exports = nextConfig;

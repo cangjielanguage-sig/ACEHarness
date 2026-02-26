@@ -137,3 +137,67 @@
   font-weight: 600;
 }
 
+/* === Todo List Styles === */
+:global(.ace-todo-list) {
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 8px 0;
+  background: hsl(var(--card));
+}
+
+:global(.ace-todo-header) {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+:global(.ace-todo-progress) {
+  height: 4px;
+  background: hsl(var(--muted));
+  border-radius: 2px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+:global(.ace-todo-progress-bar) {
+  height: 100%;
+  background: hsl(var(--primary));
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+:global(.ace-todo-item) {
+  font-size: 12.5px;
+  padding: 4px 0;
+  border-bottom: 1px solid hsl(var(--border) / 0.3);
+}
+
+:global(.ace-todo-item:last-child) {
+  border-bottom: none;
+}
+
+:global(.ace-todo-done) {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+:global(.ace-todo-active) {
+  color: hsl(var(--primary));
+  font-weight: 500;
+}
+
+.typingCursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background: hsl(var(--primary));
+  border-radius: 1px;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}

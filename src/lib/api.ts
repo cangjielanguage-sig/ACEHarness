@@ -239,15 +239,28 @@ export const workflowApi = {
     return response.json();
   },
 
-  async injectFeedback(message: string): Promise<ApiResponse> {
+  async injectFeedback(message: string, interrupt?: boolean): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/inject-feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, interrupt }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || '注入反馈失败');
+    }
+    return response.json();
+  },
+
+  async recallFeedback(message: string): Promise<ApiResponse> {
+    const response = await fetch(`${API_BASE}/workflow/recall-feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
-      throw new Error(err.error || '注入反馈失败');
+      throw new Error(err.error || '撤回反馈失败');
     }
     return response.json();
   },

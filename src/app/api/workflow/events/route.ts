@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
         escalation: (data: any) => sendEvent({ type: 'escalation', data }),
         'token-usage': (data: any) => sendEvent({ type: 'token-usage', data }),
         'feedback-injected': (data: any) => sendEvent({ type: 'feedback-injected', data }),
+        'feedback-recalled': (data: any) => sendEvent({ type: 'feedback-recalled', data }),
         'context-updated': (data: any) => sendEvent({ type: 'context-updated', data }),
       };
 

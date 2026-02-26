@@ -4,7 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { readFile, readdir } from 'fs/promises';
+import { readFile, readdir, stat } from 'fs/promises';
 import { resolve } from 'path';
 import { parse } from 'yaml';
 import { processManager } from './process-manager';
@@ -70,6 +70,7 @@ class WorkflowManager extends EventEmitter {
   private failedStepNames: string[] = [];
   private stepLogs: PersistedStepLog[] = [];
   private forceCompleteFlag: boolean = false;
+  private interruptFlag: boolean = false;
   private runStartTime: string | null = null;
   private runEndTime: string | null = null;
   /** Agent name → session_id for --resume in iterative phases */
@@ -86,6 +87,8 @@ class WorkflowManager extends EventEmitter {
   private globalContext: string = '';
   /** Per-phase context injected into steps of that phase */
   private phaseContexts: Map<string, string> = new Map();
+  /** Cached workspace skills discovered from projectRoot/.claude/skills/ */
+  private workspaceSkills: string = '';
 
   private async loadAgentConfigs(): Promise<RoleConfig[]> {
     const agentsDir = resolve(process.cwd(), 'configs', 'agents');
@@ -103,6 +106,45 @@ class WorkflowManager extends EventEmitter {
       return configs;
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Discover .claude/skills from the workspace projectRoot.
+   * Reads each skill's SKILL.md and returns a formatted prompt section.
+   */
+  private async discoverWorkspaceSkills(projectRoot: string): Promise<string> {
+    const absRoot = resolve(process.cwd(), projectRoot);
+    const skillsDir = resolve(absRoot, '.claude', 'skills');
+    try {
+      const skillIndex = resolve(skillsDir, 'SKILL.md');
+      const indexContent = await readFile(skillIndex, 'utf-8');
+
+      // Also read each sub-skill's SKILL.md for detailed instructions
+      const entries = await readdir(skillsDir);
+      const details: string[] = [];
+      for (const entry of entries) {
+        const entryPath = resolve(skillsDir, entry);
+        const entryStat = await stat(entryPath).catch(() => null);
+        if (!entryStat?.isDirectory()) continue;
+        const subSkillMd = resolve(entryPath, 'SKILL.md');
+        try {
+          const content = await readFile(subSkillMd, 'utf-8');
+          details.push(content);
+        } catch { /* no SKILL.md in this dir */ }
+      }
+
+      let result = `## 可用 Skills（来自项目 .claude/skills/）\n\n`;
+      result += `以下是项目工作区中预定义的 Skills，你可以直接按照说明使用：\n\n`;
+      result += indexContent + '\n\n';
+      if (details.length > 0) {
+        result += `### 详细使用说明\n\n`;
+        result += details.join('\n\n---\n\n') + '\n\n';
+      }
+      return result;
+    } catch {
+      // No skills directory or index — that's fine
+      return '';
     }
   }
 
@@ -203,6 +245,7 @@ class WorkflowManager extends EventEmitter {
     this.agentSessionIds.clear();
     this.liveFeedback = [];
     this.globalContext = '';
+    this.workspaceSkills = '';
     this.phaseContexts.clear();
     this.emit('status', { status: 'running', message: '开始执行工作流...' });
 
@@ -218,6 +261,11 @@ class WorkflowManager extends EventEmitter {
 
       // Load agent configs from configs/agents/*.yaml
       this.agentConfigs = await this.loadAgentConfigs();
+
+      // Discover workspace skills from projectRoot/.claude/skills/
+      if (workflowConfig.context.projectRoot) {
+        this.workspaceSkills = await this.discoverWorkspaceSkills(workflowConfig.context.projectRoot);
+      }
 
       this.initializeAgents(workflowConfig);
 
@@ -1077,24 +1125,58 @@ class WorkflowManager extends EventEmitter {
     try {
       // Execute loop: run agent, then check for pending feedback and resume if any
       while (true) {
-        const result = await processManager.executeClaudeCli(
-          currentProcessId,
-          step.agent,
-          step.name,
-          currentPrompt,
-          systemPromptToUse,
-          roleConfig.model,
-          {
-            workingDirectory: workflowConfig.context.projectRoot,
-            allowedTools: roleConfig.allowedTools,
-            resumeSessionId: currentSessionId,
-            appendSystemPrompt: !!currentSessionId,
-            timeoutMs: workflowConfig.context.timeoutMinutes
-              ? workflowConfig.context.timeoutMinutes * 60 * 1000
-              : undefined,
-            runId: this.currentRunId || undefined,
+        let result: ClaudeJsonResult;
+        try {
+          result = await processManager.executeClaudeCli(
+            currentProcessId,
+            step.agent,
+            step.name,
+            currentPrompt,
+            systemPromptToUse,
+            roleConfig.model,
+            {
+              workingDirectory: workflowConfig.context.projectRoot,
+              allowedTools: roleConfig.allowedTools,
+              resumeSessionId: currentSessionId,
+              appendSystemPrompt: !!currentSessionId,
+              timeoutMs: workflowConfig.context.timeoutMinutes
+                ? workflowConfig.context.timeoutMinutes * 60 * 1000
+                : undefined,
+              runId: this.currentRunId || undefined,
+            }
+          );
+        } catch (err) {
+          // If interrupted with feedback, preserve stream and resume with feedback
+          if (this.interruptFlag && this.liveFeedback.length > 0) {
+            this.interruptFlag = false;
+            const proc = processManager.getProcess(currentProcessId);
+            if (proc?.streamContent) {
+              accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
+            }
+            const sessionId = proc?.sessionId;
+            if (!sessionId) throw err; // Can't resume without session ID
+
+            const feedbackPrompt = this.liveFeedback.map((fb, i) => `${i + 1}. ${fb}`).join('\n');
+            this.liveFeedback = [];
+            const feedbackTimestamp = new Date().toISOString();
+            accumulatedStream += `\n\n<!-- chunk-boundary -->\n\n<!-- human-feedback: ${feedbackTimestamp} -->\n${feedbackPrompt}`;
+            if (this.currentRunId) {
+              saveStreamContent(this.currentRunId, step.name, accumulatedStream).catch(() => {});
+            }
+            currentSessionId = sessionId;
+            currentPrompt = `## 人工实时反馈（紧急打断）\n用户紧急打断了当前执行，请立即处理以下反馈：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
+            currentProcessId = `${step.agent}-${step.name}-interrupt-${Date.now()}`;
+            activeProcessId = currentProcessId;
+            this.emit('step', {
+              step: step.name,
+              agent: step.agent,
+              message: `收到紧急反馈，打断并重新执行: ${step.name}`,
+              role: step.role,
+            });
+            continue;
           }
-        );
+          throw err; // Non-interrupt error, propagate normally
+        }
 
         // Save session ID for potential resume
         if (result.session_id) {
@@ -1188,6 +1270,11 @@ class WorkflowManager extends EventEmitter {
         prompt += `\`${outputDir}/\`\n\n`;
         prompt += `文件命名建议使用步骤名或有意义的名称，格式为 Markdown (.md)。这样其他 Agent 和人类审阅者都能方便地查看你的产出。\n\n`;
       }
+    }
+
+    // Inject workspace skills (from projectRoot/.claude/skills/)
+    if (this.workspaceSkills) {
+      prompt += this.workspaceSkills;
     }
 
     if (roleConfig.capabilities && roleConfig.capabilities.length > 0) {
@@ -1312,6 +1399,47 @@ class WorkflowManager extends EventEmitter {
     const entry = { message, timestamp: new Date().toISOString() };
     this.liveFeedback.push(message);
     this.emit('feedback-injected', entry);
+  }
+
+  /**
+   * Recall (remove) a pending live feedback message that hasn't been consumed yet.
+   * Returns true if the message was found and removed.
+   */
+  recallLiveFeedback(message: string): boolean {
+    const idx = this.liveFeedback.indexOf(message);
+    if (idx === -1) return false;
+    this.liveFeedback.splice(idx, 1);
+    this.emit('feedback-recalled', { message, timestamp: new Date().toISOString() });
+    return true;
+  }
+
+  /**
+   * Interrupt the currently running step and immediately resume with feedback.
+   * Kills the current process and queues feedback so executeSingleAgent resumes.
+   */
+  interruptWithFeedback(message: string): boolean {
+    if (this.status !== 'running' || !this.currentStep) return false;
+
+    // Queue the feedback
+    this.liveFeedback.push(message);
+    this.interruptFlag = true;
+
+    // Find and kill the running process
+    const allProcs = processManager.getAllProcesses();
+    const running = allProcs.find(
+      (p: any) => p.status === 'running' && (p.step === this.currentStep || p.id.startsWith(this.currentStep!.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_')))
+    );
+    if (running) {
+      processManager.killProcess(running.id);
+    }
+
+    this.emit('log', {
+      agent: 'system',
+      level: 'warning',
+      message: `步骤 "${this.currentStep}" 被打断，将立即处理反馈`,
+    });
+    this.emit('feedback-injected', { message, timestamp: new Date().toISOString() });
+    return true;
   }
 
   setContext(scope: 'global' | 'phase', context: string, phase?: string): void {
@@ -1489,7 +1617,18 @@ class WorkflowManager extends EventEmitter {
     this.shouldStop = false;
     this.logs = [];
     this.completedStepNames = [...(runState.completedSteps || [])];
-    this.failedStepNames = []; // Reset failed — we'll retry them
+    // Promote failed steps that have completed stepLogs — they ran successfully but
+    // were marked failed due to downstream errors (e.g. API timeout after output).
+    const failedSet = new Set(runState.failedSteps || []);
+    const completedLogNames = new Set(
+      (runState.stepLogs || []).filter(l => l.status === 'completed').map(l => l.stepName)
+    );
+    for (const fn of failedSet) {
+      if (completedLogNames.has(fn) && !this.completedStepNames.includes(fn)) {
+        this.completedStepNames.push(fn);
+      }
+    }
+    this.failedStepNames = []; // Reset failed — we'll retry truly failed ones
     this.stepLogs = [...(runState.stepLogs || []).filter(l => l.status === 'completed')];
     this.runStartTime = runState.startTime;
     this.runEndTime = null;
@@ -1506,6 +1645,12 @@ class WorkflowManager extends EventEmitter {
 
     // Load agent configs
     this.agentConfigs = await this.loadAgentConfigs();
+
+    // Discover workspace skills from projectRoot/.claude/skills/
+    if (workflowConfig.context.projectRoot) {
+      this.workspaceSkills = await this.discoverWorkspaceSkills(workflowConfig.context.projectRoot);
+    }
+
     this.initializeAgents(workflowConfig);
 
     // Restore agent state from persisted data
@@ -1658,7 +1803,7 @@ class WorkflowManager extends EventEmitter {
       // For iterative phases, also check iteration state — steps may be "completed" from round 1
       // but iteration itself may still need more rounds
       const iterState = phase.iteration?.enabled ? this.iterationStates.get(phase.name) : null;
-      const iterDone = !iterState || iterState.status === 'completed';
+      const iterDone = !iterState || iterState.status === 'completed' || iterState.status === 'escalated';
       console.log(`[resume] phase="${phase.name}" steps=[${phaseStepNames.join(', ')}] allCompleted=${allPhaseCompleted} iterative=${!!phase.iteration?.enabled} iterDone=${iterDone}`);
       if (allPhaseCompleted && iterDone) {
         this.emit('phase', {

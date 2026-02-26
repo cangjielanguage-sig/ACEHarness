@@ -41,7 +41,12 @@ export async function GET(
     if (state) {
       // Parse workflow config to get phase/step mapping
       try {
-        const configPath = resolve(process.cwd(), state.configFile);
+        // Try direct path first, then with configs/ prefix
+        let configPath = resolve(process.cwd(), state.configFile);
+        const { existsSync } = await import('fs');
+        if (!existsSync(configPath)) {
+          configPath = resolve(process.cwd(), 'configs', state.configFile);
+        }
         const configContent = await readFile(configPath, 'utf-8');
         const { parse } = await import('yaml');
         const config = parse(configContent);
