@@ -141,7 +141,7 @@ export const runsApi = {
     return response.json();
   },
 
-  async listOutputFiles(id: string): Promise<{ files: { stepName: string; filename: string; size: number }[] }> {
+  async listOutputFiles(id: string): Promise<{ files: { stepName: string; filename: string; size: number; agent: string; phaseName: string; role: string; iteration: number | null; maxIterations: number | null; timestamp: string; status: string }[] }> {
     const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/outputs`);
     if (!response.ok) throw new Error('获取输出文件列表失败');
     return response.json();
@@ -150,6 +150,18 @@ export const runsApi = {
   async getStepOutput(id: string, stepName: string): Promise<{ stepName: string; content: string }> {
     const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/outputs?step=${encodeURIComponent(stepName)}`);
     if (!response.ok) throw new Error('获取步骤输出失败');
+    return response.json();
+  },
+
+  async listDocuments(id: string): Promise<{ files: { filename: string; stepName: string; baseName: string; iteration: number | null; agent: string; phaseName: string; role: string; size: number; modifiedTime: string }[] }> {
+    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`);
+    if (!response.ok) return { files: [] };
+    return response.json();
+  },
+
+  async getDocumentContent(id: string, filename: string): Promise<{ file: string; content: string }> {
+    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents?file=${encodeURIComponent(filename)}`);
+    if (!response.ok) throw new Error('获取文档内容失败');
     return response.json();
   },
 

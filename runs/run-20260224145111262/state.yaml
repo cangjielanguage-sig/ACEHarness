@@ -1,9 +1,9 @@
 # Auto-generated run state
 runId: run-20260224145111262
 configFile: workflow.yaml
-status: running
+status: crashed
 startTime: 2026-02-24T06:51:11.185Z
-endTime: null
+endTime: 2026-02-25T01:25:57.816Z
 currentPhase: 设计阶段
 currentStep: 评审设计方案-迭代5
 completedSteps:
@@ -586,3 +586,4 @@ pendingCheckpoint:
   checkpoint: 设计方案审批
   message: 请审查设计方案和发现的问题，决定是否进入实施阶段
   isIterativePhase: true
+statusReason: "服务重启时检测到运行中断。进程已不存在 (PIDs: 无)。当前阶段: 设计阶段，当前步骤: 评审设计方案-迭代5，已完成 15 步。"

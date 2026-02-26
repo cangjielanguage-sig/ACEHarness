@@ -13,6 +13,7 @@ import AgentPanel from '@/components/AgentPanel';
 import AgentConfigPanel from '@/components/AgentConfigPanel';
 import EditNodeModal from '@/components/EditNodeModal';
 import ProcessPanel from '@/components/ProcessPanel';
+import DocumentsPanel from '@/components/DocumentsPanel';
 import Markdown from '@/components/Markdown';
 import ResizablePanels from '@/components/ResizablePanels';
 import { Button } from '@/components/ui/button';
@@ -68,6 +69,8 @@ export default function WorkbenchPage() {
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
   const [showAgentDrawer, setShowAgentDrawer] = useState(false);
+  const [showDesignRequirements, setShowDesignRequirements] = useState(true);
+  const [showRunRequirements, setShowRunRequirements] = useState(true);
   const [iterationFeedback, setIterationFeedback] = useState('');
   const [liveStreamFeedback, setLiveStreamFeedback] = useState('');
   const [sendingFeedback, setSendingFeedback] = useState(false);
@@ -1087,7 +1090,42 @@ export default function WorkbenchPage() {
         {viewMode === 'run' && (
           <ResizablePanels
             leftPanel={
-              <Tabs value={activeTab} onValueChange={(val) => dispatch({ type: 'SET_ACTIVE_TAB', payload: val })} className="flex flex-col h-full overflow-hidden">
+              <div className="flex flex-col h-full overflow-hidden">
+              {/* Requirements panel - prominent at top */}
+              <div className="border-b shrink-0">
+                <button
+                  className="w-full flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent hover:from-primary/15 transition-colors"
+                  onClick={() => setShowRunRequirements(!showRunRequirements)}
+                >
+                  <span className="material-symbols-outlined text-primary" style={{ fontSize: 18 }}>assignment</span>
+                  <span className="text-sm font-semibold text-primary">需求</span>
+                  {!showRunRequirements && requirements && <span className="text-[10px] text-muted-foreground truncate flex-1 text-left ml-1">{requirements.substring(0, 50)}{requirements.length > 50 ? '...' : ''}</span>}
+                  <span className="material-symbols-outlined text-muted-foreground ml-auto" style={{ fontSize: 16 }}>{showRunRequirements ? 'expand_less' : 'expand_more'}</span>
+                </button>
+                {showRunRequirements && (
+                  <div className="px-4 py-3 space-y-2.5 bg-card/50">
+                    <div>
+                      <Label className="text-xs font-medium">项目根目录</Label>
+                      <Input value={projectRoot} onChange={(e) => dispatch({ type: 'SET_PROJECT_ROOT', payload: e.target.value })} type="text" placeholder="../cangjie_compiler" className="mt-1 h-8 text-sm" />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-medium">需求描述</Label>
+                      <Textarea value={requirements} onChange={(e) => dispatch({ type: 'SET_REQUIREMENTS', payload: e.target.value })} rows={3} placeholder="请输入需求描述..." className="mt-1 text-sm" />
+                    </div>
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <Label className="text-xs font-medium">步骤超时（分钟）</Label>
+                        <Input value={timeoutMinutes} onChange={(e) => dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: Math.max(1, parseInt(e.target.value) || 1) })} type="number" min={1} className="mt-1 h-8 text-sm" />
+                      </div>
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white h-8" onClick={saveConfig} disabled={saving}>
+                        {saving ? <ClipLoader color="currentColor" size={12} className="mr-1" /> : <span className="material-symbols-outlined text-sm mr-1">save</span>}
+                        {saving ? '...' : '保存'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <Tabs value={activeTab} onValueChange={(val) => dispatch({ type: 'SET_ACTIVE_TAB', payload: val })} className="flex flex-col flex-1 overflow-hidden">
                 <TabsList className="w-full rounded-none border-b flex-shrink-0">
                   <TabsTrigger value="workflow" className="flex-1 flex items-center justify-center gap-1 text-xs">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>monitoring</span>工作流
@@ -1097,6 +1135,9 @@ export default function WorkbenchPage() {
                   </TabsTrigger>
                   <TabsTrigger value="config" className="flex-1 flex items-center justify-center gap-1 text-xs">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span>配置
+                  </TabsTrigger>
+                  <TabsTrigger value="documents" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                    <span className="material-symbols-outlined" style={{ fontSize: 14 }}>description</span>文档
                   </TabsTrigger>
                 </TabsList>
                 <div className="flex-1 overflow-y-auto p-4 min-h-0">
@@ -1175,24 +1216,14 @@ export default function WorkbenchPage() {
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className={`w-2 h-2 rounded-full ${agent.status === 'running' ? 'bg-blue-500 animate-pulse' : agent.status === 'completed' ? 'bg-green-500' : agent.status === 'failed' ? 'bg-red-500' : 'bg-gray-400'}`} />{agent.status}</div>
                   </div>))}
                 </div></TabsContent>
-                <TabsContent value="config" className="mt-0"><div><h4 className="text-sm font-semibold mb-4">项目配置</h4>
-                  <div className="mb-4"><Label>项目根目录</Label>
-                    <Input value={projectRoot} onChange={(e) => dispatch({ type: 'SET_PROJECT_ROOT', payload: e.target.value })} type="text" placeholder="../cangjie_compiler" /></div>
-                  <div className="mb-4"><Label>需求描述</Label>
-                    <Textarea value={requirements} onChange={(e) => dispatch({ type: 'SET_REQUIREMENTS', payload: e.target.value })} rows={6} placeholder="请输入需求描述..." /></div>
-                  <div className="mb-4"><Label>步骤超时（分钟）</Label>
-                    <Input value={timeoutMinutes} onChange={(e) => dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: Math.max(1, parseInt(e.target.value) || 1) })} type="number" min={1} /></div>
-                  <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={saveConfig} disabled={saving}>
-                    {saving ? (
-                      <ClipLoader color="currentColor" size={14} className="mr-1" />
-                    ) : (
-                      <span className="material-symbols-outlined text-sm mr-1">save</span>
-                    )}
-                    {saving ? '保存中...' : '保存配置'}
-                  </Button>
+                <TabsContent value="config" className="mt-0"><div><h4 className="text-sm font-semibold mb-4">高级配置</h4>
                 </div></TabsContent>
+                <TabsContent value="documents" className="mt-0 -mx-4 -mb-4 h-[calc(100%+2rem)]">
+                  <DocumentsPanel runId={runId || selectedRun?.id || null} />
+                </TabsContent>
               </div>
             </Tabs>
+            </div>
             }
             centerPanel={
               <>
@@ -1422,6 +1453,40 @@ export default function WorkbenchPage() {
             <div className="flex-1 flex flex-col min-w-0">
               <div className="h-10 bg-muted border-b flex items-center px-4 min-w-0 overflow-hidden">
                 <h2 className="text-sm font-semibold m-0 truncate min-w-0">工作流设计</h2>
+              </div>
+              {/* Requirements panel */}
+              <div className="border-b shrink-0">
+                <button
+                  className="w-full flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent hover:from-primary/15 transition-colors"
+                  onClick={() => setShowDesignRequirements(!showDesignRequirements)}
+                >
+                  <span className="material-symbols-outlined text-primary" style={{ fontSize: 18 }}>assignment</span>
+                  <span className="text-sm font-semibold text-primary">需求配置</span>
+                  {requirements && <span className="text-[10px] text-muted-foreground truncate flex-1 text-left ml-2">{requirements.substring(0, 60)}{requirements.length > 60 ? '...' : ''}</span>}
+                  <span className="material-symbols-outlined text-muted-foreground ml-auto" style={{ fontSize: 16 }}>{showDesignRequirements ? 'expand_less' : 'expand_more'}</span>
+                </button>
+                {showDesignRequirements && (
+                  <div className="px-4 py-3 space-y-3 bg-card/50">
+                    <div>
+                      <Label className="text-xs font-medium">项目根目录</Label>
+                      <Input value={projectRoot} onChange={(e) => dispatch({ type: 'SET_PROJECT_ROOT', payload: e.target.value })} type="text" placeholder="../cangjie_compiler" className="mt-1 h-8 text-sm" />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-medium">需求描述</Label>
+                      <Textarea value={requirements} onChange={(e) => dispatch({ type: 'SET_REQUIREMENTS', payload: e.target.value })} rows={3} placeholder="请输入需求描述..." className="mt-1 text-sm" />
+                    </div>
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <Label className="text-xs font-medium">步骤超时（分钟）</Label>
+                        <Input value={timeoutMinutes} onChange={(e) => dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: Math.max(1, parseInt(e.target.value) || 1) })} type="number" min={1} className="mt-1 h-8 text-sm" />
+                      </div>
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white h-8" onClick={saveConfig} disabled={saving}>
+                        {saving ? <ClipLoader color="currentColor" size={12} className="mr-1" /> : <span className="material-symbols-outlined text-sm mr-1">save</span>}
+                        {saving ? '保存中...' : '保存'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex-1 overflow-hidden"><DesignPanel workflow={editingConfig.workflow}
                 onSelectNode={handleSelectNode}
