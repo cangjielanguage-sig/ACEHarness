@@ -1741,6 +1741,14 @@ class WorkflowManager extends EventEmitter {
       throw new Error(`步骤 "${stepName}" 未在运行记录中找到`);
     }
 
+    // Collect agents from steps being removed (before truncation)
+    const removedStepAgents = new Set<string>();
+    if (logIndex >= 0) {
+      for (const log of runState.stepLogs.slice(logIndex)) {
+        if (log.agent) removedStepAgents.add(log.agent);
+      }
+    }
+
     // Remove target step and all subsequent steps from completed list
     if (logIndex >= 0) {
       const stepsToRemove = new Set(
@@ -1778,6 +1786,22 @@ class WorkflowManager extends EventEmitter {
         }
         // Reset consecutive clean rounds count
         iterState.consecutiveCleanRounds = 0;
+      }
+    }
+
+    // Clear session IDs for agents involved in removed steps so they start fresh
+    // Also collect from workflow config for the target step (covers failed-only case)
+    for (const phase of workflowConfig.workflow.phases) {
+      for (const s of phase.steps) {
+        if (s.name === baseStepName && s.agent) {
+          removedStepAgents.add(s.agent);
+        }
+      }
+    }
+    // Clear session IDs in persisted agent state
+    for (const pa of (runState.agents || [])) {
+      if (removedStepAgents.has(pa.name)) {
+        pa.sessionId = null;
       }
     }
 

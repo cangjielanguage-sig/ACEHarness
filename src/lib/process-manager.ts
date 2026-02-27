@@ -360,6 +360,8 @@ class ProcessManager extends EventEmitter {
       let lastBlockWasTool = false;
       // Track the last tool name for formatting tool results
       let lastToolName = '';
+      // Track the last Task tool description for labeling subagent results
+      let lastTaskDescription = '';
 
       const processLine = (line: string) => {
         if (!line.trim()) return;
@@ -412,6 +414,13 @@ class ProcessManager extends EventEmitter {
                 this.emit('stream', { id, step, delta: toolBlock, total: proc.streamContent });
               }
               lastToolName = currentToolUse.name;
+              // Save Task description for labeling subagent results
+              if (currentToolUse.name.toLowerCase() === 'task') {
+                try {
+                  const parsed = JSON.parse(currentToolUse.inputJson);
+                  lastTaskDescription = parsed.description || '';
+                } catch { lastTaskDescription = ''; }
+              }
               currentToolUse = null;
               lastBlockWasTool = true;
             }
@@ -429,7 +438,13 @@ class ProcessManager extends EventEmitter {
                 const output = stdout + (stderr ? (stdout ? '\n' : '') + stderr : '');
                 if (output) {
                   const lines = output.split('\n');
-                  if (tn === 'bash' || tn === 'glob' || tn === 'grep') {
+                  if (tn === 'task' || tn === 'taskoutput') {
+                    // Subagent results: always collapsed with descriptive label
+                    const label = lastTaskDescription
+                      ? `🤖 子任务结果: ${lastTaskDescription} (${lines.length} 行)`
+                      : `🤖 子任务结果 (${lines.length} 行)`;
+                    resultBlock = `\n<details><summary>${label}</summary>\n\n${output}\n\n</details>\n`;
+                  } else if (tn === 'bash' || tn === 'glob' || tn === 'grep') {
                     if (lines.length <= 5 && output.length <= 500) {
                       resultBlock = `\n\`\`\`\n${output}\n\`\`\`\n`;
                     } else {
