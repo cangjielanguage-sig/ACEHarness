@@ -1838,7 +1838,12 @@ export default function WorkbenchPage() {
                     })}
                     </>);
                   })()}
-                  {isRunning && (
+                  {isRunning && (() => {
+                    // Determine status: if last content ends with a tool call, show "执行中", otherwise "思考中"
+                    const lastChunk = liveStream[liveStream.length - 1] || '';
+                    const isExecuting = /\*\*🔧 .+?\*\*[^]*$/.test(lastChunk) && !/<\/details>\s*$/.test(lastChunk.trim());
+                    const statusText = isExecuting ? '执行中' : '思考中';
+                    return (
                     <div className={styles.thinkingBot}>
                       <svg className={styles.botSvg} width="28" height="28" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
                         <defs>
@@ -1866,12 +1871,13 @@ export default function WorkbenchPage() {
                           </path>
                         </g>
                       </svg>
-                      <span className={styles.thinkingText}>思考中</span>
+                      <span className={styles.thinkingText}>{statusText}</span>
                       <span className={styles.thinkingDots}>
                         <span>.</span><span>.</span><span>.</span>
                       </span>
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               )}
             </div>
