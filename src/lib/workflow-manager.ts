@@ -1274,6 +1274,9 @@ class WorkflowManager extends EventEmitter {
 
     // Inject workspace skills (from projectRoot/.claude/skills/)
     if (this.workspaceSkills) {
+      prompt += `## 必须使用的 Skills\n\n`;
+      prompt += `**重要：以下 Skills 是项目工作区预定义的工具（构建、测试、知识库等），你必须优先使用这些 Skills 来完成对应任务，而不是自己猜测命令或自行编写脚本。**\n\n`;
+      prompt += `请仔细阅读每个 Skill 的使用说明，按照其中的命令格式和参数要求执行。\n\n`;
       prompt += this.workspaceSkills;
     }
 
