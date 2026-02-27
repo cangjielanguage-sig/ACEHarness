@@ -21,10 +21,11 @@ export async function POST(request: NextRequest) {
     const record: RunRecord = {
       id: `run-${formatTimestamp()}`,
       configFile: body.configFile,
+      configName: body.configName || body.configFile,
       startTime: new Date().toISOString(),
       endTime: null,
       status: 'running',
-      phaseReached: '',
+      currentPhase: null,
       totalSteps: body.totalSteps || 0,
       completedSteps: 0,
     };

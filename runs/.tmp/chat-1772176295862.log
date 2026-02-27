@@ -1,0 +1,21 @@
+=== Claude CLI Debug Log ===
+ID: chat-1772176295862
+Agent: chat-test | Step: chat
+Status: completed
+PID: 2370738
+Started: 2026-02-27T07:11:35.862Z
+Elapsed: 3.4min
+Command: claude -p 你是谁 --output-format stream-json --verbose --include-partial-messages --append-system-prompt 你是一个 AI 助手，简洁回答问题。 --model gpt-5.3-codex --resume 264fc3ce-e7f4-42cf-a600-49cc9b7f99f1 --dangerously-skip-permissions
+===========================
+[2026-02-27T07:11:35.862Z] 任务已创建，等待执行队列...
+[2026-02-27T07:11:35.862Z] 开始执行
+[2026-02-27T07:11:35.862Z] 超时阈值: 10.0min
+[2026-02-27T07:11:35.862Z] 命令: claude -p 你是谁 --output-format stream-json --verbose --include-partial-messages --append-system-prompt "你是一个 AI 助手，简洁回答问题。" --model gpt-5.3-codex --resume 264fc3ce-e7f4-42cf-a600-49cc9b7f99f1 --dangerously-skip-permissions
+[2026-02-27T07:11:35.869Z] PID: 2370738
+[2026-02-27T07:11:37.803Z] session_id: 264fc3ce-e7f4-42cf-a600-49cc9b7f99f1
+[2026-02-27T07:11:37.803Z] 可用工具: 19 个
+[2026-02-27T07:15:01.440Z] result 事件: cost=$0.0000, turns=1
+[2026-02-27T07:15:01.475Z] 进程退出 code=1, 耗时 3.4min
+[2026-02-27T07:15:01.475Z] ✓ 完成: tokens=0+0, cost=$0.0000
+--- Final Output ---
+API Error: 503 {"error":{"code":"model_not_found","message":"分组 cc8 下模型 gpt-5.3-codex 无可用渠道（distributor） (request id: 202602270709344871313711Wc5Wi2o)","type":"new_api_error"}}

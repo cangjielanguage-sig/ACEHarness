@@ -116,10 +116,11 @@ export type CopyConfigForm = z.infer<typeof copyConfigFormSchema>;
 export const runRecordSchema = z.object({
   id: z.string(),
   configFile: z.string(),
+  configName: z.string(),
   startTime: z.string(),
   endTime: z.string().nullable(),
   status: z.enum(['running', 'completed', 'failed', 'stopped', 'crashed']),
-  phaseReached: z.string(),
+  currentPhase: z.string().nullable(),
   totalSteps: z.number(),
   completedSteps: z.number(),
 });

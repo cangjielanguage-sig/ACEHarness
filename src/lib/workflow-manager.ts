@@ -277,8 +277,8 @@ class WorkflowManager extends EventEmitter {
       this.currentRunId = runId;
       try {
         await createRun({
-          id: runId, configFile, startTime: new Date().toISOString(),
-          endTime: null, status: 'running', phaseReached: '',
+          id: runId, configFile, configName: configFile, startTime: new Date().toISOString(),
+          endTime: null, status: 'running', currentPhase: null,
           totalSteps, completedSteps: 0,
         });
       } catch { /* non-critical */ }
@@ -314,7 +314,7 @@ class WorkflowManager extends EventEmitter {
       await updateRun(this.currentRunId, {
         endTime: this.runEndTime,
         status,
-        phaseReached: this.currentPhase || '',
+        currentPhase: this.currentPhase,
         completedSteps,
       });
     } catch { /* non-critical */ }
