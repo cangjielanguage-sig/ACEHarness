@@ -41,6 +41,10 @@ export default function AgentsPage() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
   const [isNewAgent, setIsNewAgent] = useState(false);
+  const [showBatchReplaceModal, setShowBatchReplaceModal] = useState(false);
+  const [fromModel, setFromModel] = useState('');
+  const [toModel, setToModel] = useState('');
+  const [batchReplacing, setBatchReplacing] = useState(false);
 
   useEffect(() => {
     loadAgents();
@@ -93,8 +97,37 @@ export default function AgentsPage() {
     }
   };
 
+  const handleBatchReplaceModel = async () => {
+    if (!fromModel.trim() || !toModel.trim()) {
+      alert('请输入源模型和目标模型');
+      return;
+    }
+    if (fromModel === toModel) {
+      alert('源模型和目标模型不能相同');
+      return;
+    }
+    if (!confirm(`确定要将所有使用 "${fromModel}" 的 Agent 替换为 "${toModel}" 吗？`)) return;
+
+    setBatchReplacing(true);
+    try {
+      const result = await agentApi.batchReplaceModel(fromModel, toModel);
+      alert(result.message);
+      await loadAgents();
+      setShowBatchReplaceModal(false);
+      setFromModel('');
+      setToModel('');
+    } catch (error: any) {
+      alert('批量替换失败: ' + error.message);
+    } finally {
+      setBatchReplacing(false);
+    }
+  };
+
   // Get all unique tags
   const allTags = Array.from(new Set(agents.flatMap(a => a.tags || [])));
+
+  // Get all unique models
+  const allModels = Array.from(new Set(agents.map(a => a.model).filter(Boolean)));
 
   // Filter agents
   const filteredAgents = agents.filter(agent => {
@@ -130,6 +163,10 @@ export default function AgentsPage() {
           <h1 className="text-lg font-semibold">Agent 管理</h1>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => setShowBatchReplaceModal(true)} variant="outline">
+            <span className="material-symbols-outlined text-sm mr-1">swap_horiz</span>
+            批量替换模型
+          </Button>
           <Button size="sm" onClick={handleCreateAgent}>
             <span className="material-symbols-outlined text-sm mr-1">add</span>
             新建 Agent
@@ -317,6 +354,50 @@ export default function AgentsPage() {
           onSave={handleSaveAgent}
           onClose={() => setEditingAgent(null)}
         />
+      )}
+
+      {showBatchReplaceModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setShowBatchReplaceModal(false)}>
+          <div className="bg-card rounded-lg w-[500px] max-w-[90%] border" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b">
+              <h3 className="text-lg font-semibold">批量替换模型</h3>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-sm font-medium mb-2 block">源模型</label>
+                <select
+                  className="w-full px-3 py-2 bg-background border rounded-md"
+                  value={fromModel}
+                  onChange={(e) => setFromModel(e.target.value)}
+                >
+                  <option value="">选择源模型</option>
+                  {allModels.map(model => (
+                    <option key={model} value={model}>{model}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-2 block">目标模型</label>
+                <Input
+                  placeholder="输入目标模型名称"
+                  value={toModel}
+                  onChange={(e) => setToModel(e.target.value)}
+                />
+              </div>
+              <div className="text-sm text-muted-foreground">
+                将所有使用 "{fromModel || '(未选择)'}" 的 Agent 替换为 "{toModel || '(未输入)'}"
+              </div>
+            </div>
+            <div className="p-5 border-t flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowBatchReplaceModal(false)} disabled={batchReplacing}>
+                取消
+              </Button>
+              <Button onClick={handleBatchReplaceModel} disabled={batchReplacing}>
+                {batchReplacing ? '替换中...' : '确认替换'}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

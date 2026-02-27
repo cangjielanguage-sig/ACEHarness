@@ -80,6 +80,8 @@ export default function WorkbenchPage() {
   const [editingContextScope, setEditingContextScope] = useState<'global' | 'phase'>('global');
   const [editingContextPhase, setEditingContextPhase] = useState('');
   const [editingContextValue, setEditingContextValue] = useState('');
+  const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
+  const [batchDeleting, setBatchDeleting] = useState(false);
   const liveStreamRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveStreamLenRef = useRef(0);
   const liveStreamStepRef = useRef<string>('');
@@ -583,9 +585,9 @@ export default function WorkbenchPage() {
   const handleDeleteRun = async (runId: string) => {
     const confirmed = await confirm({
       title: '删除运行记录',
-      message: '确定要删除这个运行记录吗？此操作不可撤销。',
-      confirmText: '删除',
-      cancelText: '取消',
+      description: '确定要删除这个运行记录吗？此操作不可撤销。',
+      confirmLabel: '删除',
+      cancelLabel: '取消',
     });
     if (!confirmed) return;
 
@@ -596,6 +598,47 @@ export default function WorkbenchPage() {
       await loadHistory();
     } catch (error: any) {
       toast('error', `删除失败: ${error.message}`);
+    }
+  };
+
+  const handleBatchDeleteRuns = async () => {
+    if (selectedRunIds.length === 0) {
+      toast('warning', '请先选择要删除的运行记录');
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: '批量删除运行记录',
+      description: `确定要删除选中的 ${selectedRunIds.length} 条运行记录吗？此操作不可撤销。`,
+      confirmLabel: '删除',
+      cancelLabel: '取消',
+    });
+    if (!confirmed) return;
+
+    setBatchDeleting(true);
+    try {
+      const result = await runsApi.batchDeleteRuns(selectedRunIds);
+      toast('success', result.message);
+      setSelectedRunIds([]);
+      await loadHistory();
+    } catch (error: any) {
+      toast('error', `批量删除失败: ${error.message}`);
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
+  const toggleRunSelection = (runId: string) => {
+    setSelectedRunIds(prev =>
+      prev.includes(runId) ? prev.filter(id => id !== runId) : [...prev, runId]
+    );
+  };
+
+  const toggleAllRunsSelection = () => {
+    if (selectedRunIds.length === historyRuns.filter(r => r.status !== 'running').length) {
+      setSelectedRunIds([]);
+    } else {
+      setSelectedRunIds(historyRuns.filter(r => r.status !== 'running').map(r => r.id));
     }
   };
 
@@ -1652,7 +1695,21 @@ export default function WorkbenchPage() {
           )}
         </>)}
         {viewMode === 'history' && (<div className="flex-1 flex flex-col overflow-hidden">
-          <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">运行历史</h2></div>
+          <div className="h-10 bg-muted border-b flex items-center justify-between px-4">
+            <h2 className="text-sm font-semibold m-0">运行历史</h2>
+            {selectedRunIds.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-red-500 hover:text-red-600"
+                onClick={handleBatchDeleteRuns}
+                disabled={batchDeleting}
+              >
+                <span className="material-symbols-outlined text-sm mr-1">delete</span>
+                删除选中 ({selectedRunIds.length})
+              </Button>
+            )}
+          </div>
           <div className="flex-1 overflow-auto p-4">
             {historyRuns.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -1664,6 +1721,14 @@ export default function WorkbenchPage() {
                 <table className="w-full">
                   <thead className="bg-muted border-b">
                     <tr>
+                      <th className="text-left p-3 text-sm font-semibold w-10">
+                        <input
+                          type="checkbox"
+                          checked={selectedRunIds.length > 0 && selectedRunIds.length === historyRuns.filter(r => r.status !== 'running').length}
+                          onChange={toggleAllRunsSelection}
+                          className="cursor-pointer"
+                        />
+                      </th>
                       <th className="text-left p-3 text-sm font-semibold">运行ID</th>
                       <th className="text-left p-3 text-sm font-semibold">状态</th>
                       <th className="text-left p-3 text-sm font-semibold">开始时间</th>
@@ -1676,6 +1741,16 @@ export default function WorkbenchPage() {
                   <tbody>
                     {historyRuns.map((run) => (
                       <tr key={run.id} className="border-b hover:bg-accent transition-colors">
+                        <td className="p-3">
+                          {run.status !== 'running' && (
+                            <input
+                              type="checkbox"
+                              checked={selectedRunIds.includes(run.id)}
+                              onChange={() => toggleRunSelection(run.id)}
+                              className="cursor-pointer"
+                            />
+                          )}
+                        </td>
                         <td className="p-3 text-sm font-mono">{run.id}</td>
                         <td className="p-3">
                           <div className="flex items-center gap-2">

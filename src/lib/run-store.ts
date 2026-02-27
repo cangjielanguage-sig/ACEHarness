@@ -1,4 +1,4 @@
-import { readdir, readFile, mkdir } from 'fs/promises';
+import { readdir, readFile, mkdir, rm } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { parse } from 'yaml';
@@ -110,4 +110,11 @@ export async function listRuns(): Promise<RunRecord[]> {
 export async function listRunsByConfig(configFile: string): Promise<RunRecord[]> {
   const all = await listRuns();
   return all.filter((r) => r.configFile === configFile);
+}
+
+export async function deleteRun(id: string): Promise<void> {
+  const runDir = resolve(RUNS_DIR, id);
+  if (existsSync(runDir)) {
+    await rm(runDir, { recursive: true, force: true });
+  }
 }

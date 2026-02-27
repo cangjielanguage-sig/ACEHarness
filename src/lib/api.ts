@@ -30,6 +30,7 @@ interface ApiResponse {
 interface WorkflowStatusResponse {
   status: string;
   runId: string | null;
+  currentConfigFile: string | null;
   logs: any[];
   agents: any[];
   currentPhase: string | null;
@@ -127,6 +128,16 @@ export const agentApi = {
     if (!response.ok) throw new Error('删除 Agent 配置失败');
     return response.json();
   },
+
+  async batchReplaceModel(fromModel: string, toModel: string): Promise<ApiResponse & { updatedCount: number }> {
+    const response = await fetch(`${API_BASE}/agents/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'replace-model', fromModel, toModel }),
+    });
+    if (!response.ok) throw new Error('批量替换模型失败');
+    return response.json();
+  },
 };
 
 export const runsApi = {
@@ -194,6 +205,16 @@ export const runsApi = {
       body: JSON.stringify(patch),
     });
     if (!response.ok) throw new Error('更新运行记录失败');
+    return response.json();
+  },
+
+  async batchDeleteRuns(runIds: string[]): Promise<ApiResponse & { deletedCount: number; errors?: string[] }> {
+    const response = await fetch(`${API_BASE}/runs/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', runIds }),
+    });
+    if (!response.ok) throw new Error('批量删除运行记录失败');
     return response.json();
   },
 };
