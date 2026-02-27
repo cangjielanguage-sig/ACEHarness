@@ -465,10 +465,10 @@ export default function DashboardPage() {
                       ) : (
                         <AlertCircle className="w-4 h-4 text-yellow-500" />
                       )}
-                      <div>
-                        <div className="text-sm font-medium">{run.id}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">{run.configName || run.configFile}</div>
                         <div className="text-xs text-muted-foreground">
-                          {new Date(run.startTime).toLocaleString()}
+                          {run.currentPhase || '启动中'} · {new Date(run.startTime).toLocaleString()}
                         </div>
                       </div>
                     </div>

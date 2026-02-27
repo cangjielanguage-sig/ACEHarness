@@ -1921,6 +1921,7 @@ class WorkflowManager extends EventEmitter {
       status: this.status,
       statusReason: this.statusReason,
       runId: this.currentRunId,
+      currentConfigFile: this.currentConfigFile,
       logs: this.logs,
       agents: this.agents,
       currentPhase: this.currentPhase,

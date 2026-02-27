@@ -43,10 +43,11 @@ interface WorkflowStatusResponse {
 interface RunRecord {
   id: string;
   configFile: string;
+  configName: string;
   startTime: string;
   endTime: string | null;
   status: 'running' | 'completed' | 'failed' | 'stopped' | 'crashed';
-  phaseReached: string;
+  currentPhase: string | null;
   totalSteps: number;
   completedSteps: number;
 }
@@ -138,6 +139,17 @@ export const runsApi = {
   async getRunDetail(id: string): Promise<any> {
     const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/detail`);
     if (!response.ok) throw new Error('获取运行详情失败');
+    return response.json();
+  },
+
+  async deleteRun(id: string): Promise< ApiResponse> {
+    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/delete`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || '删除运行记录失败');
+    }
     return response.json();
   },
 

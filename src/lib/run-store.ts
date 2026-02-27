@@ -4,14 +4,16 @@ import { existsSync } from 'fs';
 import { parse } from 'yaml';
 
 const RUNS_DIR = resolve(process.cwd(), 'runs');
+const CONFIGS_DIR = resolve(process.cwd(), 'configs');
 
 export interface RunRecord {
   id: string;
   configFile: string;
+  configName: string;
   startTime: string;
   endTime: string | null;
   status: 'running' | 'completed' | 'failed' | 'stopped' | 'crashed';
-  phaseReached: string;
+  currentPhase: string | null;
   totalSteps: number;
   completedSteps: number;
 }
@@ -19,6 +21,17 @@ export interface RunRecord {
 async function ensureRunsDir() {
   if (!existsSync(RUNS_DIR)) {
     await mkdir(RUNS_DIR, { recursive: true });
+  }
+}
+
+async function getConfigName(configFile: string): Promise<string> {
+  try {
+    const configPath = resolve(CONFIGS_DIR, configFile);
+    const content = await readFile(configPath, 'utf-8');
+    const config = parse(content);
+    return config.workflow?.name || configFile;
+  } catch {
+    return configFile;
   }
 }
 
@@ -46,13 +59,15 @@ export async function getRun(id: string): Promise<RunRecord | null> {
     const stateFile = resolve(RUNS_DIR, id, 'state.yaml');
     const content = await readFile(stateFile, 'utf-8');
     const state = parse(content);
+    const configName = await getConfigName(state.configFile);
     return {
       id: state.runId,
       configFile: state.configFile,
+      configName,
       startTime: state.startTime,
       endTime: state.endTime,
       status: state.status,
-      phaseReached: state.currentPhase || '',
+      currentPhase: state.currentPhase || null,
       totalSteps: (state.completedSteps?.length || 0) + (state.failedSteps?.length || 0),
       completedSteps: state.completedSteps?.length || 0,
     };
@@ -73,13 +88,15 @@ export async function listRuns(): Promise<RunRecord[]> {
       if (!existsSync(stateFile)) continue;
       const content = await readFile(stateFile, 'utf-8');
       const state = parse(content);
+      const configName = await getConfigName(state.configFile);
       runs.push({
         id: state.runId,
         configFile: state.configFile,
+        configName,
         startTime: state.startTime,
         endTime: state.endTime,
         status: state.status,
-        phaseReached: state.currentPhase || '',
+        currentPhase: state.currentPhase || null,
         totalSteps: (state.completedSteps?.length || 0) + (state.failedSteps?.length || 0),
         completedSteps: state.completedSteps?.length || 0,
       });

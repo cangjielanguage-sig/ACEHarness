@@ -104,7 +104,15 @@ export default function WorkbenchPage() {
   const fetchCurrentStatus = async () => {
     try {
       const status = await workflowApi.getStatus();
+      // Only apply status if it's for the current config file
       if (status.status && status.status !== 'idle') {
+        // Check if the running workflow is for this config file
+        const isForCurrentConfig = !status.currentConfigFile || status.currentConfigFile === configFile;
+        if (!isForCurrentConfig) {
+          // Running workflow is for a different config, don't apply this status
+          return;
+        }
+
         dispatch({ type: 'SET_WORKFLOW_STATUS', payload: status.status });
         if (status.runId) dispatch({ type: 'SET_RUN_ID', payload: status.runId });
         if (status.currentPhase) dispatch({ type: 'SET_CURRENT_PHASE', payload: status.currentPhase });
@@ -307,6 +315,11 @@ export default function WorkbenchPage() {
   };
 
   const handleEvent = useCallback((event: any) => {
+    // For status events, only apply if they're for the current config file
+    if (event.type === 'status' && event.data.currentConfigFile && event.data.currentConfigFile !== configFile) {
+      return; // Ignore status events from other workflow configs
+    }
+
     switch (event.type) {
       case 'status':
         dispatch({ type: 'SET_WORKFLOW_STATUS', payload: event.data.status });
@@ -419,7 +432,7 @@ export default function WorkbenchPage() {
   const saveConfig = async () => {
     setSaving(true);
     try {
-      const config = { ...workflowConfig, context: { ...workflowConfig.context, projectRoot, requirements, timeoutMinutes } };
+      const config = { ...workflowConfig, context: { ...(workflowConfig.context || {}), projectRoot, requirements, timeoutMinutes } };
       await configApi.saveConfig(configFile, config);
       dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: config });
       toast('success', '配置已保存');
@@ -565,6 +578,25 @@ export default function WorkbenchPage() {
   const getStatusText = (status: string) => {
     const texts: Record<string, string> = { idle: '空闲', running: '运行中', completed: '已完成', failed: '失败', stopped: '已停止', crashed: '崩溃' };
     return texts[status] || status;
+  };
+
+  const handleDeleteRun = async (runId: string) => {
+    const confirmed = await confirm({
+      title: '删除运行记录',
+      message: '确定要删除这个运行记录吗？此操作不可撤销。',
+      confirmText: '删除',
+      cancelText: '取消',
+    });
+    if (!confirmed) return;
+
+    try {
+      await runsApi.deleteRun(runId);
+      toast('success', '运行记录已删除');
+      // Reload history
+      await loadHistory();
+    } catch (error: any) {
+      toast('error', `删除失败: ${error.message}`);
+    }
   };
 
   const selectStep = (step: any) => {
@@ -1675,13 +1707,21 @@ export default function WorkbenchPage() {
                             second: '2-digit'
                           }) : '-'}
                         </td>
-                        <td className="p-3 text-sm">{run.phaseReached || '-'}</td>
+                        <td className="p-3 text-sm">{run.currentPhase || '-'}</td>
                         <td className="p-3 text-sm">{run.completedSteps}/{run.totalSteps}</td>
                         <td className="p-3">
-                          <Button size="sm" variant="outline" onClick={() => { setSelectedRun(run); viewHistoryRun(run.id); }}>
-                            <span className="material-symbols-outlined text-sm mr-1">visibility</span>
-                            查看
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => { setSelectedRun(run); viewHistoryRun(run.id); }}>
+                              <span className="material-symbols-outlined text-sm mr-1">visibility</span>
+                              查看
+                            </Button>
+                            {run.status !== 'running' && (
+                              <Button size="sm" variant="outline" className="text-red-500 hover:text-red-600" onClick={() => handleDeleteRun(run.id)}>
+                                <span className="material-symbols-outlined text-sm mr-1">delete</span>
+                                删除
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
