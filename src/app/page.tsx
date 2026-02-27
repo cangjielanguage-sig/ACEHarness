@@ -327,7 +327,7 @@ export default function DashboardPage() {
               <QuickAction
                 icon={Settings}
                 label={t('dashboard.quickActions.settings')}
-                onClick={() => {}}
+                onClick={() => router.push('/models')}
                 color="from-orange-600 to-orange-700"
               />
             </div>
