@@ -187,17 +187,50 @@
   font-weight: 500;
 }
 
-.typingCursor {
-  display: inline-block;
-  width: 8px;
-  height: 16px;
-  background: hsl(var(--primary));
-  border-radius: 1px;
-  animation: blink 1s steps(2, start) infinite;
+.thinkingBot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
 }
 
-@keyframes blink {
-  to {
-    visibility: hidden;
-  }
+.botSvg {
+  color: hsl(var(--muted-foreground));
+  animation: botBounce 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.thinkingText {
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+
+.thinkingDots {
+  display: inline-flex;
+  gap: 1px;
+  font-size: 18px;
+  font-weight: bold;
+  color: hsl(var(--muted-foreground));
+}
+
+.thinkingDots span {
+  animation: dotFade 1.4s ease-in-out infinite;
+}
+
+.thinkingDots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.thinkingDots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes botBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes dotFade {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
 }

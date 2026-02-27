@@ -82,6 +82,9 @@ export default function WorkbenchPage() {
   const liveStreamRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveStreamLenRef = useRef(0);
   const liveStreamScrollRef = useRef<HTMLDivElement | null>(null);
+  const LIVE_STREAM_PAGE_SIZE = 30;
+  const [liveStreamVisibleCount, setLiveStreamVisibleCount] = useState(LIVE_STREAM_PAGE_SIZE);
+  const liveStreamUserScrolledUp = useRef(false);
   const {
     viewMode, workflowConfig, editingConfig, agentConfigs,
     workflowStatus, runId, currentPhase, currentStep, agents, logs, completedSteps, failedSteps,
@@ -645,6 +648,8 @@ export default function WorkbenchPage() {
     setLiveStreamFeedback('');
     setInlineFeedbacks([]);
     liveStreamLenRef.current = 0;
+    setLiveStreamVisibleCount(LIVE_STREAM_PAGE_SIZE);
+    liveStreamUserScrolledUp.current = false;
     if (liveStreamRef.current) clearInterval(liveStreamRef.current);
     liveStreamRef.current = setInterval(async () => {
       try {
@@ -770,9 +775,9 @@ export default function WorkbenchPage() {
     return () => { if (liveStreamRef.current) clearInterval(liveStreamRef.current); };
   }, []);
 
-  // Auto-scroll live stream to bottom when content updates
+  // Auto-scroll live stream to bottom when content updates (only if user hasn't scrolled up)
   useEffect(() => {
-    if (liveStreamScrollRef.current) {
+    if (liveStreamScrollRef.current && !liveStreamUserScrolledUp.current) {
       liveStreamScrollRef.current.scrollTop = liveStreamScrollRef.current.scrollHeight;
     }
   }, [liveStream]);
@@ -1694,7 +1699,14 @@ export default function WorkbenchPage() {
               <h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">cell_tower</span>实时输出 {currentStep ? `- ${currentStep}` : ''}</h3>
               <Button variant="secondary" size="sm" onClick={stopLiveStream}>关闭</Button>
             </div>
-            <div ref={liveStreamScrollRef} className="p-5 flex-1 overflow-auto">
+            <div ref={liveStreamScrollRef} className="p-5 flex-1 overflow-auto" onScroll={(e) => {
+              const el = e.currentTarget;
+              const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+              liveStreamUserScrolledUp.current = !atBottom;
+              if (el.scrollTop === 0 && liveStream.length > liveStreamVisibleCount) {
+                setLiveStreamVisibleCount(prev => prev + LIVE_STREAM_PAGE_SIZE);
+              }
+            }}>
               {liveStream.length === 0 ? (
                 <div className="text-muted-foreground text-sm text-center py-8">(等待输出...)</div>
               ) : (
@@ -1708,7 +1720,12 @@ export default function WorkbenchPage() {
                     for (const chunk of liveStream) {
                       const parsed = parseChunk(chunk);
                       if (parsed.isHumanFeedback) {
-                        streamFeedbackMessages.add(parsed.content.trim());
+                        // Stream stores feedback as numbered lines ("1. msg"), extract raw messages
+                        const lines = parsed.content.trim().split('\n');
+                        for (const line of lines) {
+                          const stripped = line.replace(/^\d+\.\s*/, '').trim();
+                          if (stripped) streamFeedbackMessages.add(stripped);
+                        }
                       }
                     }
                     let fbIdx = 0;
@@ -1740,7 +1757,7 @@ export default function WorkbenchPage() {
                         }
                       }
                     }
-                    return items.filter(it => {
+                    const filteredItems = items.filter(it => {
                       if (it.type === 'feedback') return true;
                       const c = (it as any).content as string;
                       if (!c) return false;
@@ -1748,7 +1765,21 @@ export default function WorkbenchPage() {
                       const stripped = c.replace(/\*\*🔧 .+?\*\*/g, '').replace(/<!--.*?-->/gs, '').trim();
                       if (stripped.length <= 1) return false;
                       return true;
-                    }).map((item, i) => {
+                    });
+                    const hasMore = filteredItems.length > liveStreamVisibleCount;
+                    const visibleItems = hasMore ? filteredItems.slice(filteredItems.length - liveStreamVisibleCount) : filteredItems;
+                    return (<>
+                      {hasMore && (
+                        <div className="text-center py-2">
+                          <button
+                            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                            onClick={() => setLiveStreamVisibleCount(prev => prev + LIVE_STREAM_PAGE_SIZE)}
+                          >
+                            加载更早的 {filteredItems.length - liveStreamVisibleCount} 条内容...
+                          </button>
+                        </div>
+                      )}
+                      {visibleItems.map((item, i) => {
                       if (item.type === 'feedback') {
                         return (
                           <div key={`fb-${i}`} className="flex justify-end group">
@@ -1797,11 +1828,41 @@ export default function WorkbenchPage() {
                           </div>
                         </div>
                       );
-                    });
+                    })}
+                    </>);
                   })()}
                   {isRunning && (
-                    <div className="flex items-center gap-1 pt-1">
-                      <span className={styles.typingCursor} />
+                    <div className={styles.thinkingBot}>
+                      <svg className={styles.botSvg} width="28" height="28" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                          <linearGradient id="botBody" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#6C8EF2" />
+                            <stop offset="100%" stopColor="#4A6CF7" />
+                          </linearGradient>
+                          <linearGradient id="botFace" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stopColor="#E8F0FE" />
+                            <stop offset="100%" stopColor="#C5D8F9" />
+                          </linearGradient>
+                        </defs>
+                        <g transform="translate(0,800) scale(0.1,-0.1)" stroke="none">
+                          {/* Body */}
+                          <path fill="url(#botBody)" d="M4552 6155 c-67 -19 -85 -29 -136 -74 -30 -27 -60 -42 -111 -55 -332 -85 -548 -304 -619 -627 l-17 -75 -67 -12 c-140 -24 -291 -88 -355 -150 -42 -40 -87 -123 -87 -159 0 -14 -6 -23 -16 -23 -25 0 -186 -67 -325 -136 -137 -67 -286 -164 -381 -247 -94 -82 -217 -242 -279 -363 -30 -58 -58 -108 -64 -109 -92 -25 -102 -30 -155 -84 -67 -66 -128 -183 -161 -307 -32 -121 -38 -325 -11 -429 28 -112 67 -188 131 -258 61 -65 116 -96 172 -97 33 0 37 -3 48 -40 18 -60 103 -180 179 -251 200 -190 486 -332 852 -425 408 -104 751 -110 1225 -23 290 54 481 113 670 209 257 130 410 270 525 483 37 69 60 94 60 68 0 -16 86 -24 122 -12 159 52 236 422 168 803 -40 221 -177 406 -286 385 -22 -4 -28 2 -51 47 -96 190 -259 360 -505 527 -130 88 -335 191 -465 234 -54 17 -83 32 -83 41 0 20 -27 71 -59 112 -36 46 -143 115 -235 152 -74 30 -248 70 -302 70 -25 0 -26 2 -20 38 4 20 25 75 47 121 68 138 167 224 333 286 l66 25 15 -29 c21 -42 90 -98 143 -115 58 -20 157 -20 212 -1 58 20 115 68 148 123 22 39 27 58 26 112 -1 111 -54 199 -148 245 -66 32 -136 39 -204 20z m138 -245 c23 -44 -27 -77 -87 -57 -20 6 -38 17 -39 22 -2 6 16 24 39 41 45 33 67 32 87 -6z m-700 -845 c52 -8 124 -24 160 -36 138 -47 135 -47 -311 -51 -228 -2 -418 0 -423 4 -5 4 19 21 55 36 130 58 329 76 519 47z m480 -315 c310 -123 560 -279 738 -458 125 -127 188 -244 244 -452 31 -115 33 -389 4 -520 -28 -129 -63 -235 -113 -340 -75 -157 -208 -273 -437 -380 -174 -82 -369 -135 -676 -184 -311 -50 -435 -56 -631 -32 -478 60 -928 244 -1156 475 -78 79 -127 163 -164 282 -54 172 -64 240 -63 424 1 150 4 182 27 267 31 116 94 265 149 351 57 89 228 255 333 323 92 60 291 161 458 234 92 40 100 42 142 31 62 -15 273 -14 456 4 201 19 284 23 454 17 133 -4 145 -6 235 -42z m-2447 -1152 c-3 -93 -1 -200 5 -248 26 -198 25 -189 7 -157 -48 84 -70 306 -45 453 10 54 28 114 35 114 2 0 1 -73 -2 -162z m3711 -133 c1 -154 -2 -177 -23 -240 -13 -38 -27 -74 -32 -79 -13 -15 -11 54 6 179 8 61 15 180 16 265 l1 155 15 -55 c11 -38 16 -107 17 -225z"/>
+                          {/* Face screen */}
+                          <path fill="url(#botFace)" d="M3640 4394 c-194 -14 -558 -57 -625 -74 -224 -57 -381 -189 -480 -403 -56 -121 -76 -219 -82 -402 -6 -197 14 -311 77 -443 108 -225 363 -358 801 -418 179 -25 751 -25 1014 0 331 31 463 65 601 158 133 89 235 248 291 453 26 93 27 113 27 295 0 185 -2 199 -28 280 -43 131 -82 196 -171 286 -68 68 -97 89 -185 133 -215 105 -383 132 -845 136 -187 1 -365 1 -395 -1z m571 -234 c216 -22 460 -91 572 -162 172 -110 237 -232 237 -444 0 -245 -115 -458 -292 -542 -186 -89 -521 -129 -983 -118 -296 7 -440 22 -595 61 -378 96 -471 204 -474 545 -1 155 13 221 70 338 63 126 163 199 331 241 267 67 853 109 1134 81z"/>
+                          {/* Left eye */}
+                          <path fill="#2D3748" d="M3163 3865 c-156 -43 -257 -181 -257 -350 0 -144 60 -254 171 -312 78 -40 140 -50 218 -34 103 22 178 79 226 174 87 171 73 314 -42 429 -90 90 -205 124 -316 93z m44 -263 c-36 -38 -69 -81 -73 -96 -7 -30 9 -56 37 -56 22 0 123 103 145 148 13 28 18 31 30 21 9 -7 22 -26 30 -42 34 -65 -28 -179 -111 -207 -134 -44 -241 120 -150 229 29 34 99 71 134 71 22 0 17 -8 -42 -68z">
+                            <animate attributeName="opacity" values="1;1;0.1;1;1" keyTimes="0;0.42;0.46;0.50;1" dur="3s" repeatCount="indefinite" />
+                          </path>
+                          {/* Right eye */}
+                          <path fill="#2D3748" d="M4373 3856 c-100 -32 -195 -114 -236 -204 -17 -37 -22 -66 -22 -137 0 -82 3 -97 33 -157 37 -77 90 -128 172 -167 47 -22 69 -26 145 -26 78 0 98 4 153 29 212 98 257 390 86 560 -92 92 -231 135 -331 102z m107 -212 c0 -3 -22 -31 -50 -61 -70 -80 -79 -133 -20 -133 22 0 35 10 64 50 20 27 44 66 55 85 l18 34 23 -24 c28 -29 37 -99 20 -150 -16 -48 -70 -74 -156 -75 -49 0 -67 5 -94 25 -44 32 -50 43 -50 87 0 44 36 90 107 137 42 28 83 40 83 25z">
+                            <animate attributeName="opacity" values="1;1;0.1;1;1" keyTimes="0;0.42;0.46;0.50;1" dur="3s" repeatCount="indefinite" />
+                          </path>
+                        </g>
+                      </svg>
+                      <span className={styles.thinkingText}>思考中</span>
+                      <span className={styles.thinkingDots}>
+                        <span>.</span><span>.</span><span>.</span>
+                      </span>
                     </div>
                   )}
                 </div>
