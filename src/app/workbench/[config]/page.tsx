@@ -82,6 +82,7 @@ export default function WorkbenchPage() {
   const [editingContextValue, setEditingContextValue] = useState('');
   const liveStreamRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveStreamLenRef = useRef(0);
+  const liveStreamStepRef = useRef<string>('');
   const liveStreamScrollRef = useRef<HTMLDivElement | null>(null);
   const LIVE_STREAM_PAGE_SIZE = 30;
   const [liveStreamVisibleCount, setLiveStreamVisibleCount] = useState(LIVE_STREAM_PAGE_SIZE);
@@ -658,9 +659,17 @@ export default function WorkbenchPage() {
         // Prefer persisted stream file (contains accumulated content across feedback rounds)
         let content: string | null = null;
         const rid = runId || selectedRun?.id;
-        const step = currentStep || selectedStep?.name;
-        if (rid && step) {
-          content = await streamApi.getStreamContent(rid, step);
+        // Use running process step name to track step changes across iterations
+        const runningProc = processes.find((p: any) => p.status === 'running');
+        const activeStep = runningProc?.step || currentStep || selectedStep?.name;
+        if (rid && activeStep) {
+          // Detect step change — reset stream state when a new step starts
+          if (activeStep !== liveStreamStepRef.current) {
+            liveStreamStepRef.current = activeStep;
+            liveStreamLenRef.current = 0;
+            setLiveStream([]);
+          }
+          content = await streamApi.getStreamContent(rid, activeStep);
         }
         if (!content) {
           // Fallback: try in-memory process
@@ -787,6 +796,27 @@ export default function WorkbenchPage() {
   const selectedRoleConfig = selectedStep
     ? agentConfigs.find((r: any) => r.name === selectedStep.agent)
     : null;
+
+  // Find the latest iteration result key for a step (e.g. "代码审计" → "代码审计-迭代3" if that's the latest)
+  const getLatestStepKey = (baseName: string): string => {
+    if (!baseName) return baseName;
+    // If currentStep matches this base step, prefer it (it's the active iteration)
+    if (currentStep && (currentStep === baseName || currentStep.startsWith(baseName + '-迭代'))) {
+      if (stepResults[currentStep]) return currentStep;
+    }
+    // Find highest iteration number in stepResults
+    let latest = baseName;
+    let maxIter = 0;
+    for (const key of Object.keys(stepResults)) {
+      if (key === baseName) { if (maxIter === 0) latest = key; continue; }
+      const m = key.match(new RegExp(`^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > maxIter) { maxIter = n; latest = key; }
+      }
+    }
+    return latest;
+  };
 
   const handleSelectNode = (type: 'phase' | 'step', phaseIndex: number, stepIndex?: number) => {
     setIsNewNode(false);
@@ -1273,7 +1303,15 @@ export default function WorkbenchPage() {
             }
             rightPanel={
               <>
-                <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">{selectedStep ? selectedStep.name : selectedAgent ? selectedAgent.name : 'Agent 详情'}</h2></div>
+                {(() => {
+                  // Resolve the latest iteration key for the selected step
+                  const stepKey = selectedStep ? getLatestStepKey(selectedStep.name) : '';
+                  const stepResult = selectedStep ? stepResults[stepKey] : null;
+                  const isCurrentStepRunning = selectedStep && isRunning && (
+                    currentStep === selectedStep.name || currentStep?.startsWith(selectedStep.name + '-迭代')
+                  );
+                  return (<>
+                <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">{selectedStep ? (stepKey !== selectedStep.name ? stepKey : selectedStep.name) : selectedAgent ? selectedAgent.name : 'Agent 详情'}</h2></div>
                 <div className="flex-1 overflow-auto">
               {selectedStep && (
                 <div className="bg-muted border-b p-3.5">
@@ -1344,43 +1382,43 @@ export default function WorkbenchPage() {
                   )}
                 </div>
               )}
-              {selectedStep && stepResults[selectedStep.name] && (
+              {selectedStep && stepResult && (
                 <div className="bg-muted border-b p-3.5">
                   <div className="text-xs text-muted-foreground font-medium mb-2 uppercase tracking-wider">
-                    {stepResults[selectedStep.name].error ? (<><span className="material-symbols-outlined text-xs text-red-400">error</span> 执行错误</>) : (<><span className="material-symbols-outlined text-xs text-green-400">check_circle</span> 执行结果</>)}
+                    {stepResult.error ? (<><span className="material-symbols-outlined text-xs text-red-400">error</span> 执行错误</>) : (<><span className="material-symbols-outlined text-xs text-green-400">check_circle</span> 执行结果</>)}
                   </div>
                   <div className="flex gap-3 mb-2 flex-wrap">
-                    {stepResults[selectedStep.name].durationMs !== undefined && (
+                    {stepResult.durationMs !== undefined && (
                       <div className="bg-background px-2 py-1 rounded text-[11px]">
                         <span className="text-muted-foreground">耗时: </span>
-                        <span className="font-semibold">{(stepResults[selectedStep.name].durationMs! / 1000).toFixed(2)}s</span>
+                        <span className="font-semibold">{(stepResult.durationMs! / 1000).toFixed(2)}s</span>
                       </div>
                     )}
-                    {stepResults[selectedStep.name].costUsd !== undefined && (
+                    {stepResult.costUsd !== undefined && (
                       <div className="bg-background px-2 py-1 rounded text-[11px]">
                         <span className="text-muted-foreground">费用: </span>
-                        <span className="font-semibold">${stepResults[selectedStep.name].costUsd?.toFixed(4)}</span>
+                        <span className="font-semibold">${stepResult.costUsd?.toFixed(4)}</span>
                       </div>
                     )}
-                    {stepResults[selectedStep.name].startTime && (
+                    {stepResult.startTime && (
                       <div className="bg-background px-2 py-1 rounded text-[11px]">
                         <span className="text-muted-foreground">开始: </span>
-                        <span className="font-mono">{new Date(stepResults[selectedStep.name].startTime!).toLocaleTimeString('zh-CN')}</span>
+                        <span className="font-mono">{new Date(stepResult.startTime!).toLocaleTimeString('zh-CN')}</span>
                       </div>
                     )}
-                    {stepResults[selectedStep.name].endTime && (
+                    {stepResult.endTime && (
                       <div className="bg-background px-2 py-1 rounded text-[11px]">
                         <span className="text-muted-foreground">结束: </span>
-                        <span className="font-mono">{new Date(stepResults[selectedStep.name].endTime!).toLocaleTimeString('zh-CN')}</span>
+                        <span className="font-mono">{new Date(stepResult.endTime!).toLocaleTimeString('zh-CN')}</span>
                       </div>
                     )}
                   </div>
-                  {stepResults[selectedStep.name].error ? (
+                  {stepResult.error ? (
                     <pre className="bg-background border border-red-500 rounded p-2 text-xs leading-relaxed max-h-[200px] overflow-y-auto mt-1.5 whitespace-pre-wrap break-words font-mono text-red-400">
-                      {stepResults[selectedStep.name].error}
+                      {stepResult.error}
                     </pre>
                   ) : (() => {
-                    const raw = fullStepOutput || stepResults[selectedStep.name].output;
+                    const raw = fullStepOutput || stepResult.output;
                     const displayText = !fullStepOutput && raw.length > 2000
                       ? raw.substring(0, 2000) + '\n\n...(已截断)'
                       : raw;
@@ -1407,9 +1445,9 @@ export default function WorkbenchPage() {
                             </div>
                           ))}
                         </div>
-                        {!fullStepOutput && stepResults[selectedStep.name].output.length > 2000 && (runId || selectedRun?.id) && (
+                        {!fullStepOutput && stepResult.output.length > 2000 && (runId || selectedRun?.id) && (
                           <Button variant="secondary" size="sm" className="mt-1.5 text-[11px]"
-                            onClick={() => loadFullOutput(selectedStep.name)}
+                            onClick={() => loadFullOutput(stepKey)}
                             disabled={loadingOutput}>
                             {loadingOutput ? '加载中...' : (<><span className="material-symbols-outlined text-xs">description</span> 查看完整输出</>)}
                           </Button>
@@ -1417,9 +1455,9 @@ export default function WorkbenchPage() {
                       </>
                     );
                   })()}
-                  {!stepResults[selectedStep.name].error && (
+                  {!stepResult.error && (
                     <Button variant="secondary" size="sm" className="mt-1.5 text-[11px]"
-                      onClick={() => openMarkdownModal(selectedStep.name)}>
+                      onClick={() => openMarkdownModal(stepKey)}>
                       查看 Markdown
                     </Button>
                   )}
@@ -1462,7 +1500,7 @@ export default function WorkbenchPage() {
                 </div>
               )}
               {/* Live stream button for currently running step */}
-              {selectedStep && currentStep === selectedStep.name && isRunning && !stepResults[selectedStep.name] && (
+              {selectedStep && isCurrentStepRunning && !stepResult && (
                 <div className="bg-muted border-b p-3.5">
                   <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider"><span className="material-symbols-outlined text-xs">sync</span> 正在执行中...</div>
                   <div className="flex gap-2 mt-1.5">
@@ -1490,9 +1528,11 @@ export default function WorkbenchPage() {
                 </div>
               )}
               {selectedAgent ? (<AgentPanel agent={selectedAgent} logs={logs} onClearLogs={(name) => dispatch({ type: 'CLEAR_AGENT_LOGS', payload: name })}
-                stepSummary={selectedStep && stepResults[selectedStep.name]?.output ? stepResults[selectedStep.name].output : undefined} />
+                stepSummary={selectedStep && stepResult?.output ? stepResult.output : undefined} />
               ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">smart_toy</span><p>选择一个 Agent 查看详情</p></div>)}
             </div>
+                  </>);
+                })()}
               </>
             }
           />
