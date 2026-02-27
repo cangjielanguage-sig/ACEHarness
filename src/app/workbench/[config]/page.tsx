@@ -65,6 +65,7 @@ export default function WorkbenchPage() {
   const [nameValue, setNameValue] = useState('');
   const [liveStream, setLiveStream] = useState<string[]>([]);
   const [showLiveStream, setShowLiveStream] = useState(false);
+  const [liveStreamFullscreen, setLiveStreamFullscreen] = useState(false);
   const [isNewNode, setIsNewNode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -695,6 +696,7 @@ export default function WorkbenchPage() {
       liveStreamRef.current = null;
     }
     setShowLiveStream(false);
+    setLiveStreamFullscreen(false);
   };
 
   const sendLiveFeedback = async (interrupt?: boolean) => {
@@ -1694,10 +1696,15 @@ export default function WorkbenchPage() {
       </div>)}
       {showLiveStream && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={stopLiveStream}>
-          <div className="bg-card rounded-lg border w-[80%] max-w-[800px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className={`bg-card rounded-lg border flex flex-col ${liveStreamFullscreen ? 'w-full h-full rounded-none' : 'w-[80%] max-w-[800px] max-h-[80vh]'}`} onClick={(e) => e.stopPropagation()}>
             <div className="p-5 border-b flex justify-between items-center">
               <h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">cell_tower</span>实时输出 {currentStep ? `- ${currentStep}` : ''}</h3>
-              <Button variant="secondary" size="sm" onClick={stopLiveStream}>关闭</Button>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={() => setLiveStreamFullscreen(f => !f)} title={liveStreamFullscreen ? '退出全屏' : '全屏'}>
+                  <span className="material-symbols-outlined text-sm">{liveStreamFullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>
+                </Button>
+                <Button variant="secondary" size="sm" onClick={stopLiveStream}>关闭</Button>
+              </div>
             </div>
             <div ref={liveStreamScrollRef} className="p-5 flex-1 overflow-auto" onScroll={(e) => {
               const el = e.currentTarget;
