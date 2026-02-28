@@ -580,7 +580,6 @@ class ProcessManager extends EventEmitter {
         }
 
         if (resultObj) {
-          proc.status = 'completed';
           proc.endTime = new Date();
           if (!proc.output && proc.streamContent) {
             proc.output = proc.streamContent;
@@ -589,29 +588,70 @@ class ProcessManager extends EventEmitter {
           if (!resultObj.result && proc.output) {
             resultObj.result = proc.output;
           }
-          proc.logLines.push(`[${ts()}] ✓ 完成: tokens=${resultObj.usage.input_tokens}+${resultObj.usage.output_tokens}, cost=$${resultObj.cost_usd.toFixed(4)}`);
-          this.running--;
-          this.flushLog(proc, cliArgs);
-          this.processNext();
-          resolvePromise(resultObj);
+
+          // Check if result indicates an error (is_error flag or API error in content)
+          const lowerResult = (resultObj.result || '').toLowerCase();
+          const hasApiError = resultObj.is_error ||
+                             lowerResult.includes('api error') ||
+                             lowerResult.includes('overloaded_error') ||
+                             lowerResult.includes('rate_limit_error') ||
+                             proc.error.toLowerCase().includes('api error');
+
+          if (hasApiError) {
+            proc.status = 'failed';
+            const errMsg = proc.error || resultObj.result || 'API Error';
+            proc.logLines.push(`[${ts()}] ✗ 失败: API 错误或 is_error=true`);
+            this.running--;
+            this.flushLog(proc, cliArgs);
+            this.processNext();
+            rejectPromise(new Error(errMsg));
+          } else {
+            proc.status = 'completed';
+            proc.logLines.push(`[${ts()}] ✓ 完成: tokens=${resultObj.usage.input_tokens}+${resultObj.usage.output_tokens}, cost=$${resultObj.cost_usd.toFixed(4)}`);
+            this.running--;
+            this.flushLog(proc, cliArgs);
+            this.processNext();
+            resolvePromise(resultObj);
+          }
         } else if (code === 0 && proc.streamContent) {
-          // Got stream content but no result event — synthesize result
-          proc.status = 'completed';
+          // Got stream content but no result event — check if it's an error
           proc.endTime = new Date();
           proc.output = proc.output || proc.streamContent;
-          const synth: ClaudeJsonResult = {
-            result: proc.output,
-            session_id: proc.sessionId || '',
-            cost_usd: 0, duration_ms: elapsed, duration_api_ms: 0,
-            is_error: false, num_turns: 0,
-            usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-          };
-          proc.jsonResult = synth;
-          proc.logLines.push(`[${ts()}] ✓ 完成 (合成 result，无 result 事件)`);
-          this.running--;
-          this.flushLog(proc, cliArgs);
-          this.processNext();
-          resolvePromise(synth);
+
+          // Check for API errors in stream content
+          const lowerContent = proc.streamContent.toLowerCase();
+          const hasApiError = lowerContent.includes('api error') ||
+                             lowerContent.includes('overloaded_error') ||
+                             lowerContent.includes('rate_limit_error') ||
+                             lowerContent.includes('cloudflare') ||
+                             proc.error.toLowerCase().includes('api error');
+
+          if (hasApiError) {
+            // Treat as failure
+            proc.status = 'failed';
+            const errMsg = proc.error || 'API Error detected in output';
+            proc.logLines.push(`[${ts()}] ✗ 失败: 检测到 API 错误`);
+            this.running--;
+            this.flushLog(proc, cliArgs);
+            this.processNext();
+            rejectPromise(new Error(errMsg));
+          } else {
+            // Synthesize success result
+            proc.status = 'completed';
+            const synth: ClaudeJsonResult = {
+              result: proc.output,
+              session_id: proc.sessionId || '',
+              cost_usd: 0, duration_ms: elapsed, duration_api_ms: 0,
+              is_error: false, num_turns: 0,
+              usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+            };
+            proc.jsonResult = synth;
+            proc.logLines.push(`[${ts()}] ✓ 完成 (合成 result，无 result 事件)`);
+            this.running--;
+            this.flushLog(proc, cliArgs);
+            this.processNext();
+            resolvePromise(synth);
+          }
         } else {
           proc.status = 'failed';
           proc.endTime = new Date();

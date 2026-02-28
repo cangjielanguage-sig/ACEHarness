@@ -48,10 +48,42 @@
     "save": "保存",
     "cancel": "取消"
   },
+  "models": {
+    "title": "模型管理",
+    "subtitle": "配置 AI 模型选项",
+    "addNew": "添加新模型",
+    "configured": "已配置模型",
+    "modelValue": "模型值",
+    "displayLabel": "显示标签",
+    "costMultiplier": "费用倍率",
+    "addModel": "添加模型",
+    "value": "值",
+    "label": "标签",
+    "saveChanges": "保存更改",
+    "saving": "保存中...",
+    "loading": "加载模型中...",
+    "noModels": "未配置模型",
+    "placeholders": {
+      "value": "例如: claude-opus-4-6",
+      "label": "例如: Claude Opus 4.6",
+      "cost": "例如: 0.3"
+    },
+    "messages": {
+      "saveSuccess": "模型保存成功!",
+      "saveFailed": "模型保存失败",
+      "fillAllFields": "请填写所有字段",
+      "confirmDelete": "确定要删除这个模型吗?",
+      "deleteTitle": "确认删除"
+    }
+  },
   "common": {
     "back": "返回",
     "close": "关闭",
     "loading": "加载中...",
-    "noData": "暂无数据"
+    "noData": "暂无数据",
+    "confirm": "确定",
+    "cancel": "取消",
+    "delete": "删除",
+    "alert": "提示"
   }
 }

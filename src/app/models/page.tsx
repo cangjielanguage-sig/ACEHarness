@@ -9,6 +9,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import { useTranslations } from '@/hooks/useTranslations';
 
 interface ModelOption {
   value: string;
@@ -18,15 +21,19 @@ interface ModelOption {
 
 export default function ModelsPage() {
   const router = useRouter();
+  const { t } = useTranslations();
   const [models, setModels] = useState<ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [newModel, setNewModel] = useState<ModelOption>({
     value: '',
     label: '',
     costMultiplier: 0.1,
   });
+  const [alertMessage, setAlertMessage] = useState('');
+  const { confirm, dialogProps } = useConfirmDialog();
 
   useEffect(() => {
     loadModels();
@@ -55,13 +62,13 @@ export default function ModelsPage() {
       });
 
       if (response.ok) {
-        alert('Models saved successfully!');
+        setAlertMessage(t('models.messages.saveSuccess'));
       } else {
-        alert('Failed to save models');
+        setAlertMessage(t('models.messages.saveFailed'));
       }
     } catch (error) {
       console.error('Failed to save models:', error);
-      alert('Failed to save models');
+      setAlertMessage(t('models.messages.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -69,23 +76,50 @@ export default function ModelsPage() {
 
   const addModel = () => {
     if (!newModel.value || !newModel.label) {
-      alert('Please fill in all fields');
+      setAlertMessage(t('models.messages.fillAllFields'));
       return;
     }
     setModels([...models, { ...newModel }]);
     setNewModel({ value: '', label: '', costMultiplier: 0.1 });
   };
 
-  const deleteModel = (index: number) => {
-    if (confirm('Are you sure you want to delete this model?')) {
+  const deleteModel = async (index: number) => {
+    const confirmed = await confirm({
+      title: t('models.messages.deleteTitle'),
+      description: t('models.messages.confirmDelete'),
+      confirmLabel: t('common.delete'),
+      cancelLabel: t('common.cancel'),
+      variant: 'destructive',
+    });
+    if (confirmed) {
       setModels(models.filter((_, i) => i !== index));
     }
   };
 
-  const updateModel = (index: number, field: keyof ModelOption, value: string | number) => {
-    const updated = [...models];
-    updated[index] = { ...updated[index], [field]: value };
-    setModels(updated);
+  const startEditModel = (index: number) => {
+    setEditingIndex(index);
+    setEditingModel({ ...models[index] });
+  };
+
+  const cancelEditModel = () => {
+    setEditingIndex(null);
+    setEditingModel(null);
+  };
+
+  const saveEditModel = () => {
+    if (editingIndex !== null && editingModel) {
+      const updated = [...models];
+      updated[editingIndex] = editingModel;
+      setModels(updated);
+      setEditingIndex(null);
+      setEditingModel(null);
+    }
+  };
+
+  const updateEditingModel = (field: keyof ModelOption, value: string | number) => {
+    if (editingModel) {
+      setEditingModel({ ...editingModel, [field]: value });
+    }
   };
 
   return (
@@ -109,7 +143,7 @@ export default function ModelsPage() {
               <div className="flex items-center gap-4">
                 <Button variant="ghost" size="sm" onClick={() => router.push('/')}>
                   <ArrowLeft className="w-4 h-4 mr-2" />
-                  Back
+                  {t('common.back')}
                 </Button>
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-gradient-to-br from-primary to-blue-600 rounded-lg">
@@ -117,9 +151,9 @@ export default function ModelsPage() {
                   </div>
                   <div>
                     <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-blue-600 bg-clip-text text-transparent">
-                      Model Management
+                      {t('models.title')}
                     </h1>
-                    <p className="text-xs text-muted-foreground">Configure AI model options</p>
+                    <p className="text-xs text-muted-foreground">{t('models.subtitle')}</p>
                   </div>
                 </div>
               </div>
@@ -128,7 +162,7 @@ export default function ModelsPage() {
                 <ThemeToggle />
                 <Button onClick={saveModels} disabled={saving}>
                   <Save className="w-4 h-4 mr-2" />
-                  {saving ? 'Saving...' : 'Save Changes'}
+                  {saving ? t('models.saving') : t('models.saveChanges')}
                 </Button>
               </div>
             </div>
@@ -144,34 +178,34 @@ export default function ModelsPage() {
           >
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Plus className="w-5 h-5 text-primary" />
-              Add New Model
+              {t('models.addNew')}
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
-                <Label htmlFor="value">Model Value</Label>
+                <Label htmlFor="value">{t('models.modelValue')}</Label>
                 <Input
                   id="value"
-                  placeholder="e.g., claude-opus-4-6"
+                  placeholder={t('models.placeholders.value')}
                   value={newModel.value}
                   onChange={(e) => setNewModel({ ...newModel, value: e.target.value })}
                 />
               </div>
               <div>
-                <Label htmlFor="label">Display Label</Label>
+                <Label htmlFor="label">{t('models.displayLabel')}</Label>
                 <Input
                   id="label"
-                  placeholder="e.g., Claude Opus 4.6"
+                  placeholder={t('models.placeholders.label')}
                   value={newModel.label}
                   onChange={(e) => setNewModel({ ...newModel, label: e.target.value })}
                 />
               </div>
               <div>
-                <Label htmlFor="cost">Cost Multiplier</Label>
+                <Label htmlFor="cost">{t('models.costMultiplier')}</Label>
                 <Input
                   id="cost"
                   type="number"
                   step="0.01"
-                  placeholder="e.g., 0.3"
+                  placeholder={t('models.placeholders.cost')}
                   value={newModel.costMultiplier}
                   onChange={(e) => setNewModel({ ...newModel, costMultiplier: parseFloat(e.target.value) || 0 })}
                 />
@@ -179,7 +213,7 @@ export default function ModelsPage() {
               <div className="flex items-end">
                 <Button onClick={addModel} className="w-full">
                   <Plus className="w-4 h-4 mr-2" />
-                  Add Model
+                  {t('models.addModel')}
                 </Button>
               </div>
             </div>
@@ -194,13 +228,13 @@ export default function ModelsPage() {
           >
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Cpu className="w-5 h-5 text-primary" />
-              Configured Models ({models.length})
+              {t('models.configured')} ({models.length})
             </h2>
             <div className="space-y-3">
               {loading ? (
-                <div className="text-center py-8 text-muted-foreground">Loading models...</div>
+                <div className="text-center py-8 text-muted-foreground">{t('models.loading')}</div>
               ) : models.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">No models configured</div>
+                <div className="text-center py-8 text-muted-foreground">{t('models.noModels')}</div>
               ) : (
                 models.map((model, index) => (
                   <motion.div
@@ -214,51 +248,58 @@ export default function ModelsPage() {
                       <>
                         <div className="flex-1 grid grid-cols-3 gap-3">
                           <Input
-                            value={model.value}
-                            onChange={(e) => updateModel(index, 'value', e.target.value)}
-                            placeholder="Model value"
+                            value={editingModel?.value || ''}
+                            onChange={(e) => updateEditingModel('value', e.target.value)}
+                            placeholder={t('models.modelValue')}
                           />
                           <Input
-                            value={model.label}
-                            onChange={(e) => updateModel(index, 'label', e.target.value)}
-                            placeholder="Display label"
+                            value={editingModel?.label || ''}
+                            onChange={(e) => updateEditingModel('label', e.target.value)}
+                            placeholder={t('models.displayLabel')}
                           />
                           <Input
                             type="number"
                             step="0.01"
-                            value={model.costMultiplier}
-                            onChange={(e) => updateModel(index, 'costMultiplier', parseFloat(e.target.value) || 0)}
-                            placeholder="Cost multiplier"
+                            value={editingModel?.costMultiplier || 0}
+                            onChange={(e) => updateEditingModel('costMultiplier', parseFloat(e.target.value) || 0)}
+                            placeholder={t('models.costMultiplier')}
                           />
                         </div>
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => setEditingIndex(null)}
+                          onClick={saveEditModel}
                         >
                           <Check className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={cancelEditModel}
+                        >
+                          <X className="w-4 h-4" />
                         </Button>
                       </>
                     ) : (
                       <>
                         <div className="flex-1 grid grid-cols-3 gap-4">
                           <div>
-                            <div className="text-xs text-muted-foreground">Value</div>
+                            <div className="text-xs text-muted-foreground">{t('models.value')}</div>
                             <div className="font-mono text-sm">{model.value}</div>
                           </div>
                           <div>
-                            <div className="text-xs text-muted-foreground">Label</div>
+                            <div className="text-xs text-muted-foreground">{t('models.label')}</div>
                             <div className="font-medium">{model.label}</div>
                           </div>
                           <div>
-                            <div className="text-xs text-muted-foreground">Cost Multiplier</div>
+                            <div className="text-xs text-muted-foreground">{t('models.costMultiplier')}</div>
                             <div className="font-medium">{model.costMultiplier}</div>
                           </div>
                         </div>
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => setEditingIndex(index)}
+                          onClick={() => startEditModel(index)}
                         >
                           <Edit2 className="w-4 h-4" />
                         </Button>
@@ -279,6 +320,21 @@ export default function ModelsPage() {
           </motion.div>
         </div>
       </div>
+
+      {dialogProps && <ConfirmDialog {...dialogProps} />}
+
+      {alertMessage && (
+        <ConfirmDialog
+          open={true}
+          title={t('common.alert')}
+          description={alertMessage}
+          confirmLabel={t('common.confirm')}
+          cancelLabel=""
+          variant="default"
+          onConfirm={() => setAlertMessage('')}
+          onCancel={() => setAlertMessage('')}
+        />
+      )}
     </div>
   );
 }

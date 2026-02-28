@@ -9,6 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { ThemeToggle } from '@/components/theme-toggle';
 import AgentEditModal from '@/components/AgentEditModal';
 import { ClipLoader } from 'react-spinners';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import { MODEL_OPTIONS } from '@/lib/models';
 
 interface AgentConfig {
   name: string;
@@ -45,6 +48,8 @@ export default function AgentsPage() {
   const [fromModel, setFromModel] = useState('');
   const [toModel, setToModel] = useState('');
   const [batchReplacing, setBatchReplacing] = useState(false);
+  const [alertMessage, setAlertMessage] = useState('');
+  const { confirm, dialogProps } = useConfirmDialog();
 
   useEffect(() => {
     loadAgents();
@@ -88,36 +93,51 @@ export default function AgentsPage() {
   };
 
   const handleDeleteAgent = async (name: string) => {
-    if (!confirm(`确定要删除 Agent "${name}" 吗？`)) return;
+    const confirmed = await confirm({
+      title: '确认删除',
+      description: `确定要删除 Agent "${name}" 吗？`,
+      confirmLabel: '删除',
+      cancelLabel: '取消',
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
     try {
       await agentApi.deleteAgent(name);
       await loadAgents();
     } catch (error) {
       console.error('Failed to delete agent:', error);
+      setAlertMessage('删除失败: ' + (error as Error).message);
     }
   };
 
   const handleBatchReplaceModel = async () => {
     if (!fromModel.trim() || !toModel.trim()) {
-      alert('请输入源模型和目标模型');
+      setAlertMessage('请选择源模型和目标模型');
       return;
     }
     if (fromModel === toModel) {
-      alert('源模型和目标模型不能相同');
+      setAlertMessage('源模型和目标模型不能相同');
       return;
     }
-    if (!confirm(`确定要将所有使用 "${fromModel}" 的 Agent 替换为 "${toModel}" 吗？`)) return;
+    const confirmed = await confirm({
+      title: '确认批量替换',
+      description: `确定要将所有使用 "${fromModel}" 的 Agent 替换为 "${toModel}" 吗？`,
+      confirmLabel: '确认替换',
+      cancelLabel: '取消',
+      variant: 'default',
+    });
+    if (!confirmed) return;
 
     setBatchReplacing(true);
     try {
       const result = await agentApi.batchReplaceModel(fromModel, toModel);
-      alert(result.message);
+      setAlertMessage(result.message);
       await loadAgents();
       setShowBatchReplaceModal(false);
       setFromModel('');
       setToModel('');
     } catch (error: any) {
-      alert('批量替换失败: ' + error.message);
+      setAlertMessage('批量替换失败: ' + error.message);
     } finally {
       setBatchReplacing(false);
     }
@@ -378,14 +398,19 @@ export default function AgentsPage() {
               </div>
               <div>
                 <label className="text-sm font-medium mb-2 block">目标模型</label>
-                <Input
-                  placeholder="输入目标模型名称"
+                <select
+                  className="w-full px-3 py-2 bg-background border rounded-md"
                   value={toModel}
                   onChange={(e) => setToModel(e.target.value)}
-                />
+                >
+                  <option value="">选择目标模型</option>
+                  {MODEL_OPTIONS.map(model => (
+                    <option key={model.value} value={model.value}>{model.label}</option>
+                  ))}
+                </select>
               </div>
               <div className="text-sm text-muted-foreground">
-                将所有使用 "{fromModel || '(未选择)'}" 的 Agent 替换为 "{toModel || '(未输入)'}"
+                将所有使用 "{fromModel || '(未选择)'}" 的 Agent 替换为 "{toModel || '(未选择)'}"
               </div>
             </div>
             <div className="p-5 border-t flex justify-end gap-2">
@@ -398,6 +423,21 @@ export default function AgentsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {dialogProps && <ConfirmDialog {...dialogProps} />}
+
+      {alertMessage && (
+        <ConfirmDialog
+          open={true}
+          title="提示"
+          description={alertMessage}
+          confirmLabel="确定"
+          cancelLabel=""
+          variant="default"
+          onConfirm={() => setAlertMessage('')}
+          onCancel={() => setAlertMessage('')}
+        />
       )}
     </div>
   );

@@ -472,8 +472,14 @@ class WorkflowManager extends EventEmitter {
         if (action === 'iterate' && phase.iteration?.enabled) {
           // Re-run the iterative phase for another round
           await this.executeIterativePhase(phase, workflowConfig);
-          // Loop back to show checkpoint again
-          continue;
+          // Check if iteration is still running (not completed/escalated)
+          const iterState = this.iterationStates.get(phase.name);
+          if (iterState && (iterState.status === 'completed' || iterState.status === 'escalated')) {
+            // Iteration finished, show checkpoint one more time for final decision
+            continue;
+          }
+          // Iteration still running, break out to avoid double checkpoint
+          break;
         }
         // action === 'approve' → proceed to next phase
         break;
@@ -1387,6 +1393,16 @@ class WorkflowManager extends EventEmitter {
 
   requestIteration(feedback: string): void {
     this.iterationFeedback = feedback;
+    // Reset iteration state for current phase to allow re-execution
+    if (this.currentPhase) {
+      const iterState = this.iterationStates.get(this.currentPhase);
+      if (iterState) {
+        // Reset status to 'running' so resume won't skip this phase
+        iterState.status = 'running';
+        iterState.consecutiveCleanRounds = 0;
+        this.iterationStates.set(this.currentPhase, iterState);
+      }
+    }
     this.emit('iterate');
   }
 
@@ -1631,6 +1647,32 @@ class WorkflowManager extends EventEmitter {
         this.completedStepNames.push(fn);
       }
     }
+
+    // Recover missing completed steps by checking log files
+    // This handles cases where steps completed but state wasn't persisted (e.g. crash/restart)
+    try {
+      const logsDir = resolve(process.cwd(), 'runs', runId, 'logs');
+      const logFiles = await readdir(logsDir).catch(() => []);
+      for (const file of logFiles) {
+        if (!file.endsWith('.log')) continue;
+        // Parse filename: agent-stepName-timestamp.log
+        const match = file.match(/^(.+?)-(.+)-(\d+)\.log$/);
+        if (!match) continue;
+        const stepName = match[2];
+        // Skip if already in completedSteps or stepLogs
+        if (this.completedStepNames.includes(stepName) || completedLogNames.has(stepName)) continue;
+        // Check if log file indicates completion (has "✓ 完成" or "进程退出 code=0")
+        const logPath = resolve(logsDir, file);
+        const logContent = await readFile(logPath, 'utf-8').catch(() => '');
+        if (logContent.includes('✓ 完成') || (logContent.includes('进程退出 code=0') && !logContent.includes('✗ 失败'))) {
+          console.log(`[resume] 恢复丢失的完成步骤: ${stepName} (从日志文件)`);
+          this.completedStepNames.push(stepName);
+        }
+      }
+    } catch (err) {
+      console.warn(`[resume] 无法恢复日志文件状态:`, err);
+    }
+
     this.failedStepNames = []; // Reset failed — we'll retry truly failed ones
     this.stepLogs = [...(runState.stepLogs || []).filter(l => l.status === 'completed')];
     this.runStartTime = runState.startTime;
@@ -1776,19 +1818,59 @@ class WorkflowManager extends EventEmitter {
     for (const phase of workflowConfig.workflow.phases) {
       const phaseHasStep = phase.steps.some(s => s.name === baseStepName);
       if (phaseHasStep && phase.iteration?.enabled && runState.iterationStates[phase.name]) {
+        const iterState = runState.iterationStates[phase.name];
+
         // Extract iteration number from step name (e.g. "提出设计方案-迭代2" → 2)
         const iterMatch = stepName.match(/-迭代(\d+)$/);
-        const targetIter = iterMatch ? parseInt(iterMatch[1], 10) : 1;
-        // Roll back iteration state to just before the target iteration
-        const iterState = runState.iterationStates[phase.name];
-        iterState.currentIteration = targetIter - 1;
-        iterState.status = 'running';
-        // Trim bugsFoundPerRound to only keep rounds before target
-        if (iterState.bugsFoundPerRound) {
-          iterState.bugsFoundPerRound = iterState.bugsFoundPerRound.slice(0, targetIter - 1);
+        let targetIter: number;
+
+        if (iterMatch) {
+          // Step name has explicit iteration suffix
+          targetIter = parseInt(iterMatch[1], 10);
+        } else {
+          // Step name has no suffix - could be iteration 1 or a failed step from current iteration
+          // Check if this step appears in stepLogs to determine actual iteration
+          const stepLog = runState.stepLogs.find(l => l.stepName === stepName || l.stepName === baseStepName);
+          if (stepLog) {
+            // Find all logs with the same base step name to count iterations
+            const sameStepLogs = runState.stepLogs.filter(l =>
+              l.stepName === baseStepName || l.stepName.startsWith(`${baseStepName}-迭代`)
+            );
+            targetIter = sameStepLogs.length; // The iteration number is the count of attempts
+          } else {
+            // Not in logs yet, use current iteration state + 1 (next attempt)
+            targetIter = Math.max(1, iterState.currentIteration + 1);
+          }
         }
-        // Reset consecutive clean rounds count
-        iterState.consecutiveCleanRounds = 0;
+
+        // Check if we need to roll back the entire iteration or just remove specific steps
+        // If the target step is the first step in the iteration, roll back the iteration
+        // Otherwise, keep the iteration state and just remove the step from completed list
+        const isFirstStepInIteration = logIndex >= 0 && (() => {
+          // Find all steps in this iteration that come before the target step
+          const iterSteps = runState.stepLogs.slice(0, logIndex).filter(l => {
+            const match = l.stepName.match(/-迭代(\d+)$/);
+            const stepIter = match ? parseInt(match[1], 10) : 1;
+            return stepIter === targetIter;
+          });
+          return iterSteps.length === 0;
+        })();
+
+        if (isFirstStepInIteration) {
+          // Roll back iteration state to just before the target iteration
+          iterState.currentIteration = targetIter - 1;
+          iterState.status = 'running';
+          // Trim bugsFoundPerRound to only keep rounds before target
+          if (iterState.bugsFoundPerRound) {
+            iterState.bugsFoundPerRound = iterState.bugsFoundPerRound.slice(0, targetIter - 1);
+          }
+          // Reset consecutive clean rounds count
+          iterState.consecutiveCleanRounds = 0;
+        } else {
+          // Keep iteration state, just mark as running to allow re-execution
+          iterState.status = 'running';
+          // Don't roll back currentIteration - we're in the middle of this iteration
+        }
       }
     }
 
@@ -1906,7 +1988,14 @@ class WorkflowManager extends EventEmitter {
         this.pendingCheckpoint = null;
         if (action === 'iterate' && phase.iteration?.enabled) {
           await this.executeIterativePhase(phase, workflowConfig);
-          continue;
+          // Check if iteration is still running (not completed/escalated)
+          const iterState = this.iterationStates.get(phase.name);
+          if (iterState && (iterState.status === 'completed' || iterState.status === 'escalated')) {
+            // Iteration finished, show checkpoint one more time for final decision
+            continue;
+          }
+          // Iteration still running, break out to avoid double checkpoint
+          break;
         }
         break;
       }

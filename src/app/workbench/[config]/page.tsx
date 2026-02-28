@@ -58,6 +58,7 @@ export default function WorkbenchPage() {
   const [selectedRun, setSelectedRun] = useState<any>(null);
   const [runDetail, setRunDetail] = useState<any>(null);
   const [viewingHistoryRun, setViewingHistoryRun] = useState(false);
+  const [pendingCheckpointPhase, setPendingCheckpointPhase] = useState<string | null>(null);
   const [fullStepOutput, setFullStepOutput] = useState<string | null>(null);
   const [loadingOutput, setLoadingOutput] = useState(false);
   const [markdownModal, setMarkdownModal] = useState<{ title: string; chunks: string[] } | null>(null);
@@ -291,6 +292,9 @@ export default function WorkbenchPage() {
         dispatch({ type: 'SET_CHECKPOINT_MESSAGE', payload: detail.pendingCheckpoint.message });
         dispatch({ type: 'SET_CHECKPOINT_IS_ITERATIVE', payload: !!detail.pendingCheckpoint.isIterativePhase });
         dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
+        setPendingCheckpointPhase(detail.pendingCheckpoint.phase || null);
+      } else {
+        setPendingCheckpointPhase(null);
       }
       addLog('system', 'info', `查看历史运行: ${runId}`);
     } catch (error: any) {
@@ -368,6 +372,7 @@ export default function WorkbenchPage() {
         dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
         dispatch({ type: 'SET_CHECKPOINT_MESSAGE', payload: event.data.message });
         dispatch({ type: 'SET_CHECKPOINT_IS_ITERATIVE', payload: !!event.data.isIterativePhase });
+        setPendingCheckpointPhase(event.data.phase || null);
         addLog('system', 'warning', `✋ 检查点: ${event.data.checkpoint}`);
         break;
       case 'iteration':
@@ -534,6 +539,7 @@ export default function WorkbenchPage() {
       }
       dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
       setIterationFeedback(''); // 清空反馈
+      setPendingCheckpointPhase(null);
       addLog('system', 'success', '✓ 检查点已批准，继续执行');
     } catch (error: any) {
       addLog('system', 'error', `批准失败: ${error.message}`);
@@ -543,6 +549,7 @@ export default function WorkbenchPage() {
   const rejectCheckpoint = async () => {
     dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
     setIterationFeedback(''); // 清空反馈
+    setPendingCheckpointPhase(null);
     if (isRunning) {
       await stopWorkflow();
     }
@@ -571,6 +578,7 @@ export default function WorkbenchPage() {
       }
       dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
       setIterationFeedback('');
+      setPendingCheckpointPhase(null);
       addLog('system', 'info', '↻ 继续迭代，重新执行当前阶段');
     } catch (error: any) {
       addLog('system', 'error', `请求迭代失败: ${error.message}`);
@@ -875,16 +883,47 @@ export default function WorkbenchPage() {
   // Find the latest iteration result key for a step (e.g. "代码审计" → "代码审计-迭代3" if that's the latest)
   const getLatestStepKey = (baseName: string): string => {
     if (!baseName) return baseName;
+    // If baseName itself has an iteration suffix (e.g. "设计修复方案-迭代2"), try it directly first,
+    // then fall back to the base name (without suffix) in case stepLogs use the base name as key.
+    const iterSuffixMatch = baseName.match(/^(.+)-迭代(\d+)$/);
+    const effectiveBase = iterSuffixMatch ? iterSuffixMatch[1] : baseName;
+
     // If currentStep matches this base step, prefer it (it's the active iteration)
-    if (currentStep && (currentStep === baseName || currentStep.startsWith(baseName + '-迭代'))) {
-      if (stepResults[currentStep]) return currentStep;
+    // Return currentStep even if stepResults doesn't have it yet (for running steps)
+    if (currentStep && (currentStep === effectiveBase || currentStep.startsWith(effectiveBase + '-迭代'))) {
+      return currentStep;
     }
-    // Find highest iteration number in stepResults
-    let latest = baseName;
+
+    // If user clicked on a specific iteration node (e.g. "功能测试-迭代4")
+    if (iterSuffixMatch) {
+      const clickedIterNum = parseInt(iterSuffixMatch[2], 10);
+      // Check if this specific iteration is currently running
+      const expectedCurrentStep = baseName;
+      if (currentStep === expectedCurrentStep || currentStep?.startsWith(effectiveBase + '-迭代' + clickedIterNum)) {
+        return baseName;
+      }
+      // If the exact key exists in results, use it
+      if (stepResults[baseName]) return baseName;
+
+      // Check if this iteration number is higher than any existing iteration
+      let maxExistingIter = 0;
+      for (const key of Object.keys(stepResults)) {
+        const m = key.match(new RegExp(`^${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (n > maxExistingIter) maxExistingIter = n;
+        }
+      }
+      // If clicked iteration is higher than existing, return baseName (will show as not executed)
+      if (clickedIterNum > maxExistingIter) return baseName;
+    }
+
+    // Find highest iteration number in stepResults for the effective base name
+    let latest = effectiveBase;
     let maxIter = 0;
     for (const key of Object.keys(stepResults)) {
-      if (key === baseName) { if (maxIter === 0) latest = key; continue; }
-      const m = key.match(new RegExp(`^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
+      if (key === effectiveBase) { if (maxIter === 0) latest = key; continue; }
+      const m = key.match(new RegExp(`^${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
       if (m) {
         const n = parseInt(m[1], 10);
         if (n > maxIter) { maxIter = n; latest = key; }
@@ -1371,7 +1410,15 @@ export default function WorkbenchPage() {
                 <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">工作流可视化</h2></div>
                 <div className="flex-1 overflow-auto">
                   {workflowConfig ? (<FlowDiagram workflow={workflowConfig.workflow} currentPhase={currentPhase} currentStep={currentStep}
-                    agents={agents} completedSteps={completedSteps} failedSteps={failedSteps} iterationStates={iterationStates} onSelectStep={selectStep} />
+                    agents={agents} completedSteps={completedSteps} failedSteps={failedSteps} iterationStates={iterationStates} onSelectStep={selectStep}
+                    pendingCheckpointPhase={pendingCheckpointPhase || undefined}
+                    onSelectCheckpoint={(cp) => {
+                      // Find the phase for this checkpoint to determine isIterativePhase
+                      const phase = workflowConfig.workflow.phases.find((p: any) => p.checkpoint?.name === cp.name);
+                      dispatch({ type: 'SET_CHECKPOINT_MESSAGE', payload: cp.message });
+                      dispatch({ type: 'SET_CHECKPOINT_IS_ITERATIVE', payload: !!phase?.iteration?.enabled });
+                      dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
+                    }} />
                   ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">monitoring</span><p>加载中...</p></div>)}
                 </div>
               </>
@@ -1384,6 +1431,21 @@ export default function WorkbenchPage() {
                   const stepResult = selectedStep ? stepResults[stepKey] : null;
                   const isCurrentStepRunning = selectedStep && isRunning && (
                     currentStep === selectedStep.name || currentStep?.startsWith(selectedStep.name + '-迭代')
+                  );
+                  // For steps with iteration suffix (e.g. "设计修复方案-迭代2"), also check the base name
+                  // in completedSteps/failedSteps, since FlowDiagram marks non-last rounds as completed
+                  // even if completedSteps only contains the base name or a different iteration key.
+                  const stepBaseName = selectedStep?.name.match(/^(.+)-迭代\d+$/)
+                    ? selectedStep.name.replace(/-迭代\d+$/, '')
+                    : selectedStep?.name;
+                  const isStepDone = selectedStep && (
+                    completedSteps.includes(selectedStep.name) ||
+                    (stepBaseName && completedSteps.some(s => s === stepBaseName || s.startsWith(stepBaseName + '-迭代'))) ||
+                    !!stepResult
+                  );
+                  const isStepFailed = selectedStep && (
+                    failedSteps.includes(selectedStep.name) ||
+                    (stepBaseName && failedSteps.some(s => s === stepBaseName || s.startsWith(stepBaseName + '-迭代')))
                   );
                   return (<>
                 <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">{selectedStep ? (stepKey !== selectedStep.name ? stepKey : selectedStep.name) : selectedAgent ? selectedAgent.name : 'Agent 详情'}</h2></div>
@@ -1539,7 +1601,7 @@ export default function WorkbenchPage() {
                 </div>
               )}
               {/* Resume button on failed/crashed step */}
-              {selectedStep && failedSteps.includes(selectedStep.name) && !isRunning && (runId || selectedRun?.id) && (
+              {selectedStep && isStepFailed && !isRunning && (runId || selectedRun?.id) && (
                 <div className="bg-muted border-b p-3.5">
                   <Button className="bg-green-600 hover:bg-green-700 text-white text-xs w-full" onClick={() => resumeWorkflow()} disabled={isRunning}>
                     <span className="material-symbols-outlined text-sm">refresh</span>
@@ -1551,7 +1613,7 @@ export default function WorkbenchPage() {
                 </div>
               )}
               {/* Rerun from step button — for completed or failed steps when not running */}
-              {selectedStep && !isRunning && (runId || selectedRun?.id) && (completedSteps.includes(selectedStep.name) || failedSteps.includes(selectedStep.name)) && (
+              {selectedStep && !isRunning && (runId || selectedRun?.id) && (isStepDone || isStepFailed) && (
                 <div className="bg-muted border-b p-3.5">
                   <Button variant="secondary" size="sm" className="text-xs w-full" onClick={() => handleRerunFromStep(selectedStep.name)}>
                     <span className="material-symbols-outlined text-sm">replay</span>
@@ -1819,7 +1881,7 @@ export default function WorkbenchPage() {
         onSave={handleSaveNode} onDelete={handleDeleteNode} />)}
       {showCheckpoint && (<div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false })}>
         <div className="bg-card rounded-lg w-[600px] max-w-[90%] border" onClick={(e) => e.stopPropagation()}>
-          <div className="p-5 border-b"><h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">pan_tool</span>人工检查点</h3></div>
+          <div className="p-5 border-b"><h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">person</span>人工检查点</h3></div>
           <div className="p-5"><p className="text-sm mb-4 leading-relaxed">{checkpointMessage}</p>
             <div className="bg-muted p-4 rounded-md border-l-[3px] border-l-yellow-500 mb-4">
               <p className="text-sm text-muted-foreground mb-2">当前阶段: <strong className="text-foreground">{currentPhase}</strong></p>

@@ -1,4 +1,3 @@
-# 修复工程师 Agent 配置
 name: fix-developer
 team: blue
 category: 编码
@@ -6,7 +5,7 @@ tags:
   - 编码
   - 修复
   - 缺陷修复
-model: claude-opus-4-6
+model: claude-sonnet-4-6
 temperature: 0.3
 allowedTools:
   - Bash
@@ -15,7 +14,6 @@ allowedTools:
   - Edit
   - Glob
   - Grep
-
 capabilities:
   - 缺陷修复实现
   - 回归测试编写
@@ -23,7 +21,6 @@ capabilities:
   - 防御性编程
   - 修复验证
   - 代码加固
-
 systemPrompt: |
   你是一位专注于缺陷修复的高级工程师，精通根因修复、最小侵入性代码变更和防御性编程。你负责根据评审通过的修复方案，精确实施代码修复，确保修复的正确性、完整性和最小侵入性。
 
@@ -59,14 +56,12 @@ systemPrompt: |
   - 回归测试用例列表
   - 编译和测试验证结果
   - 潜在风险说明（如有）
-
 constraints:
   - 严格按照评审通过的修复方案实施，不擅自扩大修改范围
   - 每个修复必须有对应的回归测试用例
   - 修复后必须通过所有已有测试，不引入回归
   - 代码变更必须遵循项目编码规范
   - 修复点必须添加必要的注释说明修复原因
-
 iterationPrompt: |
   你现在处于修复实施迭代阶段。你的主要任务是：
 

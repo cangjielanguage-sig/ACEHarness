@@ -126,11 +126,14 @@ interface FlowDiagramProps {
   iterationStates?: Record<string, IterationStateInfo>;
   onSelectStep: (step: Step) => void;
   onSelectPhase?: (phase: Phase) => void;
+  onSelectCheckpoint?: (checkpoint: { name: string; message: string }) => void;
+  /** Phase name of the currently pending checkpoint (if any) */
+  pendingCheckpointPhase?: string;
 }
 
 export default function FlowDiagram({
   workflow, currentPhase, currentStep, agents, completedSteps,
-  failedSteps = [], iterationStates = {}, onSelectStep, onSelectPhase,
+  failedSteps = [], iterationStates = {}, onSelectStep, onSelectPhase, onSelectCheckpoint, pendingCheckpointPhase,
 }: FlowDiagramProps) {
   const getAgentTeam = (agentName: string) => {
     return agents?.find((a) => a.name === agentName)?.team || 'blue';
@@ -298,22 +301,25 @@ export default function FlowDiagram({
 
         // Checkpoint node — offset upward so its vertical center aligns with anchors
         const cpEstimatedH = 82; // approximate rendered height of checkpoint node
+        const isPendingCp = pendingCheckpointPhase === phase.name;
         nodes.push({
           id: cpId,
           type: 'default',
           position: { x: cpX, y: anchorCenterY - cpEstimatedH / 2 },
           sourcePosition: Position.Right,
           targetPosition: Position.Left,
-          data: { label: <div className={styles.checkpointNode}>✋ {phase.checkpoint.name}</div> },
+          data: { label: <div className={styles.checkpointNode}><span className="material-symbols-outlined" style={{fontSize:14,verticalAlign:'middle'}}>person</span> {phase.checkpoint.name}</div>, checkpoint: isPendingCp ? phase.checkpoint : undefined },
           style: {
-            background: 'hsl(var(--flow-node-bg))',
-            border: '2px solid hsl(var(--flow-warning))',
+            background: isPendingCp ? 'hsl(var(--flow-warning) / 0.15)' : 'hsl(var(--flow-node-bg))',
+            border: `2px solid ${isPendingCp ? 'hsl(var(--flow-warning))' : 'hsl(var(--muted-foreground) / 0.4)'}`,
             borderRadius: '4px',
             padding: '6px 8px',
             width: 50,
             textAlign: 'center' as const,
             lineHeight: '1.4',
             fontSize: '12px',
+            cursor: isPendingCp ? 'pointer' : 'default',
+            opacity: isPendingCp ? 1 : 0.5,
           },
           zIndex: 2,
         });
@@ -656,11 +662,13 @@ export default function FlowDiagram({
     (event: React.MouseEvent, node: Node) => {
       if (node.data.step) {
         onSelectStep(node.data.step);
+      } else if (node.data.checkpoint && onSelectCheckpoint) {
+        onSelectCheckpoint(node.data.checkpoint);
       } else if (node.data.phase && onSelectPhase) {
         onSelectPhase(node.data.phase);
       }
     },
-    [onSelectStep, onSelectPhase]
+    [onSelectStep, onSelectPhase, onSelectCheckpoint]
   );
 
   return (

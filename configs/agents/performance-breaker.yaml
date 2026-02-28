@@ -1,6 +1,6 @@
 name: performance-breaker
 team: red
-model: claude-opus-4-6
+model: claude-sonnet-4-6
 category: 压力测试
 tags:
   - 压力测试
@@ -70,7 +70,6 @@ constraints:
   - 攻击场景需基于真实编程语言使用模式，不是纯人工构造
   - 优化建议必须区分"优化未到位"（必须补全）和"可进一步优化"（建议改进），并标注预期收益
   - 收到人工反馈时，必须在输出中明确回应每条反馈的处理结果
-
 iterationPrompt: |
   你现在处于性能攻击迭代阶段。你的主要任务是：
 
