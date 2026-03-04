@@ -11,7 +11,7 @@ import AgentEditModal from '@/components/AgentEditModal';
 import { ClipLoader } from 'react-spinners';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
-import { MODEL_OPTIONS } from '@/lib/models';
+import { ModelOption } from '@/lib/models';
 
 interface AgentConfig {
   name: string;
@@ -49,11 +49,23 @@ export default function AgentsPage() {
   const [toModel, setToModel] = useState('');
   const [batchReplacing, setBatchReplacing] = useState(false);
   const [alertMessage, setAlertMessage] = useState('');
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const { confirm, dialogProps } = useConfirmDialog();
 
   useEffect(() => {
     loadAgents();
+    loadModels();
   }, []);
+
+  const loadModels = async () => {
+    try {
+      const response = await fetch('/api/models');
+      const data = await response.json();
+      setAvailableModels(data.models || []);
+    } catch (error) {
+      console.error('Failed to load models:', error);
+    }
+  };
 
   const loadAgents = async () => {
     try {
@@ -404,7 +416,7 @@ export default function AgentsPage() {
                   onChange={(e) => setToModel(e.target.value)}
                 >
                   <option value="">选择目标模型</option>
-                  {MODEL_OPTIONS.map(model => (
+                  {availableModels.map(model => (
                     <option key={model.value} value={model.value}>{model.label}</option>
                   ))}
                 </select>

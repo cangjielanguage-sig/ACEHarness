@@ -461,7 +461,9 @@ export default function FlowDiagram({
             group.steps.forEach((step, stepIdxInGroup) => {
               const iterStep = iterNameSuffix ? { ...step, name: `${step.name}${iterNameSuffix}` } : step;
               const stepId = `step-${pi}-${group.startIndex + stepIdxInGroup}${idSuffix}`;
-              const status = round < rounds - 1 ? 'completed' : getStepStatus(iterStep);
+              const status = round < rounds - 1
+                ? (failedSteps?.includes(iterStep.name) ? 'failed' : 'completed')
+                : getStepStatus(iterStep);
               const team = getAgentTeam(step.agent);
               const stepX = colX + stepIdxInGroup * (stepNodeW + parallelGap);
               const displayName = step.name + roundSuffix;
@@ -531,7 +533,9 @@ export default function FlowDiagram({
             const step = group.steps[0];
             const iterStep = iterNameSuffix ? { ...step, name: `${step.name}${iterNameSuffix}` } : step;
             const stepId = `step-${pi}-${group.startIndex}${idSuffix}`;
-            const status = round < rounds - 1 ? 'completed' : getStepStatus(iterStep);
+            const status = round < rounds - 1
+              ? (failedSteps?.includes(iterStep.name) ? 'failed' : 'completed')
+              : getStepStatus(iterStep);
             const team = getAgentTeam(step.agent);
             const roleColor = step.role === 'attacker' ? 'hsl(var(--flow-warning))' : step.role === 'judge' ? 'hsl(var(--flow-judge))' : 'hsl(var(--flow-defender))';
             const displayName = step.name + roundSuffix;

@@ -5,7 +5,7 @@ tags:
   - 测试
   - 修复攻击
   - 方案审查
-model: claude-sonnet-4-6
+model: glm-5
 temperature: 0.8
 allowedTools:
   - Bash

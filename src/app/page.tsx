@@ -39,6 +39,7 @@ export default function DashboardPage() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [performanceData, setPerformanceData] = useState<any[]>([]);
   const [activityData, setActivityData] = useState<any[]>([]);
+  const [runningRuns, setRunningRuns] = useState<any[]>([]);
 
   useEffect(() => {
     loadDashboardData();
@@ -64,11 +65,16 @@ export default function DashboardPage() {
       for (const config of (configsData.configs || [])) {
         try {
           const runsData = await runsApi.listByConfig(config.filename);
-          allRuns.push(...(runsData.runs || []));
+          const runs = runsData.runs || [];
+          allRuns.push(...runs);
         } catch (e) {
           // Ignore errors for individual configs
         }
       }
+
+      // Filter running runs for active workflows section
+      const activeRuns = allRuns.filter((r: any) => r.status === 'running');
+      setRunningRuns(activeRuns);
 
       // Sort runs by start time
       allRuns.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
@@ -417,23 +423,36 @@ export default function DashboardPage() {
                 {t('dashboard.sections.activeWorkflows')}
               </h3>
               <div className="space-y-3">
-                {configs.slice(0, 5).map((config, i) => (
-                  <motion.div
-                    key={config.filename}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.6 + i * 0.1 }}
-                    whileHover={{ x: 5 }}
-                    className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border/30 cursor-pointer hover:border-primary/50 transition-colors"
-                    onClick={() => router.push(`/workbench/${encodeURIComponent(config.filename)}?mode=run`)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                      <span className="font-medium">{config.name}</span>
-                    </div>
-                    <Badge variant="secondary">{config.phaseCount || 0} {t('dashboard.sections.phases')}</Badge>
-                  </motion.div>
-                ))}
+                {runningRuns.slice(0, 5).map((run, i) => {
+                  const config = configs.find(c => c.filename === run.configFile);
+                  const configName = config?.name || run.configName || run.configFile;
+
+                  return (
+                    <motion.div
+                      key={run.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.6 + i * 0.1 }}
+                      whileHover={{ x: 5 }}
+                      className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border/30 cursor-pointer hover:border-primary/50 transition-colors"
+                      onClick={() => router.push(`/workbench/${encodeURIComponent(run.configFile)}?mode=history&runId=${run.id}`)}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">{configName}</span>
+                          <span className="text-xs text-muted-foreground">{run.currentPhase || 'Starting...'}</span>
+                        </div>
+                      </div>
+                      <Badge variant="secondary">{run.completedSteps || 0}/{run.totalSteps || 0}</Badge>
+                    </motion.div>
+                  );
+                })}
+                {runningRuns.length === 0 && (
+                  <div className="text-center text-muted-foreground py-8">
+                    {t('dashboard.sections.noActiveWorkflows')}
+                  </div>
+                )}
               </div>
             </motion.div>
 
@@ -455,7 +474,8 @@ export default function DashboardPage() {
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.7 + i * 0.1 }}
-                    className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border/30"
+                    onClick={() => router.push(`/workbench/${encodeURIComponent(run.configFile)}?mode=history&runId=${run.id}`)}
+                    className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border/30 cursor-pointer hover:bg-muted/70 transition-colors"
                   >
                     <div className="flex items-center gap-3">
                       {run.status === 'completed' ? (

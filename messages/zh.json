@@ -23,7 +23,8 @@
     "sections": {
       "activeWorkflows": "活跃工作流",
       "recentRuns": "最近运行",
-      "phases": "个阶段"
+      "phases": "个阶段",
+      "noActiveWorkflows": "暂无活跃工作流"
     },
     "status": {
       "completed": "已完成",

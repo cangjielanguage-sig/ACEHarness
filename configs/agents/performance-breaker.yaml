@@ -1,6 +1,6 @@
 name: performance-breaker
 team: red
-model: claude-sonnet-4-6
+model: glm-5
 category: 压力测试
 tags:
   - 压力测试

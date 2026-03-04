@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { runsApi } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Markdown from '@/components/Markdown';
 import styles from '@/app/workbench/[config]/page.module.css';
@@ -53,6 +52,7 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [loadingContent, setLoadingContent] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Filters and sorting
   const [sortField, setSortField] = useState<SortField>('time');
@@ -364,24 +364,54 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
       </div>
 
       {/* Modal for document content */}
-      <Dialog open={!!selectedFile} onOpenChange={(open) => { if (!open) { setSelectedFile(null); setContent(''); } }}>
-        <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-base">article</span>
-              <span className="flex-1 truncate">{selectedFile?.baseName}</span>
-              <span className="text-xs text-muted-foreground font-normal">{selectedFile ? (selectedFile.size / 1024).toFixed(1) : 0} KB</span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className={`${styles.markdownContent} flex-1 overflow-y-auto pr-2`}>
-            {loadingContent ? (
-              <div className="text-sm text-muted-foreground text-center py-8">加载中...</div>
-            ) : (
-              <Markdown>{content}</Markdown>
-            )}
+      {selectedFile && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => { setSelectedFile(null); setContent(''); setIsFullscreen(false); }}>
+          <div className={`bg-card rounded-lg border flex flex-col ${isFullscreen ? 'w-full h-full rounded-none' : 'max-w-4xl w-[90%] h-[80vh]'}`} onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b flex justify-between items-center">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="material-symbols-outlined text-base shrink-0">article</span>
+                <span className="font-semibold truncate">{selectedFile.baseName}</span>
+                <span className="text-xs text-muted-foreground shrink-0">{(selectedFile.size / 1024).toFixed(1)} KB</span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsFullscreen(f => !f)}
+                  title={isFullscreen ? '退出全屏' : '全屏'}
+                >
+                  <span className="material-symbols-outlined text-sm">{isFullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = selectedFile.baseName;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  title="下载文件"
+                  disabled={loadingContent || !content}
+                >
+                  <span className="material-symbols-outlined text-sm">download</span>
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => { setSelectedFile(null); setContent(''); setIsFullscreen(false); }}>关闭</Button>
+              </div>
+            </div>
+            <div className={`${styles.markdownContent} flex-1 overflow-y-auto p-4`}>
+              {loadingContent ? (
+                <div className="text-sm text-muted-foreground text-center py-8">加载中...</div>
+              ) : (
+                <Markdown>{content}</Markdown>
+              )}
+            </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
     </div>
   );
 }

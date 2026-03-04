@@ -596,29 +596,11 @@ class WorkflowManager extends EventEmitter {
       startIter = iterState.currentIteration + 1;
       console.log(`[iterPhase] Subsequent iteration: starting at iter=${startIter}`);
     } else {
-      // Initial defender run — skip if already completed
-      for (const step of defenderSteps) {
-        if (this.shouldStop) return;
-        if (skipSet?.has(step.name)) {
-          console.log(`[iterPhase] SKIPPING defender "${step.name}" (already completed)`);
-          this.emit('step', { step: step.name, agent: step.agent, message: `跳过已完成: ${step.name}`, skipped: true });
-          continue;
-        }
-        console.log(`[iterPhase] EXECUTING defender "${step.name}" (NOT in skipSet)`);
-        await this.runStep(step, phase, workflowConfig, 0);
-        if (!this.lastStepSucceeded()) {
-          throw new Error(`步骤 "${step.name}" 执行失败，迭代阶段中止`);
-        }
-      }
-
       // Determine starting iteration (resume from where we left off)
-      // currentIteration is set at the START of each iteration (before steps run),
-      // so we need to check if the current iteration actually completed all its steps.
       if (iterState.currentIteration >= 1) {
         // Check if all steps of the current iteration are in completedSteps
         const curIter = iterState.currentIteration;
-        const allSteps = [...attackerSteps, ...judgeSteps, ...(curIter >= 2 ? defenderSteps : [])];
-        const iterStepNames = allSteps.map(s => curIter >= 2 ? `${s.name}-迭代${curIter}` : s.name);
+        const iterStepNames = phase.steps.map(s => curIter >= 2 ? `${s.name}-迭代${curIter}` : s.name);
         const allCompleted = iterStepNames.every(n => this.completedStepNames.includes(n));
         startIter = allCompleted ? curIter + 1 : curIter;
       } else {
@@ -626,7 +608,7 @@ class WorkflowManager extends EventEmitter {
       }
     }
 
-    // Iterative attacker → judge → (defender fix) loop
+    // Main iteration loop — execute steps in workflow.yaml order
     for (let iter = startIter; iter <= iterConfig.maxIterations; iter++) {
       if (this.shouldStop) break;
 
@@ -639,45 +621,14 @@ class WorkflowManager extends EventEmitter {
       });
       await this.persistState();
 
-      // For subsequent iterations (iter >= 2), run defenders first with iteration suffix
-      if (iter >= 2) {
-        for (const step of defenderSteps) {
-          if (this.shouldStop) return;
-          const namedStep = iterStep(step, iter);
-          if (skipSet?.has(namedStep.name) || this.completedStepNames.includes(namedStep.name)) {
-            this.emit('step', { step: namedStep.name, agent: namedStep.agent, message: `跳过已完成: ${namedStep.name}`, skipped: true });
-            continue;
-          }
-          await this.runStep(namedStep, phase, workflowConfig, 0);
-          if (!this.lastStepSucceeded()) {
-            throw new Error(`步骤 "${namedStep.name}" 执行失败，迭代阶段中止`);
-          }
-        }
-      }
-
-      // Run attackers — use parseStepVerdict for structured bug count
+      // Execute all steps in the order defined in workflow.yaml
       let totalBugs = 0;
-      for (const step of attackerSteps) {
-        if (this.shouldStop) return;
-        const namedStep = iterStep(step, iter);
-        if (skipSet?.has(namedStep.name) || this.completedStepNames.includes(namedStep.name)) {
-          this.emit('step', { step: namedStep.name, agent: namedStep.agent, message: `跳过已完成: ${namedStep.name}`, skipped: true });
-          continue;
-        }
-        const output = await this.runStep(namedStep, phase, workflowConfig, 0);
-        if (!this.lastStepSucceeded()) {
-          throw new Error(`步骤 "${namedStep.name}" 执行失败，迭代阶段中止`);
-        }
-        const verdict = this.parseStepVerdict(output);
-        totalBugs += verdict.remainingIssues;
-      }
-
-      // Run judges — use parseStepVerdict for structured verdict
       let judgeVerdict: { verdict: 'pass' | 'conditional_pass' | 'fail'; remainingIssues: number; summary: string } | null = null;
-      for (const step of judgeSteps) {
+
+      for (const step of phase.steps) {
         if (this.shouldStop) return;
         const namedStep = iterStep(step, iter);
-        if (skipSet?.has(namedStep.name) || this.completedStepNames.includes(namedStep.name)) {
+        if (skipSet?.has(namedStep.name)) {
           this.emit('step', { step: namedStep.name, agent: namedStep.agent, message: `跳过已完成: ${namedStep.name}`, skipped: true });
           continue;
         }
@@ -685,11 +636,29 @@ class WorkflowManager extends EventEmitter {
         if (!this.lastStepSucceeded()) {
           throw new Error(`步骤 "${namedStep.name}" 执行失败，迭代阶段中止`);
         }
-        judgeVerdict = this.parseStepVerdict(output);
+        if (step.role === 'attacker') {
+          const verdict = this.parseStepVerdict(output);
+          totalBugs += verdict.remainingIssues;
+        } else if (step.role === 'judge') {
+          judgeVerdict = this.parseStepVerdict(output);
+        }
       }
 
       // Clear skip set after first iteration pass — subsequent iterations run all steps
       skipSet = undefined;
+
+      // If all steps in this iteration were skipped (resume scenario), skip verdict/exit logic
+      // to avoid double-counting bugs and incorrectly triggering exit conditions
+      const allStepsSkipped = judgeVerdict === null && totalBugs === 0 &&
+        phase.steps.every(s => {
+          const name = iter >= 2 ? `${s.name}-迭代${iter}` : s.name;
+          return this.completedStepNames.includes(name);
+        });
+
+      if (allStepsSkipped) {
+        // This iteration was already fully processed in a previous run — skip verdict logic
+        continue;
+      }
 
       // Use judge verdict if available, otherwise fall back to attacker bug count
       const effectiveBugs = judgeVerdict ? judgeVerdict.remainingIssues : totalBugs;

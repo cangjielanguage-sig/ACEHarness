@@ -23,7 +23,8 @@
     "sections": {
       "activeWorkflows": "Active Workflows",
       "recentRuns": "Recent Runs",
-      "phases": "phases"
+      "phases": "phases",
+      "noActiveWorkflows": "No active workflows"
     },
     "status": {
       "completed": "Completed",

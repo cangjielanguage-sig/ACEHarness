@@ -7,9 +7,11 @@
 import { spawn, execSync } from 'child_process';
 import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
-import { writeFile, mkdir } from 'fs/promises';
+import { writeFile, mkdir, unlink } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { tmpdir } from 'os';
+import { randomBytes } from 'crypto';
 
 const DEBUG_DIR = resolve(process.cwd(), 'runs', '.tmp');
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -181,6 +183,8 @@ export interface ProcessInfo {
   logLines: string[];
   logFile?: string;
   runId?: string;
+  prompt?: string;
+  systemPrompt?: string;
 }
 
 interface ExecuteOptions {
@@ -223,6 +227,12 @@ class ProcessManager extends EventEmitter {
         '',
       ];
 
+      const promptSection = proc.prompt
+        ? `\n--- Prompt (${proc.prompt.length} chars) ---\n${proc.prompt}\n`
+        : '';
+      const systemPromptSection = proc.systemPrompt
+        ? `\n--- System Prompt (${proc.systemPrompt.length} chars) ---\n${proc.systemPrompt}\n`
+        : '';
       const streamSection = proc.streamContent
         ? `\n--- Stream Content (${proc.streamContent.length} chars) ---\n${proc.streamContent.slice(-5000)}\n`
         : '';
@@ -231,6 +241,8 @@ class ProcessManager extends EventEmitter {
 
       const content = header.join('\n')
         + proc.logLines.join('\n')
+        + promptSection
+        + systemPromptSection
         + streamSection
         + stderrSection
         + outputSection;
@@ -257,6 +269,8 @@ class ProcessManager extends EventEmitter {
       streamContent: '',
       logLines: [`[${ts()}] 任务已创建，等待执行队列...`],
       runId: options.runId,
+      prompt,
+      systemPrompt,
     };
     this.processes.set(id, proc);
 
@@ -286,20 +300,51 @@ class ProcessManager extends EventEmitter {
     const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
     proc.logLines.push(`[${ts()}] 超时阈值: ${fmtMs(timeoutMs)}`);
 
+    // Use temp files for long prompts to avoid E2BIG error
+    const ARG_SIZE_LIMIT = 50000; // Conservative limit (system ARG_MAX is typically 128KB-2MB)
+    let promptFile: string | null = null;
+    let systemPromptFile: string | null = null;
+    const tempFiles: string[] = [];
+
     // Build CLI args
     const cliArgs: string[] = [
-      '-p', prompt,
       '--output-format', 'stream-json',
       '--verbose',
       '--include-partial-messages',
     ];
+
+    // Handle prompt - use file if too large
+    if (prompt.length > ARG_SIZE_LIMIT) {
+      promptFile = resolve(tmpdir(), `claude-prompt-${randomBytes(8).toString('hex')}.txt`);
+      await writeFile(promptFile, prompt, 'utf-8');
+      tempFiles.push(promptFile);
+      cliArgs.push('-p', `@${promptFile}`);
+      proc.logLines.push(`[${ts()}] Prompt 过长 (${prompt.length} chars)，使用临时文件: ${promptFile}`);
+    } else {
+      cliArgs.push('-p', prompt);
+    }
+
+    // Handle system prompt - use file if too large
     if (systemPrompt) {
-      if (options.appendSystemPrompt) {
-        cliArgs.push('--append-system-prompt', systemPrompt);
+      if (systemPrompt.length > ARG_SIZE_LIMIT) {
+        systemPromptFile = resolve(tmpdir(), `claude-system-${randomBytes(8).toString('hex')}.txt`);
+        await writeFile(systemPromptFile, systemPrompt, 'utf-8');
+        tempFiles.push(systemPromptFile);
+        if (options.appendSystemPrompt) {
+          cliArgs.push('--append-system-prompt', `@${systemPromptFile}`);
+        } else {
+          cliArgs.push('--system-prompt', `@${systemPromptFile}`);
+        }
+        proc.logLines.push(`[${ts()}] System prompt 过长 (${systemPrompt.length} chars)，使用临时文件: ${systemPromptFile}`);
       } else {
-        cliArgs.push('--system-prompt', systemPrompt);
+        if (options.appendSystemPrompt) {
+          cliArgs.push('--append-system-prompt', systemPrompt);
+        } else {
+          cliArgs.push('--system-prompt', systemPrompt);
+        }
       }
     }
+
     if (model) cliArgs.push('--model', model);
     if (options.allowedTools?.length) {
       for (const tool of options.allowedTools) {
@@ -346,6 +391,10 @@ class ProcessManager extends EventEmitter {
         proc.logLines.push(`[${ts()}] ⚠ 超时 (${fmtMs(timeoutMs)})，终止进程`);
         proc.status = 'timeout';
         proc.endTime = new Date();
+
+        // Clean up temp files on timeout
+        this.cleanupTempFiles(tempFiles);
+
         child.kill('SIGTERM');
         setTimeout(() => child.kill('SIGKILL'), 3000);
         this.flushLog(proc, cliArgs);
@@ -551,6 +600,10 @@ class ProcessManager extends EventEmitter {
       child.on('error', (err) => {
         clearTimeout(timer);
         clearInterval(flushInterval);
+
+        // Clean up temp files on error
+        this.cleanupTempFiles(tempFiles);
+
         proc.status = 'failed';
         proc.endTime = new Date();
         proc.logLines.push(`[${ts()}] ✗ spawn error: ${err.message}`);
@@ -563,6 +616,10 @@ class ProcessManager extends EventEmitter {
       child.on('close', (code) => {
         clearTimeout(timer);
         clearInterval(flushInterval);
+
+        // Clean up temp files now that process has finished
+        this.cleanupTempFiles(tempFiles);
+
         // Process remaining buffer
         if (buffer.trim()) processLine(buffer);
 
@@ -664,6 +721,16 @@ class ProcessManager extends EventEmitter {
         }
       });
     });
+  }
+
+  private async cleanupTempFiles(files: string[]): Promise<void> {
+    for (const file of files) {
+      try {
+        await unlink(file);
+      } catch {
+        // Ignore errors - file might already be deleted or not exist
+      }
+    }
   }
 
   private processNext(): void {
