@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { workflowManager } from '@/lib/workflow-manager';
+import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
+import { loadRunState } from '@/lib/run-state-persistence';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,7 +15,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const currentStatus = workflowManager.getStatus();
+    // Load run state to determine workflow mode
+    const runState = await loadRunState(runId);
+    if (!runState) {
+      return NextResponse.json(
+        { error: `找不到运行记录: ${runId}` },
+        { status: 404 }
+      );
+    }
+
+    const isStateMachine = runState.mode === 'state-machine';
+    const manager = isStateMachine ? stateMachineWorkflowManager : workflowManager;
+
+    const currentStatus = manager.getStatus();
     if (currentStatus.status === 'running') {
       return NextResponse.json(
         { error: '已有工作流正在运行' },
@@ -23,15 +37,15 @@ export async function POST(request: NextRequest) {
 
     // If action specified, queue it so waitForApproval resolves immediately
     if (action === 'iterate' || action === 'approve') {
-      workflowManager.setQueuedApprovalAction(action);
+      manager.setQueuedApprovalAction(action);
       // If iterate action with feedback, store it
       if (action === 'iterate' && feedback) {
-        workflowManager.setIterationFeedback(feedback);
+        manager.setIterationFeedback(feedback);
       }
     }
 
     // Fire-and-forget: kick off resume without awaiting completion.
-    workflowManager.resume(runId).catch(() => {
+    manager.resume(runId).catch(() => {
       // Errors are emitted as 'status' events via SSE.
     });
 

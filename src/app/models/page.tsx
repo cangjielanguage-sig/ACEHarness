@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Cpu, Plus, Trash2, Save, ArrowLeft, Edit2, Check, X } from 'lucide-react';
+import { Cpu, Plus, Trash2, ArrowLeft, Edit2, Check, X, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,27 +12,216 @@ import { LanguageToggle } from '@/components/language-toggle';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useToast } from '@/components/ui/toast';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface ModelOption {
   value: string;
   label: string;
   costMultiplier: number;
+  endpoints: string[];
+}
+
+interface SortableItemProps {
+  id: string;
+  model: ModelOption;
+  index: number;
+  editingIndex: number | null;
+  editingModel: ModelOption | null;
+  updateEditingModel: (field: keyof ModelOption, value: string | number | string[]) => void;
+  saveEditModel: () => void;
+  cancelEditModel: () => void;
+  startEditModel: (index: number) => void;
+  deleteModel: (index: number) => void;
+  t: (key: string) => string;
+}
+
+function SortableItem({
+  id,
+  model,
+  index,
+  editingIndex,
+  editingModel,
+  updateEditingModel,
+  saveEditModel,
+  cancelEditModel,
+  startEditModel,
+  deleteModel,
+  t,
+}: SortableItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg border border-border/30"
+    >
+      {editingIndex !== index && (
+        <div
+          {...attributes}
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing"
+        >
+          <GripVertical className="w-5 h-5 text-muted-foreground" />
+        </div>
+      )}
+      {editingIndex === index ? (
+        <>
+          <div className="flex-1 grid grid-cols-4 gap-3">
+            <Input
+              value={editingModel?.value || ''}
+              onChange={(e) => updateEditingModel('value', e.target.value)}
+              placeholder={t('models.modelValue')}
+            />
+            <Input
+              value={editingModel?.label || ''}
+              onChange={(e) => updateEditingModel('label', e.target.value)}
+              placeholder={t('models.displayLabel')}
+            />
+            <Input
+              type="number"
+              step="0.01"
+              value={editingModel?.costMultiplier || 0}
+              onChange={(e) => updateEditingModel('costMultiplier', parseFloat(e.target.value) || 0)}
+              placeholder={t('models.costMultiplier')}
+            />
+            <div className="flex gap-2 items-center">
+              <label className="flex items-center gap-1 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editingModel?.endpoints?.includes('anthropic') || false}
+                  onChange={(e) => {
+                    const endpoints = e.target.checked
+                      ? [...(editingModel?.endpoints || []), 'anthropic']
+                      : (editingModel?.endpoints || []).filter(ep => ep !== 'anthropic');
+                    updateEditingModel('endpoints', endpoints);
+                  }}
+                  className="rounded"
+                />
+                Anthropic
+              </label>
+              <label className="flex items-center gap-1 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editingModel?.endpoints?.includes('openai') || false}
+                  onChange={(e) => {
+                    const endpoints = e.target.checked
+                      ? [...(editingModel?.endpoints || []), 'openai']
+                      : (editingModel?.endpoints || []).filter(ep => ep !== 'openai');
+                    updateEditingModel('endpoints', endpoints);
+                  }}
+                  className="rounded"
+                />
+                OpenAI
+              </label>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={saveEditModel}
+          >
+            <Check className="w-4 h-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={cancelEditModel}
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        </>
+      ) : (
+        <>
+          <div className="flex-1 grid grid-cols-4 gap-4">
+            <div>
+              <div className="text-xs text-muted-foreground">{t('models.value')}</div>
+              <div className="font-mono text-sm">{model.value}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t('models.label')}</div>
+              <div className="font-medium">{model.label}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t('models.costMultiplier')}</div>
+              <div className="font-medium">{model.costMultiplier}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">API 端点</div>
+              <div className="flex gap-1 mt-1">
+                {(model.endpoints || []).map(ep => (
+                  <span key={ep} className="text-xs px-2 py-0.5 bg-primary/10 text-primary rounded">
+                    {ep}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => startEditModel(index)}
+          >
+            <Edit2 className="w-4 h-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => deleteModel(index)}
+            className="text-red-500 hover:text-red-600"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function ModelsPage() {
   const router = useRouter();
   const { t } = useTranslations();
+  const { toast } = useToast();
   const [models, setModels] = useState<ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [newModel, setNewModel] = useState<ModelOption>({
     value: '',
     label: '',
     costMultiplier: 0.1,
+    endpoints: [],
   });
-  const [alertMessage, setAlertMessage] = useState('');
   const { confirm, dialogProps } = useConfirmDialog();
 
   useEffect(() => {
@@ -52,35 +241,34 @@ export default function ModelsPage() {
     }
   };
 
-  const saveModels = async () => {
+  const saveModels = async (updatedModels: ModelOption[]) => {
     try {
-      setSaving(true);
       const response = await fetch('/api/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ models }),
+        body: JSON.stringify({ models: updatedModels }),
       });
 
       if (response.ok) {
-        setAlertMessage(t('models.messages.saveSuccess'));
+        toast('success', t('models.messages.saveSuccess'));
       } else {
-        setAlertMessage(t('models.messages.saveFailed'));
+        toast('error', t('models.messages.saveFailed'));
       }
     } catch (error) {
       console.error('Failed to save models:', error);
-      setAlertMessage(t('models.messages.saveFailed'));
-    } finally {
-      setSaving(false);
+      toast('error', t('models.messages.saveFailed'));
     }
   };
 
-  const addModel = () => {
-    if (!newModel.value || !newModel.label) {
-      setAlertMessage(t('models.messages.fillAllFields'));
+  const addModel = async () => {
+    if (!newModel.value || !newModel.label || newModel.endpoints.length === 0) {
+      toast('warning', t('models.messages.fillAllFields'));
       return;
     }
-    setModels([...models, { ...newModel }]);
-    setNewModel({ value: '', label: '', costMultiplier: 0.1 });
+    const updatedModels = [...models, { ...newModel }];
+    setModels(updatedModels);
+    await saveModels(updatedModels);
+    setNewModel({ value: '', label: '', costMultiplier: 0.1, endpoints: [] });
   };
 
   const deleteModel = async (index: number) => {
@@ -92,7 +280,9 @@ export default function ModelsPage() {
       variant: 'destructive',
     });
     if (confirmed) {
-      setModels(models.filter((_, i) => i !== index));
+      const updatedModels = models.filter((_, i) => i !== index);
+      setModels(updatedModels);
+      await saveModels(updatedModels);
     }
   };
 
@@ -106,19 +296,39 @@ export default function ModelsPage() {
     setEditingModel(null);
   };
 
-  const saveEditModel = () => {
+  const saveEditModel = async () => {
     if (editingIndex !== null && editingModel) {
       const updated = [...models];
       updated[editingIndex] = editingModel;
       setModels(updated);
+      await saveModels(updated);
       setEditingIndex(null);
       setEditingModel(null);
     }
   };
 
-  const updateEditingModel = (field: keyof ModelOption, value: string | number) => {
+  const updateEditingModel = (field: keyof ModelOption, value: any) => {
     if (editingModel) {
       setEditingModel({ ...editingModel, [field]: value });
+    }
+  };
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      const oldIndex = models.findIndex((_, i) => i.toString() === active.id);
+      const newIndex = models.findIndex((_, i) => i.toString() === over.id);
+      const updatedModels = arrayMove(models, oldIndex, newIndex);
+      setModels(updatedModels);
+      await saveModels(updatedModels);
     }
   };
 
@@ -160,10 +370,6 @@ export default function ModelsPage() {
               <div className="flex items-center gap-3">
                 <LanguageToggle />
                 <ThemeToggle />
-                <Button onClick={saveModels} disabled={saving}>
-                  <Save className="w-4 h-4 mr-2" />
-                  {saving ? t('models.saving') : t('models.saveChanges')}
-                </Button>
               </div>
             </div>
           </div>
@@ -180,7 +386,7 @@ export default function ModelsPage() {
               <Plus className="w-5 h-5 text-primary" />
               {t('models.addNew')}
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <div>
                 <Label htmlFor="value">{t('models.modelValue')}</Label>
                 <Input
@@ -210,6 +416,39 @@ export default function ModelsPage() {
                   onChange={(e) => setNewModel({ ...newModel, costMultiplier: parseFloat(e.target.value) || 0 })}
                 />
               </div>
+              <div>
+                <Label htmlFor="endpoints">API 端点</Label>
+                <div className="flex gap-2 mt-2">
+                  <label className="flex items-center gap-1 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newModel.endpoints.includes('anthropic')}
+                      onChange={(e) => {
+                        const endpoints = e.target.checked
+                          ? [...newModel.endpoints, 'anthropic']
+                          : newModel.endpoints.filter(ep => ep !== 'anthropic');
+                        setNewModel({ ...newModel, endpoints });
+                      }}
+                      className="rounded"
+                    />
+                    Anthropic
+                  </label>
+                  <label className="flex items-center gap-1 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newModel.endpoints.includes('openai')}
+                      onChange={(e) => {
+                        const endpoints = e.target.checked
+                          ? [...newModel.endpoints, 'openai']
+                          : newModel.endpoints.filter(ep => ep !== 'openai');
+                        setNewModel({ ...newModel, endpoints });
+                      }}
+                      className="rounded"
+                    />
+                    OpenAI
+                  </label>
+                </div>
+              </div>
               <div className="flex items-end">
                 <Button onClick={addModel} className="w-full">
                   <Plus className="w-4 h-4 mr-2" />
@@ -230,111 +469,46 @@ export default function ModelsPage() {
               <Cpu className="w-5 h-5 text-primary" />
               {t('models.configured')} ({models.length})
             </h2>
-            <div className="space-y-3">
-              {loading ? (
-                <div className="text-center py-8 text-muted-foreground">{t('models.loading')}</div>
-              ) : models.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">{t('models.noModels')}</div>
-              ) : (
-                models.map((model, index) => (
-                  <motion.div
-                    key={index}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.2 + index * 0.05 }}
-                    className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg border border-border/30"
-                  >
-                    {editingIndex === index ? (
-                      <>
-                        <div className="flex-1 grid grid-cols-3 gap-3">
-                          <Input
-                            value={editingModel?.value || ''}
-                            onChange={(e) => updateEditingModel('value', e.target.value)}
-                            placeholder={t('models.modelValue')}
-                          />
-                          <Input
-                            value={editingModel?.label || ''}
-                            onChange={(e) => updateEditingModel('label', e.target.value)}
-                            placeholder={t('models.displayLabel')}
-                          />
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={editingModel?.costMultiplier || 0}
-                            onChange={(e) => updateEditingModel('costMultiplier', parseFloat(e.target.value) || 0)}
-                            placeholder={t('models.costMultiplier')}
-                          />
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={saveEditModel}
-                        >
-                          <Check className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={cancelEditModel}
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex-1 grid grid-cols-3 gap-4">
-                          <div>
-                            <div className="text-xs text-muted-foreground">{t('models.value')}</div>
-                            <div className="font-mono text-sm">{model.value}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted-foreground">{t('models.label')}</div>
-                            <div className="font-medium">{model.label}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted-foreground">{t('models.costMultiplier')}</div>
-                            <div className="font-medium">{model.costMultiplier}</div>
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => startEditModel(index)}
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => deleteModel(index)}
-                          className="text-red-500 hover:text-red-600"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </>
-                    )}
-                  </motion.div>
-                ))
-              )}
-            </div>
+            {loading ? (
+              <div className="text-center py-8 text-muted-foreground">{t('models.loading')}</div>
+            ) : models.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">{t('models.noModels')}</div>
+            ) : (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={models.map((_, i) => i.toString())}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="space-y-3">
+                    {models.map((model, index) => (
+                      <SortableItem
+                        key={index}
+                        id={index.toString()}
+                        model={model}
+                        index={index}
+                        editingIndex={editingIndex}
+                        editingModel={editingModel}
+                        updateEditingModel={updateEditingModel}
+                        saveEditModel={saveEditModel}
+                        cancelEditModel={cancelEditModel}
+                        startEditModel={startEditModel}
+                        deleteModel={deleteModel}
+                        t={t}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            )}
           </motion.div>
         </div>
       </div>
 
       {dialogProps && <ConfirmDialog {...dialogProps} />}
-
-      {alertMessage && (
-        <ConfirmDialog
-          open={true}
-          title={t('common.alert')}
-          description={alertMessage}
-          confirmLabel={t('common.confirm')}
-          cancelLabel=""
-          variant="default"
-          onConfirm={() => setAlertMessage('')}
-          onCancel={() => setAlertMessage('')}
-        />
-      )}
     </div>
   );
 }

@@ -19,6 +19,7 @@ export const workflowStepSchema = z.object({
   constraints: z.array(z.string()).optional(),
   parallelGroup: z.string().optional(),
   enableReviewPanel: z.boolean().optional(), // 是否启用会审模式
+  skills: z.array(z.string()).optional(), // 步骤级别的 skills
 });
 
 // 检查点 Schema
@@ -68,6 +69,7 @@ export const contextConfigSchema = z.object({
   requirements: z.string().optional(),
   codebase: z.string().optional(),
   timeoutMinutes: z.number().min(1).optional(),
+  skills: z.array(z.string()).optional(), // 启用的 skills 列表
 });
 
 // 完整工作流配置 Schema
@@ -108,6 +110,10 @@ export const copyConfigFormSchema = z.object({
     .string()
     .min(1, '文件名不能为空')
     .regex(/^[a-zA-Z0-9_-]+\.yaml$/, '文件名必须以 .yaml 结尾且只包含字母、数字、下划线和连字符'),
+  workflowName: z
+    .string()
+    .min(1, '工作流名称不能为空')
+    .max(100, '工作流名称不能超过100个字符'),
 });
 
 export type CopyConfigForm = z.infer<typeof copyConfigFormSchema>;
@@ -135,4 +141,98 @@ export interface ConfigSummary {
   phaseCount: number;
   stepCount: number;
   agentCount: number;
+}
+
+// ============ 状态机工作流 Schema ============
+
+// 问题分类 Schema
+export const issueSchema = z.object({
+  id: z.string().optional(),
+  type: z.enum(['design', 'implementation', 'test', 'performance', 'security']),
+  severity: z.enum(['critical', 'major', 'minor']),
+  description: z.string(),
+  foundInState: z.string().optional(),
+  foundByAgent: z.string().optional(),
+  targetState: z.string().optional(),
+});
+
+// 状态转移条件 Schema
+export const transitionConditionSchema = z.object({
+  verdict: z.enum(['pass', 'conditional_pass', 'fail']).optional(),
+  issueTypes: z.array(z.enum(['design', 'implementation', 'test', 'performance', 'security'])).optional(),
+  severities: z.array(z.enum(['critical', 'major', 'minor'])).optional(),
+  minIssueCount: z.number().optional(),
+  maxIssueCount: z.number().optional(),
+  custom: z.string().optional(), // 自定义条件表达式
+});
+
+// 状态转移规则 Schema
+export const stateTransitionSchema = z.object({
+  to: z.string().min(1, '目标状态不能为空'),
+  condition: transitionConditionSchema,
+  priority: z.number().default(100),
+  label: z.string().optional(), // 转移边的标签
+});
+
+// 状态机状态 Schema
+export const stateMachineStateSchema = z.object({
+  name: z.string().min(1, '状态名称不能为空'),
+  description: z.string().optional(),
+  type: z.enum(['normal', 'human-checkpoint']).default('normal').optional(), // 状态类型（将废弃）
+  requireHumanApproval: z.boolean().default(false).optional(), // 完成后是否需要人工审查（跳转到自身除外）
+  steps: z.array(workflowStepSchema).min(1, '至少需要一个步骤'),
+  transitions: z.array(stateTransitionSchema), // 终止状态允许空数组
+  position: z.object({ x: z.number(), y: z.number() }).optional(), // 可视化位置
+  isInitial: z.boolean().default(false), // 是否为初始状态
+  isFinal: z.boolean().default(false), // 是否为终止状态
+});
+
+// 问题路由规则 Schema
+export const issueRoutingRuleSchema = z.object({
+  pattern: z.string().min(1, '匹配模式不能为空'),
+  targetState: z.string().min(1, '目标状态不能为空'),
+  issueType: z.enum(['design', 'implementation', 'test', 'performance', 'security']),
+  priority: z.number().default(100),
+});
+
+// 状态机工作流配置 Schema
+export const stateMachineWorkflowSchema = z.object({
+  workflow: z.object({
+    name: z.string().min(1, '工作流名称不能为空'),
+    description: z.string().optional(),
+    mode: z.literal('state-machine'),
+    states: z.array(stateMachineStateSchema).min(1, '至少需要一个状态'),
+    issueRouting: z.array(issueRoutingRuleSchema).optional(),
+    maxTransitions: z.number().min(1).max(100).default(50), // 最大状态转移次数，防止死循环
+  }),
+  roles: z.array(roleConfigSchema).optional(),
+  context: contextConfigSchema,
+});
+
+// 统一工作流配置 Schema（支持两种模式）
+export const unifiedWorkflowConfigSchema = z.union([
+  workflowConfigSchema.extend({
+    workflow: workflowConfigSchema.shape.workflow.extend({
+      mode: z.literal('phase-based').optional().default('phase-based'),
+    }),
+  }),
+  stateMachineWorkflowSchema,
+]);
+
+// TypeScript 类型导出
+export type Issue = z.infer<typeof issueSchema>;
+export type TransitionCondition = z.infer<typeof transitionConditionSchema>;
+export type StateTransition = z.infer<typeof stateTransitionSchema>;
+export type StateMachineState = z.infer<typeof stateMachineStateSchema>;
+export type IssueRoutingRule = z.infer<typeof issueRoutingRuleSchema>;
+export type StateMachineWorkflowConfig = z.infer<typeof stateMachineWorkflowSchema>;
+export type UnifiedWorkflowConfig = z.infer<typeof unifiedWorkflowConfigSchema>;
+
+// 状态转移记录（运行时）
+export interface StateTransitionRecord {
+  from: string;
+  to: string;
+  reason: string;
+  issues: Issue[];
+  timestamp: string;
 }

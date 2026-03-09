@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { newConfigFormSchema, type NewConfigForm } from '@/lib/schemas';
@@ -15,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import WorkflowModeSelector from './WorkflowModeSelector';
 
 interface NewConfigModalProps {
   isOpen: boolean;
@@ -28,6 +30,8 @@ export default function NewConfigModal({
   onSuccess,
 }: NewConfigModalProps) {
   const { toast } = useToast();
+  const [workflowMode, setWorkflowMode] = useState<'phase-based' | 'state-machine'>('phase-based');
+
   const {
     register,
     handleSubmit,
@@ -42,7 +46,7 @@ export default function NewConfigModal({
       const response = await fetch('/api/configs/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, mode: workflowMode }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -64,14 +68,29 @@ export default function NewConfigModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg flex flex-col p-0">
+      <DialogContent className="max-w-4xl flex flex-col p-0 max-h-[90vh]">
         <div className="flex items-center justify-between p-6 pb-4 flex-shrink-0">
           <DialogTitle>新建工作流配置</DialogTitle>
           <Button type="button" variant="ghost" size="icon" onClick={onClose}>
             <span className="material-symbols-outlined">close</span>
           </Button>
         </div>
-        <form id="new-config-form" onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-auto px-6 space-y-4">
+        <form id="new-config-form" onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-auto px-6 space-y-6">
+          {/* 工作流模式选择 */}
+          <div className="space-y-2">
+            <Label className="text-base font-semibold">
+              选择工作流模式 <span className="text-destructive">*</span>
+            </Label>
+            <WorkflowModeSelector
+              value={workflowMode}
+              onChange={setWorkflowMode}
+              showDetails={true}
+            />
+          </div>
+
+          {/* 分隔线 */}
+          <div className="border-t border-gray-200 dark:border-gray-700" />
+
           <div className="space-y-2">
             <Label htmlFor="filename">
               文件名 <span className="text-destructive">*</span>

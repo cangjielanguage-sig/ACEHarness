@@ -43,7 +43,7 @@ export default function CopyConfigModal({
       const response = await fetch(`/api/configs/${sourceFilename}/copy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newFilename: data.newFilename }),
+        body: JSON.stringify({ newFilename: data.newFilename, workflowName: data.workflowName }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -73,6 +73,23 @@ export default function CopyConfigModal({
           </Button>
         </div>
         <form id="copy-config-form" onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-auto px-6 space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="workflowName">
+              工作流名称 <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="workflowName"
+              placeholder="我的工作流副本"
+              {...register('workflowName')}
+              className={errors.workflowName ? 'border-destructive' : ''}
+            />
+            {errors.workflowName && (
+              <p className="text-sm text-destructive">{errors.workflowName.message}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              新工作流的显示名称
+            </p>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="newFilename">
               新文件名 <span className="text-destructive">*</span>

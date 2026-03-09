@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { workflowManager } from '@/lib/workflow-manager';
+import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,14 +31,34 @@ export async function GET(request: NextRequest) {
         'context-updated': (data: any) => sendEvent({ type: 'context-updated', data }),
       };
 
+      // 状态机专属事件
+      const smHandlers = {
+        'state-change': (data: any) => sendEvent({ type: 'phase', data: { phase: data.state, message: data.message } }),
+        'step-start': (data: any) => sendEvent({ type: 'step', data: { step: data.step, agent: data.agent } }),
+        'step-complete': (data: any) => sendEvent({ type: 'result', data: { step: data.step, agent: data.agent, output: data.output } }),
+        'transition': (data: any) => sendEvent({ type: 'sm-transition', data }),
+        'force-transition': (data: any) => sendEvent({ type: 'force-transition', data }),
+        'transition-forced': (data: any) => sendEvent({ type: 'transition-forced', data }),
+        'human-approval-required': (data: any) => sendEvent({ type: 'human-approval-required', data }),
+        status: (data: any) => sendEvent({ type: 'status', data }),
+        agents: (data: any) => sendEvent({ type: 'agents', data }),
+        escalation: (data: any) => sendEvent({ type: 'escalation', data }),
+      };
+
       Object.entries(handlers).forEach(([event, handler]) => {
         workflowManager.on(event, handler);
+      });
+      Object.entries(smHandlers).forEach(([event, handler]) => {
+        stateMachineWorkflowManager.on(event, handler);
       });
 
       // 清理函数
       request.signal.addEventListener('abort', () => {
         Object.entries(handlers).forEach(([event, handler]) => {
           workflowManager.off(event, handler);
+        });
+        Object.entries(smHandlers).forEach(([event, handler]) => {
+          stateMachineWorkflowManager.off(event, handler);
         });
         controller.close();
       });

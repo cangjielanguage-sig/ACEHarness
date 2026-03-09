@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { workflowManager } from '@/lib/workflow-manager';
+import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,7 +14,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const recalled = workflowManager.recallLiveFeedback(message.trim());
+    // Try both managers
+    let recalled = workflowManager.recallLiveFeedback(message.trim());
+    if (!recalled) {
+      recalled = stateMachineWorkflowManager.recallLiveFeedback(message.trim());
+    }
 
     if (!recalled) {
       return NextResponse.json(

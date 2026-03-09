@@ -11,9 +11,10 @@
     "quickActions": {
       "title": "快速操作",
       "newWorkflow": "新建工作流",
-      "manageAgents": "管理 Agent",
+      "manageAgents": "Agent 管理",
       "viewHistory": "查看历史",
       "settings": "设置",
+      "models": "模型管理",
       "workflows": "工作流管理"
     },
     "charts": {
@@ -27,10 +28,12 @@
       "noActiveWorkflows": "暂无活跃工作流"
     },
     "status": {
+      "pending": "待启动",
       "completed": "已完成",
       "failed": "失败",
       "running": "运行中",
-      "stopped": "已停止"
+      "stopped": "已停止",
+      "crashed": "崩溃"
     }
   },
   "agents": {

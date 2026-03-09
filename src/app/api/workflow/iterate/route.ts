@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { workflowManager } from '@/lib/workflow-manager';
+import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const feedback = body.feedback || '';
-    
+
     if (!feedback.trim()) {
       return NextResponse.json(
         { error: '迭代意见不能为空' },
@@ -13,7 +14,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    workflowManager.requestIteration(feedback);
+    // Check which manager is running
+    const phaseStatus = workflowManager.getInternalStatus();
+    const smStatus = stateMachineWorkflowManager.getInternalStatus();
+
+    if (phaseStatus === 'running') {
+      workflowManager.requestIteration(feedback);
+    } else if (smStatus === 'running') {
+      stateMachineWorkflowManager.requestIteration(feedback);
+    } else {
+      return NextResponse.json(
+        { error: '没有正在运行的工作流' },
+        { status: 400 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
+import { parse, stringify } from 'yaml';
+import { getModelOptions, clearModelsCache, type ModelOption } from '@/lib/models';
 
-const MODELS_FILE = path.join(process.cwd(), 'src/lib/models.ts');
+const MODELS_CONFIG_FILE = path.join(process.cwd(), 'configs', 'models', 'models.yaml');
 
 export async function GET() {
   try {
-    const content = await fs.readFile(MODELS_FILE, 'utf-8');
-
-    // Extract MODEL_OPTIONS array from the file
-    const match = content.match(/export const MODEL_OPTIONS: ModelOption\[\] = (\[[\s\S]*?\]);/);
-    if (!match) {
-      return NextResponse.json({ error: 'Failed to parse models' }, { status: 500 });
-    }
-
-    // Parse the array (simple eval for now, could use a proper parser)
-    const modelsStr = match[1];
-    const models = eval(modelsStr);
-
+    const models = await getModelOptions();
     return NextResponse.json({ models });
   } catch (error) {
     console.error('Failed to read models:', error);
@@ -29,23 +20,24 @@ export async function POST(request: NextRequest) {
   try {
     const { models } = await request.json();
 
-    // Read current file
-    const content = await fs.readFile(MODELS_FILE, 'utf-8');
+    // Read current config
+    let config: { models: ModelOption[] };
+    try {
+      const content = await fs.readFile(MODELS_CONFIG_FILE, 'utf-8');
+      config = parse(content) || { models: [] };
+    } catch {
+      config = { models: [] };
+    }
 
-    // Generate new MODEL_OPTIONS array
-    const modelsStr = JSON.stringify(models, null, 2)
-      .replace(/"value":/g, 'value:')
-      .replace(/"label":/g, 'label:')
-      .replace(/"costMultiplier":/g, 'costMultiplier:')
-      .replace(/"/g, "'");
+    // Update models
+    config.models = models;
 
-    // Replace the MODEL_OPTIONS array
-    const newContent = content.replace(
-      /export const MODEL_OPTIONS: ModelOption\[\] = \[[\s\S]*?\];/,
-      `export const MODEL_OPTIONS: ModelOption[] = ${modelsStr};`
-    );
+    // Write back to YAML
+    const yamlContent = stringify(config, { lineWidth: 0 });
+    await fs.writeFile(MODELS_CONFIG_FILE, yamlContent, 'utf-8');
 
-    await fs.writeFile(MODELS_FILE, newContent, 'utf-8');
+    // Clear cache so next read gets fresh data
+    clearModelsCache();
 
     return NextResponse.json({ success: true });
   } catch (error) {

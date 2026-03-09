@@ -39,6 +39,8 @@ interface WorkflowStatusResponse {
   failedSteps: string[];
   stepLogs?: { stepName: string; agent: string; status: string; output: string; error: string; costUsd: number; durationMs: number; timestamp: string }[];
   iterationStates: Record<string, any>;
+  globalContext?: string;
+  phaseContexts?: Record<string, string>;
 }
 
 interface RunRecord {
@@ -305,6 +307,19 @@ export const workflowApi = {
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
       throw new Error(err.error || '强制完成失败');
+    }
+    return response.json();
+  },
+
+  async forceTransition(targetState: string, instruction?: string): Promise<any> {
+    const response = await fetch(`${API_BASE}/workflow/force-transition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetState, instruction }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || '强制跳转失败');
     }
     return response.json();
   },

@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { workflowManager } from '@/lib/workflow-manager';
+import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
 import { processManager } from '@/lib/process-manager';
 
 export async function POST(request: NextRequest) {
   try {
-    await workflowManager.stop();
+    // Stop whichever manager is running
+    const smStatus = stateMachineWorkflowManager.getStatus();
+    if (smStatus.status === 'running') {
+      await stateMachineWorkflowManager.stop();
+    } else {
+      await workflowManager.stop();
+    }
+
     // Also kill any orphan system-level claude processes
     const { killed } = await processManager.killAllSystem();
 

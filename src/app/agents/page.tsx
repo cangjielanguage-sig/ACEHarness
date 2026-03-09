@@ -178,6 +178,20 @@ export default function AgentsPage() {
     return true;
   });
 
+  // Group agents by team
+  const groupedAgents = {
+    blue: filteredAgents.filter(a => a.team === 'blue'),
+    red: filteredAgents.filter(a => a.team === 'red'),
+    judge: filteredAgents.filter(a => a.team === 'judge'),
+  };
+
+  const teamLabels: Record<string, string> = { blue: '蓝队', red: '红队', judge: '裁判' };
+  const teamColors: Record<string, string> = {
+    blue: 'border-l-blue-500 bg-blue-500/5',
+    red: 'border-l-red-500 bg-red-500/5',
+    judge: 'border-l-yellow-500 bg-yellow-500/5',
+  };
+
   const toggleTag = (tag: string) => {
     setSelectedTags(prev =>
       prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
@@ -305,36 +319,43 @@ export default function AgentsPage() {
             <p>没有找到匹配的 Agent</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filteredAgents.map(agent => (
-              <div
-                key={agent.name}
-                className="bg-card border rounded-lg p-4 hover:shadow-lg transition-shadow"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-base mb-1">{agent.name}</h3>
-                    <Badge className={TEAM_COLORS[agent.team]}>
-                      {agent.team === 'blue' ? '蓝队' : agent.team === 'red' ? '红队' : '裁判'}
-                    </Badge>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleEditAgent(agent)}
-                    >
-                      <span className="material-symbols-outlined text-sm">edit</span>
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleDeleteAgent(agent.name)}
-                    >
-                      <span className="material-symbols-outlined text-sm">delete</span>
-                    </Button>
-                  </div>
-                </div>
+          <div className="space-y-8">
+            {(['blue', 'red', 'judge'] as const).map(team => (
+              groupedAgents[team].length > 0 && (
+                <div key={team}>
+                  <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <span className={`w-3 h-3 rounded-full ${
+                      team === 'blue' ? 'bg-blue-500' : team === 'red' ? 'bg-red-500' : 'bg-yellow-500'
+                    }`}></span>
+                    {teamLabels[team]} <span className="text-sm font-normal text-muted-foreground">({groupedAgents[team].length})</span>
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {groupedAgents[team].map(agent => (
+                      <div
+                        key={agent.name}
+                        className={`bg-card border rounded-lg p-4 hover:shadow-lg transition-shadow border-l-4 ${teamColors[team]}`}
+                      >
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-base mb-1">{agent.name}</h3>
+                          </div>
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleEditAgent(agent)}
+                            >
+                              <span className="material-symbols-outlined text-sm">edit</span>
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleDeleteAgent(agent.name)}
+                            >
+                              <span className="material-symbols-outlined text-sm">delete</span>
+                            </Button>
+                          </div>
+                        </div>
 
                 {agent.category && (
                   <div className="mb-2">
@@ -374,6 +395,10 @@ export default function AgentsPage() {
                   </div>
                 )}
               </div>
+            ))}
+                  </div>
+                </div>
+              )
             ))}
           </div>
         )}

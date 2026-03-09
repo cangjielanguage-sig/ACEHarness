@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { workflowManager } from '@/lib/workflow-manager';
+import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
 
 export async function POST(request: NextRequest) {
   try {
-    workflowManager.approve();
+    // Check which manager is running
+    const phaseStatus = workflowManager.getInternalStatus();
+    const smStatus = stateMachineWorkflowManager.getInternalStatus();
+
+    if (phaseStatus === 'running') {
+      workflowManager.approve();
+    } else if (smStatus === 'running') {
+      stateMachineWorkflowManager.approve();
+    } else {
+      return NextResponse.json(
+        { error: '没有正在运行的工作流' },
+        { status: 400 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

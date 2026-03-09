@@ -11,9 +11,10 @@
     "quickActions": {
       "title": "Quick Actions",
       "newWorkflow": "New Workflow",
-      "manageAgents": "Manage Agents",
+      "manageAgents": "Agent Management",
       "viewHistory": "View History",
       "settings": "Settings",
+      "models": "Model Management",
       "workflows": "Workflows"
     },
     "charts": {
@@ -27,10 +28,12 @@
       "noActiveWorkflows": "No active workflows"
     },
     "status": {
+      "pending": "Pending",
       "completed": "Completed",
       "failed": "Failed",
       "running": "Running",
-      "stopped": "Stopped"
+      "stopped": "Stopped",
+      "crashed": "Crashed"
     }
   },
   "agents": {

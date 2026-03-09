@@ -8,6 +8,9 @@ import { configApi, workflowApi, agentApi, runsApi, processApi, streamApi } from
 import { useWorkflowState } from '@/hooks/useWorkflowState';
 import type { ViewMode } from '@/hooks/useWorkflowState';
 import FlowDiagram from '@/components/FlowDiagram';
+import StateMachineDiagram from '@/components/StateMachineDiagram';
+import StateMachineDesignPanel from '@/components/StateMachineDesignPanel';
+import StateMachineExecutionView from '@/components/StateMachineExecutionView';
 import DesignPanel from '@/components/DesignPanel';
 import AgentPanel from '@/components/AgentPanel';
 import AgentConfigPanel from '@/components/AgentConfigPanel';
@@ -21,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -56,6 +60,7 @@ export default function WorkbenchPage() {
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   const [historyRuns, setHistoryRuns] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<any>(null);
+  const [focusedState, setFocusedState] = useState<string | null>(null); // 用于流程图视图跳转
   const [runDetail, setRunDetail] = useState<any>(null);
   const [viewingHistoryRun, setViewingHistoryRun] = useState(false);
   const [pendingCheckpointPhase, setPendingCheckpointPhase] = useState<string | null>(null);
@@ -64,11 +69,21 @@ export default function WorkbenchPage() {
   const [markdownModal, setMarkdownModal] = useState<{ title: string; chunks: string[] } | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
+  const [smStateHistory, setSmStateHistory] = useState<any[]>([]);
+  const [smIssueTracker, setSmIssueTracker] = useState<any[]>([]);
+  const [smTransitionCount, setSmTransitionCount] = useState(0);
+  const [humanApprovalData, setHumanApprovalData] = useState<{
+    currentState: string;
+    nextState: string;
+    result: any;
+    availableStates: string[];
+  } | null>(null);
   const [liveStream, setLiveStream] = useState<string[]>([]);
   const [showLiveStream, setShowLiveStream] = useState(false);
   const [liveStreamFullscreen, setLiveStreamFullscreen] = useState(false);
   const [isNewNode, setIsNewNode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>([]);
   const [starting, setStarting] = useState(false);
   const [showAgentDrawer, setShowAgentDrawer] = useState(false);
   const [showDesignRequirements, setShowDesignRequirements] = useState(true);
@@ -78,11 +93,20 @@ export default function WorkbenchPage() {
   const [sendingFeedback, setSendingFeedback] = useState(false);
   const [inlineFeedbacks, setInlineFeedbacks] = useState<{ message: string; timestamp: string; streamIndex: number }[]>([]);
   const [showContextEditor, setShowContextEditor] = useState(false);
+  const [showPromptAnalysis, setShowPromptAnalysis] = useState(false);
+  const [analyzingRunId, setAnalyzingRunId] = useState<string | null>(null);
+  const [analysisResults, setAnalysisResults] = useState<any[]>([]);
+  const [analysisSummary, setAnalysisSummary] = useState<{ totalSteps: number; avgScore: number } | null>(null);
+  const [selectedOptimizations, setSelectedOptimizations] = useState<Set<number>>(new Set());
+  const [applyingOptimization, setApplyingOptimization] = useState(false);
   const [editingContextScope, setEditingContextScope] = useState<'global' | 'phase'>('global');
   const [editingContextPhase, setEditingContextPhase] = useState('');
   const [editingContextValue, setEditingContextValue] = useState('');
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
+  const [showSkillSelector, setShowSkillSelector] = useState(false);
+  const [designTab, setDesignTab] = useState<'workflow' | 'config'>('workflow');
+  const [forceTransitionModal, setForceTransitionModal] = useState<{ targetState: string; instruction: string } | null>(null);
   const liveStreamRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveStreamLenRef = useRef(0);
   const liveStreamStepRef = useRef<string>('');
@@ -94,15 +118,24 @@ export default function WorkbenchPage() {
     viewMode, workflowConfig, editingConfig, agentConfigs,
     workflowStatus, runId, currentPhase, currentStep, agents, logs, completedSteps, failedSteps,
     showCheckpoint, checkpointMessage, checkpointIsIterative, activeTab, selectedAgent, selectedStep,
-    projectRoot, requirements, timeoutMinutes, showProcessPanel,
+    projectRoot, requirements, timeoutMinutes, skills, showProcessPanel,
     showEditNodeModal, editingNode, iterationStates, stepResults,
     globalContext, phaseContexts,
   } = state;
 
+  // Explicitly convert viewMode to string for conditional rendering
+  const isDesignMode = state.viewMode === 'design';
+  const isRunMode = state.viewMode === 'run';
+  const isHistoryMode = state.viewMode === 'history';
+
   const isRunning = workflowStatus === 'running';
-  const totalSteps = workflowConfig?.workflow?.phases?.reduce(
-    (sum: number, phase: any) => sum + phase.steps.length, 0
-  ) || 0;
+  const totalSteps = workflowConfig?.workflow?.mode === 'state-machine'
+    ? (workflowConfig?.workflow?.states?.reduce(
+        (sum: number, state: any) => sum + (state.steps?.length ?? 0), 0
+      ) ?? 0)
+    : (workflowConfig?.workflow?.phases?.reduce(
+        (sum: number, phase: any) => sum + phase.steps.length, 0
+      ) ?? 0);
 
   const fetchCurrentStatus = async () => {
     try {
@@ -123,6 +156,15 @@ export default function WorkbenchPage() {
         if (status.agents?.length) dispatch({ type: 'SET_AGENTS', payload: status.agents });
         if (status.completedSteps) dispatch({ type: 'SET_COMPLETED_STEPS', payload: status.completedSteps });
         dispatch({ type: 'SET_FAILED_STEPS', payload: status.failedSteps || [] });
+
+        // Restore contexts
+        if (status.globalContext !== undefined) {
+          dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: status.globalContext });
+        }
+        if (status.phaseContexts) {
+          dispatch({ type: 'SET_PHASE_CONTEXTS', payload: status.phaseContexts });
+        }
+
         {
           const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
           if (status.stepLogs?.length) {
@@ -153,6 +195,18 @@ export default function WorkbenchPage() {
     } catch { /* ignore */ }
   };
 
+  const loadContexts = async () => {
+    try {
+      const contexts = await workflowApi.getContexts();
+      if (contexts.globalContext !== undefined) {
+        dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: contexts.globalContext });
+      }
+      if (contexts.phaseContexts) {
+        dispatch({ type: 'SET_PHASE_CONTEXTS', payload: contexts.phaseContexts });
+      }
+    } catch { /* ignore */ }
+  };
+
   const loadRunDetail = async (runId: string) => {
     try {
       const detail = await runsApi.getRunDetail(runId);
@@ -164,33 +218,39 @@ export default function WorkbenchPage() {
 
   useEffect(() => {
     loadWorkflowConfig();
-    if (viewMode === 'run') {
-      if (!viewingHistoryRun) {
-        fetchCurrentStatus();
+    loadContexts(); // Load contexts on page load
+    if (isRunMode) {
+      // 如果正在查看历史运行，不连接实时事件流
+      if (viewingHistoryRun) {
+        return;
       }
+      // 如果 URL 中有 run 参数但还没加载历史数据，等待加载
+      if (initialRunId && !runId) {
+        return;
+      }
+      // 否则连接实时事件流
+      fetchCurrentStatus();
       const eventSource = workflowApi.connectEventStream((event: any) => {
         // If we receive a live event, we're no longer viewing history
         setViewingHistoryRun(false);
         handleEventRef.current(event);
       });
       eventSource.addEventListener('open', () => {
-        if (!viewingHistoryRun) {
-          fetchCurrentStatus();
-        }
+        fetchCurrentStatus();
       });
       return () => eventSource?.close();
     }
-    if (viewMode === 'history') {
+    if (isHistoryMode) {
       loadHistory();
     }
-  }, [viewMode]);
+  }, [viewMode, viewingHistoryRun, initialRunId, runId]);
 
   // Auto-load run from URL ?run=xxx on mount
   useEffect(() => {
-    if (initialRunId && !runId) {
+    if (initialRunId && !runId && workflowConfig) {
       viewHistoryRun(initialRunId);
     }
-  }, [initialRunId]);
+  }, [initialRunId, runId, workflowConfig]);
 
   // Sync runId to URL
   useEffect(() => {
@@ -208,7 +268,7 @@ export default function WorkbenchPage() {
   }, [viewMode, isRunning]);
 
   useEffect(() => {
-    if (viewMode === 'design' && workflowConfig) {
+    if (isDesignMode && workflowConfig) {
       dispatch({ type: 'SET_EDITING_CONFIG', payload: JSON.parse(JSON.stringify(workflowConfig)) });
     }
   }, [viewMode, workflowConfig]);
@@ -280,6 +340,25 @@ export default function WorkbenchPage() {
         });
       }
 
+      // Restore state machine data
+      if (detail.stateHistory) {
+        setSmStateHistory(detail.stateHistory);
+      }
+      if (detail.issueTracker) {
+        setSmIssueTracker(detail.issueTracker);
+      }
+      if (detail.transitionCount !== undefined) {
+        setSmTransitionCount(detail.transitionCount);
+      }
+
+      // Restore contexts
+      if (detail.globalContext !== undefined) {
+        dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: detail.globalContext });
+      }
+      if (detail.phaseContexts) {
+        dispatch({ type: 'SET_PHASE_CONTEXTS', payload: detail.phaseContexts });
+      }
+
       // Switch to run view
       setViewingHistoryRun(true);
       dispatch({ type: 'SET_VIEW_MODE', payload: 'run' });
@@ -312,6 +391,14 @@ export default function WorkbenchPage() {
       dispatch({ type: 'SET_PROJECT_ROOT', payload: config.context?.projectRoot || '' });
       dispatch({ type: 'SET_REQUIREMENTS', payload: config.context?.requirements || '' });
       dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: config.context?.timeoutMinutes || 30 });
+      dispatch({ type: 'SET_SKILLS', payload: config.context?.skills || [] });
+
+      // Load available skills
+      try {
+        const skillsRes = await fetch('/api/skills');
+        const skillsData = await skillsRes.json();
+        setAvailableSkills(skillsData.skills?.map((s: any) => ({ name: s.name, description: s.description })) || []);
+      } catch { /* ignore */ }
     } catch (error: any) {
       console.error('加载工作流配置失败:', error);
       setLoadError(error.message || '加载失败');
@@ -397,6 +484,33 @@ export default function WorkbenchPage() {
       case 'escalation':
         addLog('system', 'warning', `⚠️ 升级人工: ${event.data.phase} - ${event.data.reason}`);
         break;
+      case 'human-approval-required':
+        addLog('system', 'info', `👤 等待人工审查: ${event.data.currentState} → ${event.data.nextState}`);
+        // Show human approval dialog
+        setHumanApprovalData({
+          currentState: event.data.currentState,
+          nextState: event.data.nextState,
+          result: event.data.result,
+          availableStates: event.data.availableStates || [],
+        });
+        break;
+      case 'force-transition':
+        addLog('system', 'warning', `⚡ 强制跳转请求: ${event.data.from} → ${event.data.targetState}`);
+        break;
+      case 'transition-forced':
+        addLog('system', 'info', `⚡ 已强制跳转: ${event.data.from} → ${event.data.to}`);
+        dispatch({ type: 'SET_CURRENT_PHASE', payload: event.data.to });
+        break;
+      case 'sm-transition':
+        setSmStateHistory(prev => [...prev, {
+          from: event.data.from,
+          to: event.data.to,
+          reason: event.data.reason || '',
+          issues: event.data.issues || [],
+          timestamp: new Date().toISOString(),
+        }]);
+        setSmTransitionCount(event.data.transitionCount || 0);
+        break;
       case 'token-usage':
         dispatch({
           type: 'UPDATE_AGENT_TOKEN_USAGE',
@@ -439,7 +553,7 @@ export default function WorkbenchPage() {
   const saveConfig = async () => {
     setSaving(true);
     try {
-      const config = { ...workflowConfig, context: { ...(workflowConfig.context || {}), projectRoot, requirements, timeoutMinutes } };
+      const config = { ...workflowConfig, context: { ...(workflowConfig.context || {}), projectRoot, requirements, timeoutMinutes, skills } };
       await configApi.saveConfig(configFile, config);
       dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: config });
       toast('success', '配置已保存');
@@ -466,6 +580,9 @@ export default function WorkbenchPage() {
       setViewingHistoryRun(false);
       dispatch({ type: 'RESET_RUN' });
       dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'running' });
+      setSmStateHistory([]);
+      setSmIssueTracker([]);
+      setSmTransitionCount(0);
       addLog('system', 'info', '正在启动工作流...');
       await workflowApi.start(configFile);
       addLog('system', 'success', '工作流启动成功，等待执行...');
@@ -488,6 +605,22 @@ export default function WorkbenchPage() {
       addLog('system', 'warning', '工作流已停止');
     } catch (error: any) {
       addLog('system', 'error', `停止失败: ${error.message}`);
+    }
+  };
+
+  const handleForceTransition = (targetState: string) => {
+    setForceTransitionModal({ targetState, instruction: '' });
+  };
+
+  const executeForceTransition = async () => {
+    if (!forceTransitionModal) return;
+    try {
+      await workflowApi.forceTransition(forceTransitionModal.targetState, forceTransitionModal.instruction || undefined);
+      toast('success', `已请求跳转到: ${forceTransitionModal.targetState}`);
+      setForceTransitionModal(null);
+      setHumanApprovalData(null); // 关闭人工审查弹框
+    } catch (e: any) {
+      toast('error', e.message);
     }
   };
 
@@ -606,6 +739,70 @@ export default function WorkbenchPage() {
       await loadHistory();
     } catch (error: any) {
       toast('error', `删除失败: ${error.message}`);
+    }
+  };
+
+  const handleAnalyzeRunPrompts = async (runId: string) => {
+    setAnalyzingRunId(runId);
+    setShowPromptAnalysis(true);
+    setAnalysisResults([]);
+    setAnalysisSummary(null);
+    setSelectedOptimizations(new Set());
+
+    try {
+      const response = await fetch(`/api/prompt-analysis?runId=${runId}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setAnalysisResults(data.steps || []);
+        setAnalysisSummary(data.summary);
+      } else {
+        toast('error', data.error || '分析失败');
+      }
+    } catch (error: any) {
+      toast('error', `分析失败: ${error.message}`);
+    } finally {
+      setAnalyzingRunId(null);
+    }
+  };
+
+  const handleApplyOptimizations = async () => {
+    if (selectedOptimizations.size === 0) {
+      toast('warning', '请先选择要应用的优化');
+      return;
+    }
+
+    setApplyingOptimization(true);
+
+    try {
+      for (const index of selectedOptimizations) {
+        const result = analysisResults[index];
+        if (!result || !result.analysis?.optimizedPrompt) continue;
+
+        // Save optimized prompt to agent config
+        const agentName = result.agentName;
+        const agentConfig = agentConfigs.find((a: any) => a.name === agentName);
+
+        if (agentConfig) {
+          const updatedConfig = {
+            ...agentConfig,
+            systemPrompt: result.analysis.optimizedPrompt,
+          };
+
+          await fetch('/api/agents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedConfig),
+          });
+        }
+      }
+
+      toast('success', `已应用 ${selectedOptimizations.size} 项优化`);
+      setShowPromptAnalysis(false);
+    } catch (error: any) {
+      toast('error', `应用失败: ${error.message}`);
+    } finally {
+      setApplyingOptimization(false);
     }
   };
 
@@ -1195,31 +1392,61 @@ export default function WorkbenchPage() {
     <div className="flex flex-col h-screen bg-background/80 text-foreground">
       <div className="shrink-0 bg-muted border-b flex flex-wrap items-center px-4 py-2 gap-x-4 gap-y-2">
         <div className="flex items-center gap-2 shrink-0">
-          <Button variant="outline" size="sm" asChild><Link href="/">
-            <span className="material-symbols-outlined text-sm">arrow_back</span><span className="hidden sm:inline"> 首页</span>
-          </Link></Button>
+          <Button variant="outline" size="sm" onClick={() => {
+            if (document.referrer && document.referrer.includes('/workflows')) {
+              router.push('/workflows');
+            } else {
+              router.push('/');
+            }
+          }}>
+            <span className="material-symbols-outlined text-sm">arrow_back</span><span className="hidden sm:inline"> 返回</span>
+          </Button>
           <h1 className="text-sm sm:text-base font-semibold m-0 flex items-center gap-1.5 truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
             <span className="material-symbols-outlined text-lg sm:text-xl shrink-0">bolt</span>
-            <span className="truncate">{workflowConfig?.workflow?.name || configFile}</span>
+            {isDesignMode ? (
+              editingName ? (
+                <Input
+                  value={nameValue}
+                  onChange={(e) => setNameValue(e.target.value)}
+                  onBlur={() => saveWorkflowName(nameValue)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveWorkflowName(nameValue);
+                    if (e.key === 'Escape') setEditingName(false);
+                  }}
+                  className="h-6 text-sm font-semibold w-[150px]"
+                  autoFocus
+                />
+              ) : (
+                <button
+                  onClick={() => { setEditingName(true); setNameValue(workflowConfig?.workflow?.name || ''); }}
+                  className="flex items-center gap-1 text-sm font-semibold hover:bg-background/50 px-2 py-0.5 rounded truncate"
+                >
+                  <span className="truncate">{workflowConfig?.workflow?.name || configFile}</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>edit</span>
+                </button>
+              )
+            ) : (
+              <span className="truncate">{workflowConfig?.workflow?.name || configFile}</span>
+            )}
           </h1>
         </div>
         <div className="flex gap-0.5 bg-background/50 rounded-md p-0.5 shrink-0">
-          <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${viewMode === 'run' ? 'bg-primary text-primary-foreground' : ''}`}
+          <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${isRunMode ? 'bg-primary text-primary-foreground' : ''}`}
             onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'run' })}>
             <span className="material-symbols-outlined text-sm">play_arrow</span><span className="hidden sm:inline ml-1">运行</span>
           </Button>
-          <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${viewMode === 'design' ? 'bg-primary text-primary-foreground' : ''}`}
+          <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${isDesignMode ? 'bg-primary text-primary-foreground' : ''}`}
             onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'design' })}>
             <span className="material-symbols-outlined text-sm">edit</span><span className="hidden sm:inline ml-1">设计</span>
           </Button>
-          <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${viewMode === 'history' ? 'bg-primary text-primary-foreground' : ''}`}
+          <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${isHistoryMode ? 'bg-primary text-primary-foreground' : ''}`}
             onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'history' })}>
             <span className="material-symbols-outlined text-sm">history</span><span className="hidden sm:inline ml-1">历史</span>
           </Button>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {viewMode === 'run' && (<>
-            <Button size="sm" onClick={startWorkflow} disabled={starting || isRunning}>
+          {isRunMode && (<>
+            <Button size="sm" onClick={startWorkflow} disabled={starting || isRunning || workflowStatus === 'running'}>
               {starting ? (
                 <ClipLoader color="currentColor" size={14} className="mr-1" />
               ) : (
@@ -1228,7 +1455,7 @@ export default function WorkbenchPage() {
               <span className="hidden sm:inline">{starting ? '启动中...' : '启动工作流'}</span>
               <span className="sm:hidden">{starting ? '...' : '启动'}</span>
             </Button>
-            <Button variant="destructive" size="sm" onClick={stopWorkflow} disabled={!isRunning}>
+            <Button variant="destructive" size="sm" onClick={stopWorkflow} disabled={!isRunning && workflowStatus !== 'running'}>
               <span className="material-symbols-outlined text-sm">stop</span><span className="hidden sm:inline">停止</span>
             </Button>
             <Button variant="secondary" size="sm" onClick={() => dispatch({ type: 'SET_SHOW_PROCESS_PANEL', payload: !showProcessPanel })}>
@@ -1238,7 +1465,7 @@ export default function WorkbenchPage() {
               <span className="material-symbols-outlined text-sm">edit_note</span><span className="hidden sm:inline">上下文</span>
             </Button>
           </>)}
-          {viewMode === 'design' && (
+          {isDesignMode && (
             <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={handleSaveConfig} disabled={saving}>
               {saving ? (
                 <ClipLoader color="currentColor" size={14} className="mr-1" />
@@ -1267,7 +1494,7 @@ export default function WorkbenchPage() {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {viewMode === 'run' && (
+        {isRunMode && (
           <ResizablePanels
             leftPanel={
               <div className="flex flex-col h-full overflow-hidden">
@@ -1278,30 +1505,34 @@ export default function WorkbenchPage() {
                   onClick={() => setShowRunRequirements(!showRunRequirements)}
                 >
                   <span className="material-symbols-outlined text-primary" style={{ fontSize: 18 }}>assignment</span>
-                  <span className="text-sm font-semibold text-primary">需求</span>
+                  <span className="text-sm font-semibold text-primary">配置</span>
                   {!showRunRequirements && requirements && <span className="text-[10px] text-muted-foreground truncate flex-1 text-left ml-1">{requirements.substring(0, 50)}{requirements.length > 50 ? '...' : ''}</span>}
                   <span className="material-symbols-outlined text-muted-foreground ml-auto" style={{ fontSize: 16 }}>{showRunRequirements ? 'expand_less' : 'expand_more'}</span>
                 </button>
                 {showRunRequirements && (
                   <div className="px-4 py-3 space-y-2.5 bg-card/50">
-                    <div>
-                      <Label className="text-xs font-medium">项目根目录</Label>
-                      <Input value={projectRoot} onChange={(e) => dispatch({ type: 'SET_PROJECT_ROOT', payload: e.target.value })} type="text" placeholder="../cangjie_compiler" className="mt-1 h-8 text-sm" />
-                    </div>
-                    <div>
-                      <Label className="text-xs font-medium">需求描述</Label>
-                      <Textarea value={requirements} onChange={(e) => dispatch({ type: 'SET_REQUIREMENTS', payload: e.target.value })} rows={3} placeholder="请输入需求描述..." className="mt-1 text-sm" />
-                    </div>
-                    <div className="flex items-end gap-3">
-                      <div className="flex-1">
-                        <Label className="text-xs font-medium">步骤超时（分钟）</Label>
-                        <Input value={timeoutMinutes} onChange={(e) => dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: Math.max(1, parseInt(e.target.value) || 1) })} type="number" min={1} className="mt-1 h-8 text-sm" />
+                    {projectRoot && (
+                      <div>
+                        <Label className="text-xs font-medium text-muted-foreground">项目根目录</Label>
+                        <p className="text-sm mt-1">{projectRoot}</p>
                       </div>
-                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white h-8" onClick={saveConfig} disabled={saving}>
-                        {saving ? <ClipLoader color="currentColor" size={12} className="mr-1" /> : <span className="material-symbols-outlined text-sm mr-1">save</span>}
-                        {saving ? '...' : '保存'}
-                      </Button>
+                    )}
+                    {requirements && (
+                      <div>
+                        <Label className="text-xs font-medium text-muted-foreground">需求描述</Label>
+                        <p className="text-sm mt-1 leading-relaxed">{requirements}</p>
+                      </div>
+                    )}
+                    <div>
+                      <Label className="text-xs font-medium text-muted-foreground">步骤超时</Label>
+                      <p className="text-sm mt-1">{timeoutMinutes} 分钟</p>
                     </div>
+                    {skills.length > 0 && (
+                      <div>
+                        <Label className="text-xs font-medium text-muted-foreground">Skills</Label>
+                        <p className="text-sm mt-1">{skills.join(', ')}</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1313,9 +1544,7 @@ export default function WorkbenchPage() {
                   <TabsTrigger value="agents" className="flex-1 flex items-center justify-center gap-1 text-xs">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>smart_toy</span>Agents
                   </TabsTrigger>
-                  <TabsTrigger value="config" className="flex-1 flex items-center justify-center gap-1 text-xs">
-                    <span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span>配置
-                  </TabsTrigger>
+        {(isDesignMode) && <TabsTrigger value="config" className="flex-1 flex items-center justify-center gap-1 text-xs"><span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span>配置</TabsTrigger>}
                   <TabsTrigger value="documents" className="flex-1 flex items-center justify-center gap-1 text-xs">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>description</span>文档
                   </TabsTrigger>
@@ -1325,26 +1554,19 @@ export default function WorkbenchPage() {
                   {workflowConfig && (
                     <div>
                       <div>
-                        {editingName ? (
-                          <Input autoFocus value={nameValue}
-                            onChange={(e) => setNameValue(e.target.value)}
-                            onBlur={() => saveWorkflowName(nameValue)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') saveWorkflowName(nameValue); if (e.key === 'Escape') setEditingName(false); }}
-                          />
-                        ) : (
-                          <h3 className="text-base font-semibold mb-2 cursor-pointer border-b border-dashed border-transparent hover:border-muted-foreground"
-                            onClick={() => { setNameValue(workflowConfig.workflow.name); setEditingName(true); }}
-                            title="点击编辑名称">{workflowConfig.workflow.name}</h3>
-                        )}
+                        <h3 className="text-base font-semibold mb-2">{workflowConfig.workflow.name}</h3>
                         <p className="text-sm text-muted-foreground mb-4 leading-relaxed">{workflowConfig.workflow.description}</p>
                         <div className="flex gap-3">
-                          <div className="flex-1 bg-muted p-3 rounded-md text-center"><span className="block text-xs text-muted-foreground mb-1">阶段</span><span className="block text-xl font-semibold">{workflowConfig.workflow.phases.length}</span></div>
+                          <div className="flex-1 bg-muted p-3 rounded-md text-center"><span className="block text-xs text-muted-foreground mb-1">{workflowConfig.workflow.mode === 'state-machine' ? '状态' : '阶段'}</span><span className="block text-xl font-semibold">{workflowConfig.workflow.mode === 'state-machine' ? (workflowConfig.workflow.states?.length ?? 0) : (workflowConfig.workflow.phases?.length ?? 0)}</span></div>
                           <div className="flex-1 bg-muted p-3 rounded-md text-center"><span className="block text-xs text-muted-foreground mb-1">步骤</span><span className="block text-xl font-semibold">{totalSteps}</span></div>
                           <div className="flex-1 bg-muted p-3 rounded-md text-center"><span className="block text-xs text-muted-foreground mb-1">Agent</span><span className="block text-xl font-semibold">{agentConfigs.length}</span></div>
                         </div>
                       </div>
                       <div className="flex flex-col gap-2 mt-4">
-                        {workflowConfig.workflow.phases.map((phase: any, idx: number) => {
+                        {(workflowConfig.workflow.mode === 'state-machine'
+                          ? workflowConfig.workflow.states
+                          : workflowConfig.workflow.phases
+                        )?.map((phase: any, idx: number) => {
                           const phaseAgents = phase.steps.map((s: any) => {
                             const role = agentConfigs.find((r: any) => r.name === s.agent);
                             return { name: s.agent, team: role?.team || 'blue', role: s.role };
@@ -1357,7 +1579,8 @@ export default function WorkbenchPage() {
                               isActive ? 'border-l-primary bg-accent' : isDone ? 'border-l-green-500' : 'border-transparent'
                             }`}
                             onClick={() => {
-                              // 点击阶段时，选择该阶段的第一个步骤
+                              // 触发流程图跳转到该节点
+                              setFocusedState(phase.name);
                               if (phase.steps.length > 0) {
                                 selectStep(phase.steps[0]);
                               }
@@ -1370,9 +1593,11 @@ export default function WorkbenchPage() {
                                   <Badge variant="outline" className="text-[10px]"><span className="material-symbols-outlined" style={{ fontSize: 10 }}>edit_note</span></Badge>
                                 )}
                                 {phase.iteration?.enabled && (<Badge><span className="material-symbols-outlined" style={{ fontSize: 10 }}>loop</span> {iterState ? `${iterState.currentIteration}/${iterState.maxIterations}` : `max ${phase.iteration.maxIterations}`}</Badge>)}
-                                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => { e.stopPropagation(); openContextEditor('phase', phase.name); }} title="设置阶段上下文">
-                                  <span className="material-symbols-outlined" style={{ fontSize: 12 }}>edit_note</span>
-                                </Button>
+                                {workflowConfig.workflow.mode !== 'state-machine' && (
+                                  <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => { e.stopPropagation(); openContextEditor('phase', phase.name); }} title="设置阶段上下文">
+                                    <span className="material-symbols-outlined" style={{ fontSize: 12 }}>edit_note</span>
+                                  </Button>
+                                )}
                               </div>
                             </div>
                             <div className="flex flex-wrap gap-1">
@@ -1396,9 +1621,9 @@ export default function WorkbenchPage() {
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className={`w-2 h-2 rounded-full ${agent.status === 'running' ? 'bg-blue-500 animate-pulse' : agent.status === 'completed' ? 'bg-green-500' : agent.status === 'failed' ? 'bg-red-500' : 'bg-gray-400'}`} />{agent.status}</div>
                   </div>))}
                 </div></TabsContent>
-                <TabsContent value="config" className="mt-0 overflow-y-auto h-full p-4"><div><h4 className="text-sm font-semibold mb-4">高级配置</h4>
-                </div></TabsContent>
-                <TabsContent value="documents" className="mt-0 h-full">
+{isDesignMode && <TabsContent value="config" className="mt-0 overflow-y-auto h-full p-4"><div><h4 className="text-sm font-semibold mb-4">高级配置</h4>
+          </div></TabsContent>}
+<TabsContent value="documents" className="mt-0 h-full">
                   <DocumentsPanel runId={runId || selectedRun?.id || null} />
                 </TabsContent>
               </div>
@@ -1409,16 +1634,50 @@ export default function WorkbenchPage() {
               <>
                 <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">工作流可视化</h2></div>
                 <div className="flex-1 overflow-auto">
-                  {workflowConfig ? (<FlowDiagram workflow={workflowConfig.workflow} currentPhase={currentPhase} currentStep={currentStep}
-                    agents={agents} completedSteps={completedSteps} failedSteps={failedSteps} iterationStates={iterationStates} onSelectStep={selectStep}
-                    pendingCheckpointPhase={pendingCheckpointPhase || undefined}
-                    onSelectCheckpoint={(cp) => {
-                      // Find the phase for this checkpoint to determine isIterativePhase
-                      const phase = workflowConfig.workflow.phases.find((p: any) => p.checkpoint?.name === cp.name);
-                      dispatch({ type: 'SET_CHECKPOINT_MESSAGE', payload: cp.message });
-                      dispatch({ type: 'SET_CHECKPOINT_IS_ITERATIVE', payload: !!phase?.iteration?.enabled });
-                      dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
-                    }} />
+                  {workflowConfig ? (
+                    workflowConfig.workflow.mode === 'state-machine' ? (
+                      isDesignMode ? (
+                        <StateMachineDiagram
+                          states={workflowConfig.workflow.states || []}
+                          currentState={currentPhase}
+                          currentStep={currentStep}
+                          completedSteps={completedSteps}
+                          stateHistory={smStateHistory}
+                          isRunning={isRunning}
+                          onStepClick={(step) => selectStep(step)}
+                          onForceTransition={handleForceTransition}
+                        />
+                      ) : (
+                        <div className="h-full p-4">
+                          <StateMachineExecutionView
+                            states={workflowConfig.workflow.states || []}
+                            currentState={currentPhase}
+                            currentStep={currentStep}
+                            completedSteps={completedSteps}
+                            stateHistory={smStateHistory}
+                            issueTracker={smIssueTracker}
+                            transitionCount={smTransitionCount}
+                            maxTransitions={workflowConfig.workflow.maxTransitions || 50}
+                            status={workflowStatus as any}
+                            isRunning={isRunning}
+                            focusedState={focusedState}
+                            onStateClick={(s) => dispatch({ type: 'SET_CURRENT_PHASE', payload: s })}
+                            onStepClick={(step) => selectStep(step)}
+                            onForceTransition={handleForceTransition}
+                          />
+                        </div>
+                      )
+                    ) : (
+                      <FlowDiagram workflow={workflowConfig.workflow} currentPhase={currentPhase} currentStep={currentStep}
+                        agents={agents} completedSteps={completedSteps} failedSteps={failedSteps} iterationStates={iterationStates} onSelectStep={selectStep}
+                        pendingCheckpointPhase={pendingCheckpointPhase || undefined}
+                        onSelectCheckpoint={(cp) => {
+                          const phase = workflowConfig.workflow.phases?.find((p: any) => p.checkpoint?.name === cp.name);
+                          dispatch({ type: 'SET_CHECKPOINT_MESSAGE', payload: cp.message });
+                          dispatch({ type: 'SET_CHECKPOINT_IS_ITERATIVE', payload: !!phase?.iteration?.enabled });
+                          dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
+                        }} />
+                    )
                   ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">monitoring</span><p>加载中...</p></div>)}
                 </div>
               </>
@@ -1625,14 +1884,16 @@ export default function WorkbenchPage() {
                 </div>
               )}
               {/* Resume button when viewing crashed/stopped run without specific step selected */}
-              {!selectedStep && !isRunning && (workflowStatus === 'failed' || workflowStatus === 'stopped') && (runId || selectedRun?.id) && (
+              {!selectedStep && !isRunning && (workflowStatus === 'failed' || workflowStatus === 'stopped' || workflowStatus === 'pending') && (runId || selectedRun?.id) && (
                 <div className="bg-muted border-b p-3.5">
                   <Button className="bg-green-600 hover:bg-green-700 text-white text-xs w-full" onClick={() => resumeWorkflow()} disabled={isRunning}>
                     <span className="material-symbols-outlined text-sm">refresh</span>
-                    恢复运行
+                    {workflowStatus === 'pending' ? '启动运行' : '恢复运行'}
                   </Button>
                   <div className="text-[11px] text-muted-foreground mt-1.5">
-                    已完成 {completedSteps.length} 步，将从中断处继续
+                    {workflowStatus === 'pending'
+                      ? '从当前状态开始执行工作流'
+                      : `已完成 ${completedSteps.length} 步，将从中断处继续`}
                   </div>
                 </div>
               )}
@@ -1664,6 +1925,20 @@ export default function WorkbenchPage() {
                   </div>
                 </div>
               )}
+              {/* Show status when running but no current step */}
+              {isRunning && !selectedStep && !currentStep && (
+                <div className="bg-muted border-b p-3.5">
+                  <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">
+                    <span className="material-symbols-outlined text-xs">sync</span> 工作流运行中
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-2">
+                    等待步骤开始执行...
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    当前状态: {currentPhase || '未知'}
+                  </div>
+                </div>
+              )}
               {selectedAgent ? (<AgentPanel agent={selectedAgent} logs={logs} onClearLogs={(name) => dispatch({ type: 'CLEAR_AGENT_LOGS', payload: name })}
                 stepSummary={selectedStep && stepResult?.output ? stepResult.output : undefined} />
               ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">smart_toy</span><p>选择一个 Agent 查看详情</p></div>)}
@@ -1674,89 +1949,172 @@ export default function WorkbenchPage() {
             }
           />
         )}
-        {viewMode === 'design' && editingConfig && (<>
+        {isDesignMode && editingConfig && (<>
           <div className="flex flex-1 overflow-hidden">
             <div className="flex-1 flex flex-col min-w-0">
-              <div className="h-10 bg-muted border-b flex items-center px-4 min-w-0 overflow-hidden">
-                <h2 className="text-sm font-semibold m-0 truncate min-w-0">工作流设计</h2>
+              {/* Design Tabs */}
+              <div className="shrink-0 border-b bg-muted/30">
+                <div className="flex gap-0.5 px-2 pt-1">
+                  <button
+                    className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${designTab === 'workflow' ? 'bg-card text-foreground border-t border-l border-r' : 'text-muted-foreground hover:text-foreground'}`}
+                    onClick={() => setDesignTab('workflow')}
+                  >
+                    <span className="material-symbols-outlined text-sm mr-1 align-middle">account_tree</span>
+                    工作流设计
+                  </button>
+                  <button
+                    className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${designTab === 'config' ? 'bg-card text-foreground border-t border-l border-r' : 'text-muted-foreground hover:text-foreground'}`}
+                    onClick={() => setDesignTab('config')}
+                  >
+                    <span className="material-symbols-outlined text-sm mr-1 align-middle">settings</span>
+                    配置
+                  </button>
+                </div>
               </div>
-              {/* Requirements panel */}
-              <div className="border-b shrink-0">
-                <button
-                  className="w-full flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent hover:from-primary/15 transition-colors"
-                  onClick={() => setShowDesignRequirements(!showDesignRequirements)}
-                >
-                  <span className="material-symbols-outlined text-primary" style={{ fontSize: 18 }}>assignment</span>
-                  <span className="text-sm font-semibold text-primary">需求配置</span>
-                  {requirements && <span className="text-[10px] text-muted-foreground truncate flex-1 text-left ml-2">{requirements.substring(0, 60)}{requirements.length > 60 ? '...' : ''}</span>}
-                  <span className="material-symbols-outlined text-muted-foreground ml-auto" style={{ fontSize: 16 }}>{showDesignRequirements ? 'expand_less' : 'expand_more'}</span>
-                </button>
-                {showDesignRequirements && (
-                  <div className="px-4 py-3 space-y-3 bg-card/50">
-                    <div>
-                      <Label className="text-xs font-medium">项目根目录</Label>
-                      <Input value={projectRoot} onChange={(e) => dispatch({ type: 'SET_PROJECT_ROOT', payload: e.target.value })} type="text" placeholder="../cangjie_compiler" className="mt-1 h-8 text-sm" />
-                    </div>
-                    <div>
-                      <Label className="text-xs font-medium">需求描述</Label>
-                      <Textarea value={requirements} onChange={(e) => dispatch({ type: 'SET_REQUIREMENTS', payload: e.target.value })} rows={3} placeholder="请输入需求描述..." className="mt-1 text-sm" />
-                    </div>
-                    <div className="flex items-end gap-3">
-                      <div className="flex-1">
-                        <Label className="text-xs font-medium">步骤超时（分钟）</Label>
-                        <Input value={timeoutMinutes} onChange={(e) => dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: Math.max(1, parseInt(e.target.value) || 1) })} type="number" min={1} className="mt-1 h-8 text-sm" />
+
+              {/* Workflow Design Tab */}
+              {designTab === 'workflow' && editingConfig?.workflow && (
+                <div className="flex-1 overflow-hidden">
+                  {editingConfig.workflow.mode === 'state-machine' ? (
+                    <StateMachineDesignPanel
+                      states={editingConfig.workflow.states || []}
+                      onStatesChange={(states) => {
+                        const newConfig = JSON.parse(JSON.stringify(editingConfig));
+                        newConfig.workflow.states = states;
+                        dispatch({ type: 'SET_EDITING_CONFIG', payload: newConfig });
+                      }}
+                      availableAgents={agentConfigs}
+                      availableSkills={availableSkills}
+                    />
+                  ) : (
+                    <DesignPanel workflow={editingConfig.workflow}
+                      onSelectNode={handleSelectNode}
+                      onAddPhase={handleAddPhase}
+                      onAddStep={handleAddStep}
+                      onAddStepAt={handleAddStepAt}
+                      onDeletePhase={handleDeletePhase}
+                      onDeleteStep={handleDeleteStep}
+                      onMoveStep={handleMoveStep}
+                      onToggleParallel={handleToggleParallel}
+                      onUngroup={handleUngroup}
+                      onCrossPhaseMove={handleCrossPhaseMove}
+                      onMoveGroup={handleMoveGroup}
+                      onJoinGroup={handleJoinGroup} />
+                  )}
+                </div>
+              )}
+
+              {/* Config Tab */}
+              {designTab === 'config' && (
+                <div className="flex-1 overflow-auto bg-muted/20">
+                  <div className="max-w-xl mx-auto p-6">
+                    <div className="bg-card border rounded-lg shadow-sm">
+                      <div className="p-5 border-b">
+                        <h3 className="text-base font-semibold">工作流配置</h3>
+                        <p className="text-xs text-muted-foreground mt-1">配置工作流运行时的基本参数</p>
                       </div>
-                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white h-8" onClick={saveConfig} disabled={saving}>
-                        {saving ? <ClipLoader color="currentColor" size={12} className="mr-1" /> : <span className="material-symbols-outlined text-sm mr-1">save</span>}
-                        {saving ? '保存中...' : '保存'}
-                      </Button>
+                      <div className="p-5 space-y-5">
+                        <div>
+                          <Label className="text-sm font-medium">项目根目录</Label>
+                          <Input
+                            value={projectRoot}
+                            onChange={(e) => dispatch({ type: 'SET_PROJECT_ROOT', payload: e.target.value })}
+                            type="text"
+                            placeholder="../cangjie_compiler"
+                            className="mt-2"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1.5">工作流执行时的项目根目录路径</p>
+                        </div>
+
+                        <div>
+                          <Label className="text-sm font-medium">需求描述</Label>
+                          <Textarea
+                            value={requirements}
+                            onChange={(e) => dispatch({ type: 'SET_REQUIREMENTS', payload: e.target.value })}
+                            rows={4}
+                            placeholder="请输入需求描述..."
+                            className="mt-2"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1.5">详细描述本次工作流执行的目标和需求</p>
+                        </div>
+
+                        <div>
+                          <Label className="text-sm font-medium">步骤超时（分钟）</Label>
+                          <Input
+                            value={timeoutMinutes}
+                            onChange={(e) => dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: Math.max(1, parseInt(e.target.value) || 1) })}
+                            type="number"
+                            min={1}
+                            className="mt-2"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1.5">每个步骤的最大执行时间</p>
+                        </div>
+
+                        {availableSkills.length > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <Label className="text-sm font-medium">Skills</Label>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => setShowSkillSelector(true)}
+                              >
+                                <span className="material-symbols-outlined text-xs mr-1">list</span>
+                                选择 ({skills.length})
+                              </Button>
+                            </div>
+                            <div className="mt-2 min-h-[40px] p-3 border rounded-md bg-muted/30">
+                              {skills.length > 0 ? (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {skills.map((skillName) => (
+                                    <Badge key={skillName} variant="secondary" className="text-xs">
+                                      {skillName}
+                                      <button
+                                        type="button"
+                                        className="ml-1 hover:text-destructive"
+                                        onClick={() => dispatch({ type: 'SET_SKILLS', payload: skills.filter(s => s !== skillName) })}
+                                      >
+                                        ×
+                                      </button>
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-center text-muted-foreground text-sm py-2">
+                                  <span className="material-symbols-outlined text-base mr-1">info</span>
+                                  未选择任何 Skills
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1.5">选择工作流运行时可用的 Skills</p>
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-5 border-t bg-muted/30 flex justify-end">
+                        <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={saveConfig} disabled={saving}>
+                          {saving ? <ClipLoader color="currentColor" size={14} className="mr-2" /> : <span className="material-symbols-outlined text-sm mr-2">save</span>}
+                          {saving ? '保存中...' : '保存配置'}
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                )}
-              </div>
-              <div className="flex-1 overflow-hidden"><DesignPanel workflow={editingConfig.workflow}
-                onSelectNode={handleSelectNode}
-                onAddPhase={handleAddPhase}
-                onAddStep={handleAddStep}
-                onAddStepAt={handleAddStepAt}
-                onDeletePhase={handleDeletePhase}
-                onDeleteStep={handleDeleteStep}
-                onMoveStep={handleMoveStep}
-                onToggleParallel={handleToggleParallel}
-                onUngroup={handleUngroup}
-                onCrossPhaseMove={handleCrossPhaseMove}
-                onMoveGroup={handleMoveGroup}
-                onJoinGroup={handleJoinGroup} /></div>
+                </div>
+              )}
             </div>
           </div>
-          {/* Floating Agent config button */}
-          <button
-            className="fixed right-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:bg-primary/90 transition-colors"
-            onClick={() => setShowAgentDrawer(!showAgentDrawer)}
-            title="Agent 配置"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>smart_toy</span>
-          </button>
-          {/* Agent config drawer */}
-          {showAgentDrawer && (
-            <div className="fixed inset-0 z-40" onClick={() => setShowAgentDrawer(false)}>
-              <div className="absolute inset-0 bg-black/20" />
-              <div className="absolute top-0 right-0 h-full w-[400px] max-w-[90vw] bg-card border-l shadow-2xl flex flex-col animate-in slide-in-from-right duration-200"
-                onClick={(e) => e.stopPropagation()}>
-                <div className="h-10 bg-muted border-b flex items-center px-4 justify-between shrink-0">
-                  <h2 className="text-sm font-semibold m-0">Agent 配置</h2>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowAgentDrawer(false)}>
-                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>close</span>
-                  </Button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4">
-                  <AgentConfigPanel agents={agentConfigs} onSaveAgent={handleSaveAgent} onDeleteAgent={handleDeleteAgent} />
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Floating Agent config button - navigate to agents page */}
+          <Link href="/agents">
+            <button
+              className="fixed right-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:bg-primary/90 transition-colors"
+              title="Agent 管理"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 20 }}>smart_toy</span>
+            </button>
+          </Link>
         </>)}
-        {viewMode === 'history' && (<div className="flex-1 flex flex-col overflow-hidden">
+        {isHistoryMode && (<div className="flex-1 flex flex-col overflow-hidden">
           <div className="h-10 bg-muted border-b flex items-center justify-between px-4">
             <h2 className="text-sm font-semibold m-0">运行历史</h2>
             {selectedRunIds.length > 0 && (
@@ -1779,9 +2137,9 @@ export default function WorkbenchPage() {
                 <p>暂无运行记录</p>
               </div>
             ) : (
-              <div className="bg-card border rounded-lg overflow-hidden">
-                <table className="w-full">
-                  <thead className="bg-muted border-b">
+              <div className="bg-card border rounded-lg overflow-x-auto">
+                <table className="w-full min-w-[800px]">
+                  <thead className="bg-muted border-b sticky top-0">
                     <tr>
                       <th className="text-left p-3 text-sm font-semibold w-10">
                         <input
@@ -1793,9 +2151,9 @@ export default function WorkbenchPage() {
                       </th>
                       <th className="text-left p-3 text-sm font-semibold">运行ID</th>
                       <th className="text-left p-3 text-sm font-semibold">状态</th>
-                      <th className="text-left p-3 text-sm font-semibold">开始时间</th>
-                      <th className="text-left p-3 text-sm font-semibold">结束时间</th>
-                      <th className="text-left p-3 text-sm font-semibold">阶段</th>
+                      <th className="text-left p-3 text-sm font-semibold hidden md:table-cell">开始时间</th>
+                      <th className="text-left p-3 text-sm font-semibold hidden md:table-cell">结束时间</th>
+                      <th className="text-left p-3 text-sm font-semibold hidden sm:table-cell">阶段</th>
                       <th className="text-left p-3 text-sm font-semibold">进度</th>
                       <th className="text-left p-3 text-sm font-semibold">操作</th>
                     </tr>
@@ -1824,7 +2182,7 @@ export default function WorkbenchPage() {
                             </span>
                           </div>
                         </td>
-                        <td className="p-3 text-sm text-muted-foreground">
+                        <td className="p-3 text-sm text-muted-foreground hidden md:table-cell">
                           {new Date(run.startTime).toLocaleString('zh-CN', {
                             year: 'numeric',
                             month: '2-digit',
@@ -1834,7 +2192,7 @@ export default function WorkbenchPage() {
                             second: '2-digit'
                           })}
                         </td>
-                        <td className="p-3 text-sm text-muted-foreground">
+                        <td className="p-3 text-sm text-muted-foreground hidden md:table-cell">
                           {run.endTime ? new Date(run.endTime).toLocaleString('zh-CN', {
                             year: 'numeric',
                             month: '2-digit',
@@ -1844,7 +2202,7 @@ export default function WorkbenchPage() {
                             second: '2-digit'
                           }) : '-'}
                         </td>
-                        <td className="p-3 text-sm">{run.currentPhase || '-'}</td>
+                        <td className="p-3 text-sm hidden sm:table-cell">{run.currentPhase || '-'}</td>
                         <td className="p-3 text-sm">{run.completedSteps}/{run.totalSteps}</td>
                         <td className="p-3">
                           <div className="flex gap-2">
@@ -1852,6 +2210,18 @@ export default function WorkbenchPage() {
                               <span className="material-symbols-outlined text-sm mr-1">visibility</span>
                               查看
                             </Button>
+                            {(run.status === 'failed' || run.status === 'stopped' || run.status === 'pending') && (
+                              <Button size="sm" variant="outline" className="text-green-600 hover:text-green-700" onClick={() => { setSelectedRun(run); resumeWorkflow(run.id); }}>
+                                <span className="material-symbols-outlined text-sm mr-1">refresh</span>
+                                恢复
+                              </Button>
+                            )}
+                            {run.status !== 'running' && (
+                              <Button size="sm" variant="outline" className="text-blue-500 hover:text-blue-600" onClick={() => handleAnalyzeRunPrompts(run.id)}>
+                                <span className="material-symbols-outlined text-sm mr-1">psychology</span>
+                                分析
+                              </Button>
+                            )}
                             {run.status !== 'running' && (
                               <Button size="sm" variant="outline" className="text-red-500 hover:text-red-600" onClick={() => handleDeleteRun(run.id)}>
                                 <span className="material-symbols-outlined text-sm mr-1">delete</span>
@@ -1874,6 +2244,7 @@ export default function WorkbenchPage() {
         <ProcessPanel onClose={() => dispatch({ type: 'SET_SHOW_PROCESS_PANEL', payload: false })} />
       </div></div>)}
       {editingNode && (<EditNodeModal isOpen={showEditNodeModal} type={editingNode.type} data={getEditingNodeData()} roles={agentConfigs}
+        availableSkills={availableSkills}
         isNew={isNewNode}
         existingPhases={editingConfig?.workflow?.phases || []}
         existingSteps={editingConfig?.workflow?.phases?.flatMap((p: any) => p.steps) || []}
@@ -2047,7 +2418,7 @@ export default function WorkbenchPage() {
                               {new Date(parsed.timestamp).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                             </div>
                           )}
-                          <div className={`${styles.markdownContent} text-sm`}>
+                          <div className="text-sm">
                             <Markdown>{parsed.content}</Markdown>
                           </div>
                         </div>
@@ -2162,6 +2533,63 @@ export default function WorkbenchPage() {
           </div>
         </div>
       )}
+      {showSkillSelector && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setShowSkillSelector(false)}>
+          <div className="bg-card rounded-lg w-[700px] max-w-[90%] max-h-[80vh] flex flex-col border" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b flex items-center justify-between shrink-0">
+              <h3 className="text-lg font-semibold">
+                <span className="material-symbols-outlined text-lg mr-2 align-middle">list</span>
+                选择 Skills
+              </h3>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowSkillSelector(false)}>
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
+              </Button>
+            </div>
+            <div className="flex-1 overflow-auto p-5">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 px-2 w-8"></th>
+                    <th className="text-left py-2 px-2">名称</th>
+                    <th className="text-left py-2 px-2">描述</th>
+                    <th className="text-left py-2 px-2">标签</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {availableSkills.map((skill) => (
+                    <tr key={skill.name} className="border-b hover:bg-muted/50">
+                      <td className="py-2 px-2">
+                        <Checkbox
+                          checked={skills.includes(skill.name)}
+                          onCheckedChange={(checked) => {
+                            const newSkills = checked
+                              ? [...skills, skill.name]
+                              : skills.filter(s => s !== skill.name);
+                            dispatch({ type: 'SET_SKILLS', payload: newSkills });
+                          }}
+                        />
+                      </td>
+                      <td className="py-2 px-2 font-medium">{skill.name}</td>
+                      <td className="py-2 px-2 text-muted-foreground">{skill.description}</td>
+                      <td className="py-2 px-2">
+                        <div className="flex flex-wrap gap-1">
+                          {(skill as any).tags?.slice(0, 3).map((tag: string) => (
+                            <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="p-4 border-t flex justify-between items-center shrink-0">
+              <span className="text-sm text-muted-foreground">已选择 {skills.length} 个</span>
+              <Button onClick={() => setShowSkillSelector(false)}>确定</Button>
+            </div>
+          </div>
+        </div>
+      )}
       {confirmDialogProps && <ConfirmDialog {...confirmDialogProps} />}
       {showContextEditor && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setShowContextEditor(false)}>
@@ -2189,6 +2617,110 @@ export default function WorkbenchPage() {
             <div className="p-5 border-t flex gap-3 justify-end">
               <Button variant="secondary" onClick={() => setShowContextEditor(false)}>取消</Button>
               <Button onClick={saveContext}>保存</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 人工审查对话框 */}
+      {humanApprovalData && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-card rounded-lg w-[700px] max-w-[90%] border shadow-2xl">
+            <div className="p-5 border-b bg-orange-50 dark:bg-orange-950">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <span className="material-symbols-outlined text-orange-500">person</span>
+                人工审查 - {humanApprovalData.currentState}
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                状态已完成，请选择下一步操作
+              </p>
+            </div>
+
+            <div className="p-5 max-h-[60vh] overflow-y-auto">
+              {/* 执行结果摘要 */}
+              <div className="mb-4 p-3 bg-muted/30 rounded-lg">
+                <div className="text-sm font-medium mb-2">执行结果</div>
+                <div className="text-xs text-muted-foreground">
+                  <div>判定: <span className="font-medium">{humanApprovalData.result?.verdict || 'N/A'}</span></div>
+                  <div>问题数: <span className="font-medium">{humanApprovalData.result?.issues?.length || 0}</span></div>
+                  {humanApprovalData.result?.summary && (
+                    <div className="mt-2 text-xs">{humanApprovalData.result.summary}</div>
+                  )}
+                </div>
+              </div>
+
+              {/* AI 建议的下一步 */}
+              <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
+                <div className="text-sm font-medium mb-1 text-blue-700 dark:text-blue-400">
+                  AI 建议
+                </div>
+                <div className="text-sm">
+                  → {humanApprovalData.nextState}
+                </div>
+              </div>
+
+              {/* 可选的跳转目标 */}
+              <div className="mb-2">
+                <div className="text-sm font-medium mb-2">选择下一步：</div>
+                <div className="space-y-2">
+                  {humanApprovalData.availableStates.map((stateName) => (
+                    <button
+                      key={stateName}
+                      onClick={() => handleForceTransition(stateName)}
+                      className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-all ${
+                        stateName === humanApprovalData.nextState
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-950'
+                          : 'border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600 hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{stateName}</span>
+                        {stateName === humanApprovalData.nextState && (
+                          <Badge variant="outline" className="text-xs bg-blue-100 dark:bg-blue-900">推荐</Badge>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 强制跳转对话框 */}
+      {forceTransitionModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setForceTransitionModal(null)}>
+          <div className="bg-card rounded-lg w-[600px] max-w-[90%] border shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <span className="material-symbols-outlined text-orange-500">alt_route</span>
+                强制跳转到: {forceTransitionModal.targetState}
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                可选：为 AI 提供跳转指令
+              </p>
+            </div>
+
+            <div className="p-5">
+              <Textarea
+                value={forceTransitionModal.instruction}
+                onChange={(e) => setForceTransitionModal({ ...forceTransitionModal, instruction: e.target.value })}
+                placeholder="输入给 AI 的指令，例如：重点关注性能问题，忽略代码风格..."
+                rows={4}
+                className="w-full"
+              />
+              <p className="text-xs text-muted-foreground mt-2">
+                此指令将被添加到 AI 的 prompt 中，帮助 AI 更好地理解你的意图
+              </p>
+            </div>
+
+            <div className="p-5 border-t flex gap-3 justify-end">
+              <Button variant="secondary" onClick={() => setForceTransitionModal(null)}>取消</Button>
+              <Button onClick={executeForceTransition}>
+                <span className="material-symbols-outlined text-sm mr-1">check</span>
+                确认跳转
+              </Button>
             </div>
           </div>
         </div>

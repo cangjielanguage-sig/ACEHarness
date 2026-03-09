@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -15,6 +16,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -41,6 +44,7 @@ const stepSchema = z.object({
   task: z.string().min(1, '任务描述不能为空'),
   constraints: z.string().optional(),
   enableReviewPanel: z.boolean().optional(),
+  skills: z.array(z.string()).optional(),
 });
 
 type PhaseForm = z.infer<typeof phaseSchema>;
@@ -51,11 +55,18 @@ interface RoleOption {
   team: string;
 }
 
+interface SkillOption {
+  name: string;
+  description: string;
+  tags?: string[];
+}
+
 interface EditNodeModalProps {
   isOpen: boolean;
   type: 'phase' | 'step';
   data: any;
   roles?: RoleOption[];
+  availableSkills?: SkillOption[];
   isNew?: boolean;
   existingPhases?: any[];
   existingSteps?: any[];
@@ -69,6 +80,7 @@ export default function EditNodeModal({
   type,
   data,
   roles = [],
+  availableSkills = [],
   isNew = false,
   existingPhases = [],
   existingSteps = [],
@@ -78,6 +90,7 @@ export default function EditNodeModal({
 }: EditNodeModalProps) {
   const isPhase = type === 'phase';
   const schema = isPhase ? phaseSchema : stepSchema;
+  const [showSkillSelector, setShowSkillSelector] = useState(false);
 
   const {
     register,
@@ -104,8 +117,9 @@ export default function EditNodeModal({
           name: data?.name || '',
           agent: data?.agent || '',
           task: data?.task || '',
-          constraints: data?.constraints?.join('\n') || '',
+          constraints: Array.isArray(data?.constraints) ? data.constraints.join('\n') : (data?.constraints || ''),
           enableReviewPanel: data?.enableReviewPanel || false,
+          skills: data?.skills || [],
         },
   });
 
@@ -137,6 +151,7 @@ export default function EditNodeModal({
         task: source.task || '',
         constraints: source.constraints?.join('\n') || '',
         enableReviewPanel: source.enableReviewPanel || false,
+        skills: source.skills || [],
       });
     }
   };
@@ -181,10 +196,12 @@ export default function EditNodeModal({
       if (formData.enableReviewPanel !== undefined) {
         stepData.enableReviewPanel = formData.enableReviewPanel;
       }
+      if (formData.skills && formData.skills.length > 0) {
+        stepData.skills = formData.skills;
+      }
       onSave(stepData);
     }
   };
-  /* PLACEHOLDER_RETURN */
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -382,6 +399,50 @@ export default function EditNodeModal({
                   onCheckedChange={(v) => setValue('enableReviewPanel', v)}
                 />
               </div>
+
+              {availableSkills.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Skills</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-xs"
+                      onClick={() => setShowSkillSelector(true)}
+                    >
+                      <span className="material-symbols-outlined text-xs mr-1">list</span>
+                      选择 ({(watch('skills') || []).length})
+                    </Button>
+                  </div>
+                  <div className="min-h-[40px] p-2 border rounded-md bg-muted/30">
+                    {(watch('skills') || []).length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {(watch('skills') || []).map((skillName: string) => (
+                          <Badge key={skillName} variant="secondary" className="text-xs">
+                            {skillName}
+                            <button
+                              type="button"
+                              className="ml-1 hover:text-destructive"
+                              onClick={() => {
+                                const current = watch('skills') || [];
+                                setValue('skills', current.filter((s: string) => s !== skillName));
+                              }}
+                            >
+                              ×
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center text-muted-foreground text-xs py-2">
+                        <span className="material-symbols-outlined text-sm mr-1">info</span>
+                        未选择任何 Skills
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -400,6 +461,54 @@ export default function EditNodeModal({
             {isSubmitting ? '保存中...' : '保存'}
           </Button>
         </div>
+        {/* Skill Selector Dialog */}
+        {showSkillSelector && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setShowSkillSelector(false)}>
+            <div className="bg-card rounded-lg w-[600px] max-w-[90%] max-h-[70vh] flex flex-col border" onClick={(e) => e.stopPropagation()}>
+              <div className="p-4 border-b flex items-center justify-between shrink-0">
+                <h3 className="text-base font-semibold">选择 Skills</h3>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowSkillSelector(false)}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>close</span>
+                </Button>
+              </div>
+              <div className="flex-1 overflow-auto p-4">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-2 px-2 w-8"></th>
+                      <th className="text-left py-2 px-2">名称</th>
+                      <th className="text-left py-2 px-2">描述</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {availableSkills.map((skill) => (
+                      <tr key={skill.name} className="border-b hover:bg-muted/50">
+                        <td className="py-2 px-2">
+                          <Checkbox
+                            checked={(watch('skills') || []).includes(skill.name)}
+                            onCheckedChange={(checked) => {
+                              const current = watch('skills') || [];
+                              const newSkills = checked
+                                ? [...current, skill.name]
+                                : current.filter((s: string) => s !== skill.name);
+                              setValue('skills', newSkills);
+                            }}
+                          />
+                        </td>
+                        <td className="py-2 px-2 font-medium">{skill.name}</td>
+                        <td className="py-2 px-2 text-muted-foreground text-xs">{skill.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="p-3 border-t flex justify-between items-center shrink-0">
+                <span className="text-xs text-muted-foreground">已选择 {(watch('skills') || []).length} 个</span>
+                <Button size="sm" onClick={() => setShowSkillSelector(false)}>确定</Button>
+              </div>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

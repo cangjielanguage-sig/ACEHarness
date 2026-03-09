@@ -1,59 +1,71 @@
-// 统一的模型配置
+// 模型配置 - 从 configs/models.yaml 读取
+import fs from 'fs/promises';
+import path from 'path';
+import { parse } from 'yaml';
+
 export interface ModelOption {
   value: string;
   label: string;
-  costMultiplier: number; // 费用倍率
+  costMultiplier: number;
+  endpoints: string[];
 }
 
-export const MODEL_OPTIONS: ModelOption[] = [
-  {
-    value: 'claude-haiku-4-5',
-    label: 'Claude Haiku 4.5',
-    costMultiplier: 0.06
-  },
-  {
-    value: 'claude-opus-4-6',
-    label: 'Claude Opus 4.6',
-    costMultiplier: 0.3
-  },
-  {
-    value: 'claude-sonnet-4-6',
-    label: 'Claude Sonnet 4.6',
-    costMultiplier: 0.18
-  },
-  {
-    value: 'claude-sonnet-4-5-20250929',
-    label: 'Claude Sonnet 4.5 (20250929)',
-    costMultiplier: 0.18
-  },
-  {
-    value: 'glm-5',
-    label: 'GLM-5',
-    costMultiplier: 0.02
-  },
-  {
-    value: 'qwen3.5-plus',
-    label: 'Qwen 3.5 Plus',
-    costMultiplier: 0.02
-  },
-  {
-    value: 'kimi-k2.5',
-    label: 'Kimi K2.5',
-    costMultiplier: 0.02
-  },
-  {
-    value: 'minimax-m2.5',
-    label: 'Minimax M2.5',
-    costMultiplier: 0.02
+interface ModelsConfig {
+  models: ModelOption[];
+}
+
+let cachedModels: ModelOption[] | null = null;
+
+async function loadModels(): Promise<ModelOption[]> {
+  if (cachedModels) return cachedModels;
+
+  const configPath = path.join(process.cwd(), 'configs', 'models', 'models.yaml');
+  try {
+    const content = await fs.readFile(configPath, 'utf-8');
+    const config = parse(content) as ModelsConfig;
+    cachedModels = config.models || [];
+    return cachedModels;
+  } catch {
+    // Fallback to empty array if file not found
+    cachedModels = [];
+    return cachedModels;
   }
-];
+}
+
+// 同步版本（使用缓存），用于服务端渲染等同步场景
+export function getModelOptionsSync(): ModelOption[] {
+  return cachedModels || [];
+}
+
+// 异步加载（推荐）
+export async function getModelOptions(): Promise<ModelOption[]> {
+  return loadModels();
+}
+
+// 清除缓存（用于保存后重新加载）
+export function clearModelsCache(): void {
+  cachedModels = null;
+}
 
 // 获取模型显示名称
-export function getModelLabel(value: string): string {
-  return MODEL_OPTIONS.find(m => m.value === value)?.label || value;
+export async function getModelLabel(value: string): Promise<string> {
+  const models = await loadModels();
+  return models.find(m => m.value === value)?.label || value;
 }
 
 // 获取模型费用倍率
-export function getModelCostMultiplier(value: string): number {
-  return MODEL_OPTIONS.find(m => m.value === value)?.costMultiplier || 1;
+export async function getModelCostMultiplier(value: string): Promise<number> {
+  const models = await loadModels();
+  return models.find(m => m.value === value)?.costMultiplier || 1;
+}
+
+// 同步版本（需要先调用过异步版本）
+export function getModelLabelSync(value: string): string {
+  const models = cachedModels || [];
+  return models.find(m => m.value === value)?.label || value;
+}
+
+export function getModelCostMultiplierSync(value: string): number {
+  const models = cachedModels || [];
+  return models.find(m => m.value === value)?.costMultiplier || 1;
 }

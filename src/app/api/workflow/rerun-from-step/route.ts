@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { workflowManager } from '@/lib/workflow-manager';
+import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
+import { loadRunState } from '@/lib/run-state-persistence';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,7 +15,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const currentStatus = workflowManager.getStatus();
+    // Load run state to determine workflow mode
+    const runState = await loadRunState(runId);
+    if (!runState) {
+      return NextResponse.json(
+        { error: `找不到运行记录: ${runId}` },
+        { status: 404 }
+      );
+    }
+
+    const isStateMachine = runState.mode === 'state-machine';
+    const manager = isStateMachine ? stateMachineWorkflowManager : workflowManager;
+
+    const currentStatus = manager.getStatus();
     if (currentStatus.status === 'running') {
       return NextResponse.json(
         { error: '已有工作流正在运行' },
@@ -22,7 +36,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Fire-and-forget
-    workflowManager.rerunFromStep(runId, stepName).catch(() => {});
+    manager.rerunFromStep(runId, stepName).catch(() => {});
 
     return NextResponse.json({
       success: true,

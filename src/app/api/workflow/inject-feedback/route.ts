@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { workflowManager } from '@/lib/workflow-manager';
+import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,8 +14,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const status = workflowManager.getStatus();
-    if (status.status !== 'running') {
+    // Check both managers to find which one is running
+    const phaseStatus = workflowManager.getStatus();
+    const smStatus = stateMachineWorkflowManager.getStatus();
+
+    let manager;
+    if (phaseStatus.status === 'running') {
+      manager = workflowManager;
+    } else if (smStatus.status === 'running') {
+      manager = stateMachineWorkflowManager;
+    } else {
       return NextResponse.json(
         { error: '当前没有运行中的工作流' },
         { status: 409 }
@@ -22,7 +31,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (interrupt) {
-      const ok = workflowManager.interruptWithFeedback(message.trim());
+      const ok = manager.interruptWithFeedback(message.trim());
       return NextResponse.json({
         success: true,
         interrupted: ok,
@@ -30,7 +39,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    workflowManager.injectLiveFeedback(message.trim());
+    manager.injectLiveFeedback(message.trim());
 
     return NextResponse.json({
       success: true,

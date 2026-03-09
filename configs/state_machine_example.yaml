@@ -1,0 +1,267 @@
+workflow:
+  name: 状态机工作流示例
+  description: 支持跨阶段回退的动态流程
+  mode: state-machine
+  maxTransitions: 50
+
+  states:
+    # 设计状态
+    - name: 设计阶段
+      description: 设计技术方案
+      isInitial: true
+      isFinal: false
+      position:
+        x: 100
+        y: 100
+      steps:
+        - name: 提出设计方案
+          agent: architect
+          task: 根据需求设计技术方案，提供 2-3 个备选方案
+          role: defender
+        - name: 攻击设计方案
+          agent: design-breaker
+          task: 分析设计方案，找出所有可能的缺陷和风险
+          type: adversarial
+          role: attacker
+        - name: 评审设计方案
+          agent: design-judge
+          task: 评估设计方案和发现的问题，给出决策建议
+          role: judge
+      transitions:
+        - to: 实施阶段
+          condition:
+            verdict: pass
+          priority: 1
+          label: 设计通过
+        - to: 设计阶段
+          condition:
+            issueTypes: [design]
+          priority: 2
+          label: 设计问题
+
+    # 实施状态
+    - name: 实施阶段
+      description: 实现代码
+      isInitial: false
+      isFinal: false
+      position:
+        x: 400
+        y: 100
+      steps:
+        - name: 编写代码
+          agent: developer
+          task: 根据设计方案实现代码
+          role: defender
+        - name: 代码审查
+          agent: code-hunter
+          task: 审查代码，发现潜在的漏洞和问题
+          type: adversarial
+          role: attacker
+        - name: 验证修复
+          agent: code-judge
+          task: 验证代码修复的有效性
+          role: judge
+      transitions:
+        - to: 测试阶段
+          condition:
+            verdict: pass
+          priority: 1
+          label: 代码通过
+        - to: 设计阶段
+          condition:
+            issueTypes: [design, architecture]
+            severities: [critical, major]
+          priority: 2
+          label: 架构问题
+        - to: 实施阶段
+          condition:
+            issueTypes: [implementation]
+          priority: 3
+          label: 实现问题
+
+    # 测试状态
+    - name: 测试阶段
+      description: 执行测试
+      isInitial: false
+      isFinal: false
+      position:
+        x: 700
+        y: 100
+      steps:
+        - name: 功能测试
+          agent: tester
+          task: 编写和执行 E2E 功能测试用例
+          role: defender
+        - name: 压力测试
+          agent: stress-tester
+          task: 执行极限场景和压力测试
+          type: adversarial
+          role: attacker
+        - name: 代码审计
+          agent: code-auditor
+          task: 审计代码是否符合编码规范
+          role: judge
+      transitions:
+        - to: 优化阶段
+          condition:
+            verdict: pass
+          priority: 1
+          label: 测试通过
+        - to: 设计阶段
+          condition:
+            issueTypes: [design, architecture]
+            severities: [critical]
+          priority: 2
+          label: 设计缺陷
+        - to: 实施阶段
+          condition:
+            issueTypes: [implementation, bug]
+          priority: 3
+          label: 功能Bug
+        - to: 修复阶段
+          condition:
+            minIssueCount: 1
+          priority: 4
+          label: 需要修复
+
+    # 修复状态
+    - name: 修复阶段
+      description: 修复发现的问题
+      isInitial: false
+      isFinal: false
+      position:
+        x: 700
+        y: 300
+      steps:
+        - name: 设计修复方案
+          agent: fix-architect
+          task: 根据测试发现的缺陷，设计系统性修复方案
+          role: defender
+        - name: 攻击修复方案
+          agent: fix-breaker
+          task: 攻击修复方案，验证方案的完整性和鲁棒性
+          type: adversarial
+          role: attacker
+        - name: 评审修复方案
+          agent: fix-judge
+          task: 评审修复方案和攻击发现，做出最终裁决
+          role: judge
+        - name: 实施修复
+          agent: fix-developer
+          task: 根据评审通过的修复方案实施代码修复
+          role: defender
+        - name: 审查修复代码
+          agent: fix-hunter
+          task: 审查修复代码，验证修复有效性
+          type: adversarial
+          role: attacker
+        - name: 验证修复结果
+          agent: fix-reviewer
+          task: 评审修复代码的有效性和完整性
+          role: judge
+      transitions:
+        - to: 测试阶段
+          condition:
+            verdict: pass
+          priority: 1
+          label: 修复完成
+        - to: 设计阶段
+          condition:
+            issueTypes: [design]
+            severities: [critical]
+          priority: 2
+          label: 设计问题
+        - to: 修复阶段
+          condition:
+            issueTypes: [implementation]
+          priority: 3
+          label: 修复问题
+
+    # 优化状态
+    - name: 优化阶段
+      description: 性能优化
+      isInitial: false
+      isFinal: false
+      position:
+        x: 1000
+        y: 100
+      steps:
+        - name: 性能优化
+          agent: developer
+          task: 优化性能瓶颈
+          role: defender
+        - name: 性能退化测试
+          agent: performance-breaker
+          task: 寻找性能退化场景
+          type: adversarial
+          role: attacker
+        - name: 性能仲裁
+          agent: performance-judge
+          task: 验证性能提升的真实性
+          role: judge
+      transitions:
+        - to: 完成
+          condition:
+            verdict: pass
+          priority: 1
+          label: 优化完成
+        - to: 设计阶段
+          condition:
+            issueTypes: [design, architecture]
+            severities: [critical]
+          priority: 2
+          label: 架构瓶颈
+        - to: 实施阶段
+          condition:
+            issueTypes: [performance]
+            severities: [major]
+          priority: 3
+          label: 性能回归
+        - to: 优化阶段
+          condition:
+            issueTypes: [performance]
+          priority: 4
+          label: 优化问题
+
+    # 完成状态
+    - name: 完成
+      description: 工作流完成
+      isInitial: false
+      isFinal: true
+      position:
+        x: 1300
+        y: 100
+      steps:
+        - name: 生成报告
+          agent: architect
+          task: 生成最终报告
+          role: defender
+      transitions: []
+
+  # 问题路由规则
+  issueRouting:
+    - pattern: "架构|设计缺陷|方案问题|系统设计"
+      targetState: 设计阶段
+      issueType: design
+      priority: 1
+
+    - pattern: "Bug|功能缺陷|实现错误|代码问题"
+      targetState: 实施阶段
+      issueType: implementation
+      priority: 2
+
+    - pattern: "性能瓶颈|内存泄漏|响应慢|性能问题"
+      targetState: 优化阶段
+      issueType: performance
+      priority: 3
+
+    - pattern: "测试失败|测试用例|测试问题"
+      targetState: 测试阶段
+      issueType: test
+      priority: 4
+
+context:
+  projectRoot: ../cangjie_stdx
+  requirements: 用于该工程下src/stdx目录下所有代码的安全审计
+  codebase: ../cangjie_compiler/src
+  timeoutMinutes: 300

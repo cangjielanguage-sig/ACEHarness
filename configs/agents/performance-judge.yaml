@@ -5,7 +5,7 @@ tags:
   - 审查
   - 性能评估
   - 性能分析
-model: glm-5
+model: claude-sonnet-4-5-20250929
 temperature: 0.5
 allowedTools:
   - Read

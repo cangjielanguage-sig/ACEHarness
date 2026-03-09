@@ -52,7 +52,7 @@ export interface PersistedStepLog {
 export interface PersistedRunState {
   runId: string;
   configFile: string;
-  status: 'running' | 'completed' | 'failed' | 'stopped' | 'crashed';
+  status: 'running' | 'completed' | 'failed' | 'stopped' | 'crashed' | 'pending';
   statusReason?: string;
   startTime: string;
   endTime: string | null;
@@ -73,6 +73,27 @@ export interface PersistedRunState {
   };
   globalContext?: string;
   phaseContexts?: Record<string, string>;
+
+  // State machine specific fields
+  mode?: 'state-machine' | 'phase-based';
+  currentState?: string | null;
+  transitionCount?: number;
+  maxTransitions?: number;
+  stateHistory?: Array<{
+    from: string;
+    to: string;
+    reason: string;
+    issues: any[];
+    timestamp: string;
+  }>;
+  issueTracker?: Array<{
+    type: string;
+    severity: string;
+    description: string;
+    foundInState?: string;
+    foundByAgent?: string;
+  }>;
+  requirements?: string;
 }
 
 function runDir(runId: string): string {

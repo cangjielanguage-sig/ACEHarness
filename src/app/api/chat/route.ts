@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processManager } from '@/lib/process-manager';
+import { createEngine, getConfiguredEngine } from '@/lib/engines/engine-factory';
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,7 +12,36 @@ export async function POST(request: NextRequest) {
 
     const id = `chat-${Date.now()}`;
     const useModel = model || '';
+    const engineType = await getConfiguredEngine();
+    const engine = await createEngine(engineType);
 
+    if (engine) {
+      // Use configured engine (e.g. kiro-cli)
+      const chunks: string[] = [];
+      engine.on('stream', (event: any) => {
+        if (event.type === 'text') chunks.push(event.content);
+      });
+
+      const result = await engine.execute({
+        agent: 'chat',
+        step: 'chat',
+        prompt: message,
+        systemPrompt: '你是一个 AI 助手，简洁回答问题。',
+        model: useModel,
+        workingDirectory: process.cwd(),
+        sessionId: sessionId || undefined,
+      });
+
+      engine.cancel();
+
+      return NextResponse.json({
+        result: result.output || chunks.join(''),
+        sessionId: result.sessionId,
+        isError: !result.success,
+      });
+    }
+
+    // Fallback: Claude Code via process-manager
     const result = await processManager.executeClaudeCli(
       id,
       'chat-test',
@@ -35,7 +65,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     return NextResponse.json(
-      { error: error.message || 'Claude CLI 调用失败' },
+      { error: error.message || 'CLI 调用失败' },
       { status: 500 }
     );
   }

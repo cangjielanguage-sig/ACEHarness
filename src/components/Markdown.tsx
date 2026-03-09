@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import styles from './Markdown.module.css';
 
 const components = {
   code({ className, children, ...props }: any) {
@@ -47,8 +48,10 @@ const components = {
 
 export default function Markdown({ children }: { children: string }) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={components}>
-      {children}
-    </ReactMarkdown>
+    <div className={styles.markdownContent}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={components}>
+        {children}
+      </ReactMarkdown>
+    </div>
   );
 }

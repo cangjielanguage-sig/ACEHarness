@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Zap, Cpu, Database, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, History, Play } from 'lucide-react';
+import { Activity, Zap, Cpu, Database, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, History, Play, Package, Cog } from 'lucide-react';
 import { configApi, runsApi, agentApi } from '@/lib/api';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
@@ -250,10 +250,6 @@ export default function DashboardPage() {
               <div className="flex items-center gap-3">
                 <LanguageToggle />
                 <ThemeToggle />
-                <Button variant="outline" size="sm" onClick={() => router.push('/agents')}>
-                  <Bot className="w-4 h-4 mr-2" />
-                  {t('agents.title')}
-                </Button>
                 <Button size="sm" onClick={() => setShowNewModal(true)}>
                   <Play className="w-4 h-4 mr-2" />
                   {t('dashboard.quickActions.newWorkflow')}
@@ -305,37 +301,53 @@ export default function DashboardPage() {
               <Zap className="w-5 h-5 text-primary" />
               {t('dashboard.quickActions.title')}
             </h2>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <QuickAction
-                icon={Play}
-                label={t('dashboard.quickActions.newWorkflow')}
-                onClick={() => setShowNewModal(true)}
-                color="from-blue-600 to-blue-700"
-              />
-              <QuickAction
-                icon={Workflow}
-                label={t('dashboard.quickActions.workflows')}
-                onClick={() => router.push('/workflows')}
-                color="from-cyan-600 to-cyan-700"
-              />
-              <QuickAction
-                icon={Bot}
-                label={t('dashboard.quickActions.manageAgents')}
-                onClick={() => router.push('/agents')}
-                color="from-purple-600 to-purple-700"
-              />
-              <QuickAction
-                icon={History}
-                label={t('dashboard.quickActions.viewHistory')}
-                onClick={() => router.push('/workbench/workflow.yaml?mode=history')}
-                color="from-green-600 to-green-700"
-              />
-              <QuickAction
-                icon={Settings}
-                label={t('dashboard.quickActions.settings')}
-                onClick={() => router.push('/models')}
-                color="from-orange-600 to-orange-700"
-              />
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <QuickAction
+                  icon={Play}
+                  label={t('dashboard.quickActions.newWorkflow')}
+                  onClick={() => setShowNewModal(true)}
+                  color="from-blue-600 to-blue-700"
+                />
+                <QuickAction
+                  icon={Workflow}
+                  label={t('dashboard.quickActions.workflows')}
+                  onClick={() => router.push('/workflows')}
+                  color="from-cyan-600 to-cyan-700"
+                />
+                <QuickAction
+                  icon={Bot}
+                  label={t('dashboard.quickActions.manageAgents')}
+                  onClick={() => router.push('/agents')}
+                  color="from-purple-600 to-purple-700"
+                />
+                <QuickAction
+                  icon={History}
+                  label={t('dashboard.quickActions.viewHistory')}
+                  onClick={() => router.push('/workbench/workflow.yaml?mode=history')}
+                  color="from-green-600 to-green-700"
+                />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <QuickAction
+                  icon={Settings}
+                  label={t('dashboard.quickActions.models')}
+                  onClick={() => router.push('/models')}
+                  color="from-orange-600 to-orange-700"
+                />
+                <QuickAction
+                  icon={Package}
+                  label="Skills 管理"
+                  onClick={() => router.push('/skills')}
+                  color="from-pink-600 to-pink-700"
+                />
+                <QuickAction
+                  icon={Cog}
+                  label="引擎管理"
+                  onClick={() => router.push('/engines')}
+                  color="from-indigo-600 to-indigo-700"
+                />
+              </div>
             </div>
           </motion.div>
 
@@ -482,8 +494,14 @@ export default function DashboardPage() {
                         <CheckCircle2 className="w-4 h-4 text-green-500" />
                       ) : run.status === 'failed' ? (
                         <XCircle className="w-4 h-4 text-red-500" />
+                      ) : run.status === 'running' ? (
+                        <Play className="w-4 h-4 text-blue-500" />
+                      ) : run.status === 'stopped' ? (
+                        <AlertCircle className="w-4 h-4 text-gray-500" />
+                      ) : run.status === 'crashed' ? (
+                        <XCircle className="w-4 h-4 text-orange-500" />
                       ) : (
-                        <AlertCircle className="w-4 h-4 text-yellow-500" />
+                        <Clock className="w-4 h-4 text-yellow-500" />
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{run.configName || run.configFile}</div>

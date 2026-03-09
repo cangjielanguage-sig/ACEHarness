@@ -10,8 +10,9 @@ import { Badge } from '@/components/ui/badge';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { useTranslations } from '@/hooks/useTranslations';
-import { Search, Plus, Play, Edit, Copy, Trash2, ArrowLeft, FileText } from 'lucide-react';
+import { Search, Plus, Play, Edit, Copy, Trash2, ArrowLeft, FileText, History } from 'lucide-react';
 import NewConfigModal from '@/components/NewConfigModal';
+import CopyConfigModal from '@/components/CopyConfigModal';
 import { useToast } from '@/components/ui/toast';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -20,6 +21,7 @@ interface WorkflowConfig {
   filename: string;
   name: string;
   description?: string;
+  mode?: 'phase-based' | 'state-machine';
   phaseCount?: number;
   stepCount?: number;
   agentCount?: number;
@@ -36,6 +38,7 @@ export default function WorkflowsPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
+  const [copyingFilename, setCopyingFilename] = useState<string | null>(null);
 
   useEffect(() => {
     loadWorkflows();
@@ -75,21 +78,13 @@ export default function WorkflowsPage() {
   };
 
   const handleCopy = async (filename: string) => {
-    const newFilename = prompt('请输入新的文件名（包含.yaml后缀）：', filename.replace('.yaml', '-copy.yaml'));
-    if (!newFilename) return;
+    setCopyingFilename(filename);
+  };
 
-    if (!newFilename.endsWith('.yaml')) {
-      toast('error', '文件名必须以.yaml结尾');
-      return;
-    }
-
-    try {
-      await configApi.copyConfig(filename, newFilename);
-      toast('success', `工作流已复制为 "${newFilename}"`);
-      loadWorkflows();
-    } catch (error) {
-      toast('error', '无法复制工作流');
-    }
+  const handleCopySuccess = (newFilename: string) => {
+    setCopyingFilename(null);
+    loadWorkflows();
+    toast('success', `工作流已复制为 "${newFilename}"`);
   };
 
   const filteredWorkflows = workflows.filter(wf =>
@@ -171,7 +166,14 @@ export default function WorkflowsPage() {
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold mb-1">{workflow.name}</h3>
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-lg font-semibold">{workflow.name}</h3>
+                      {workflow.mode === 'state-machine' && (
+                        <Badge className="bg-gradient-to-r from-purple-500 to-blue-500 text-white border-0 text-xs">
+                          状态机
+                        </Badge>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground mb-2">{workflow.filename}</p>
                     {workflow.description && (
                       <p className="text-sm text-muted-foreground line-clamp-2">{workflow.description}</p>
@@ -181,7 +183,7 @@ export default function WorkflowsPage() {
 
                 <div className="flex items-center gap-2 mb-4">
                   <Badge variant="secondary">
-                    {workflow.phases || workflow.phaseCount || 0} 阶段
+                    {workflow.phases || workflow.phaseCount || 0} {workflow.mode === 'state-machine' ? '状态' : '阶段'}
                   </Badge>
                   <Badge variant="secondary">
                     {workflow.steps || workflow.stepCount || 0} 步骤
@@ -196,6 +198,14 @@ export default function WorkflowsPage() {
                   >
                     <Play className="w-3 h-3 mr-1" />
                     运行
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push(`/workbench/${encodeURIComponent(workflow.filename)}?mode=history`)}
+                    title="查看历史记录"
+                  >
+                    <History className="w-3 h-3" />
                   </Button>
                   <Button
                     size="sm"
@@ -238,6 +248,15 @@ export default function WorkflowsPage() {
       )}
 
       {dialogProps && <ConfirmDialog {...dialogProps} />}
+
+      {copyingFilename && (
+        <CopyConfigModal
+          isOpen={!!copyingFilename}
+          sourceFilename={copyingFilename}
+          onClose={() => setCopyingFilename(null)}
+          onSuccess={handleCopySuccess}
+        />
+      )}
     </div>
   );
 }

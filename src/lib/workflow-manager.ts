@@ -17,6 +17,8 @@ import {
 } from './run-state-persistence';
 import type { WorkflowConfig, WorkflowPhase, WorkflowStep, RoleConfig, IterationConfig } from './schemas';
 import { formatTimestamp } from './utils';
+import { createEngine, getConfiguredEngine, type Engine, type EngineType } from './engines';
+import type { EngineStreamEvent } from './engines/engine-interface';
 
 export interface TokenUsage {
   inputTokens: number;
@@ -89,6 +91,99 @@ class WorkflowManager extends EventEmitter {
   private phaseContexts: Map<string, string> = new Map();
   /** Cached workspace skills discovered from projectRoot/.claude/skills/ */
   private workspaceSkills: string = '';
+  /** Cached workspace skill names for deduplication */
+  private workspaceSkillNames: Set<string> = new Set();
+  /** Cached workflow-level skills from context.skills */
+  private workflowSkillsContent: string = '';
+  /** Current engine instance (Kiro CLI, Codex, etc.) */
+  private currentEngine: Engine | null = null;
+  /** Current engine type */
+  private engineType: EngineType = 'claude-code';
+
+  /**
+   * Load a single skill's content from either project or system skills directory
+   */
+  private async loadSkillContent(skillName: string, projectRoot: string): Promise<string | null> {
+    // Try project-level skill first
+    const projectSkillPath = resolve(process.cwd(), projectRoot, '.claude', 'skills', skillName, 'SKILL.md');
+    try {
+      const content = await readFile(projectSkillPath, 'utf-8');
+      return content;
+    } catch { /* not found in project */ }
+
+    // Try system-level skills directory
+    const systemSkillPath = resolve(process.cwd(), 'skills', '.claude', 'skills', skillName, 'SKILL.md');
+    try {
+      const content = await readFile(systemSkillPath, 'utf-8');
+      return content;
+    } catch { /* not found in system */ }
+
+    return null;
+  }
+
+  /**
+   * Load multiple step-level skills, merging duplicates and returning formatted content
+   */
+  private async loadStepSkills(skillNames: string[], projectRoot: string): Promise<string> {
+    const uniqueSkills = [...new Set(skillNames)].filter(
+      name => !this.workspaceSkillNames.has(name)
+    );
+    if (uniqueSkills.length === 0) return '';
+
+    const loadedSkills: { name: string; content: string }[] = [];
+
+    for (const skillName of uniqueSkills) {
+      const content = await this.loadSkillContent(skillName, projectRoot);
+      if (content) {
+        loadedSkills.push({ name: skillName, content });
+      }
+    }
+
+    if (loadedSkills.length === 0) return '';
+
+    let result = `### 步骤指定 Skills\n\n`;
+    result += `此步骤特别要求使用以下 Skills：\n\n`;
+
+    for (const skill of loadedSkills) {
+      result += `#### ${skill.name}\n\n`;
+      result += skill.content + '\n\n---\n\n';
+    }
+
+    return result;
+  }
+
+  /**
+   * Load workflow-level skills from context.skills
+   */
+  private async loadWorkflowSkills(skillNames: string[], projectRoot: string): Promise<string> {
+    const uniqueSkills = [...new Set(skillNames)].filter(
+      name => !this.workspaceSkillNames.has(name)
+    );
+    if (uniqueSkills.length === 0) return '';
+
+    const loadedSkills: { name: string; content: string }[] = [];
+
+    for (const skillName of uniqueSkills) {
+      const content = await this.loadSkillContent(skillName, projectRoot);
+      if (content) {
+        loadedSkills.push({ name: skillName, content });
+        // Also track for deduplication with step-level skills
+        this.workspaceSkillNames.add(skillName);
+      }
+    }
+
+    if (loadedSkills.length === 0) return '';
+
+    let result = `### 工作流指定 Skills\n\n`;
+    result += `本工作流要求使用以下 Skills（适用于所有步骤）：\n\n`;
+
+    for (const skill of loadedSkills) {
+      result += `#### ${skill.name}\n\n`;
+      result += skill.content + '\n\n---\n\n';
+    }
+
+    return result;
+  }
 
   private async loadAgentConfigs(): Promise<RoleConfig[]> {
     const agentsDir = resolve(process.cwd(), 'configs', 'agents');
@@ -112,6 +207,7 @@ class WorkflowManager extends EventEmitter {
   /**
    * Discover .claude/skills from the workspace projectRoot.
    * Reads each skill's SKILL.md and returns a formatted prompt section.
+   * Also tracks skill names for deduplication with step-level skills.
    */
   private async discoverWorkspaceSkills(projectRoot: string): Promise<string> {
     const absRoot = resolve(process.cwd(), projectRoot);
@@ -123,10 +219,16 @@ class WorkflowManager extends EventEmitter {
       // Also read each sub-skill's SKILL.md for detailed instructions
       const entries = await readdir(skillsDir);
       const details: string[] = [];
+      this.workspaceSkillNames.clear();
+
       for (const entry of entries) {
         const entryPath = resolve(skillsDir, entry);
         const entryStat = await stat(entryPath).catch(() => null);
         if (!entryStat?.isDirectory()) continue;
+
+        // Track skill name for deduplication
+        this.workspaceSkillNames.add(entry);
+
         const subSkillMd = resolve(entryPath, 'SKILL.md');
         try {
           const content = await readFile(subSkillMd, 'utf-8');
@@ -144,7 +246,113 @@ class WorkflowManager extends EventEmitter {
       return result;
     } catch {
       // No skills directory or index — that's fine
+      this.workspaceSkillNames.clear();
       return '';
+    }
+  }
+
+  /**
+   * Initialize the AI engine based on configuration
+   */
+  private async initializeEngine(): Promise<void> {
+    try {
+      this.engineType = await getConfiguredEngine();
+      console.log(`[WorkflowManager] 使用引擎: ${this.engineType}`);
+      this.emit('log', `使用引擎: ${this.engineType}`);
+
+      // Only create engine instance for non-Claude Code engines
+      if (this.engineType !== 'claude-code') {
+        this.currentEngine = await createEngine(this.engineType);
+        if (!this.currentEngine) {
+          console.log(`[WorkflowManager] 引擎 ${this.engineType} 不可用，回退到 Claude Code`);
+          this.emit('log', `引擎 ${this.engineType} 不可用，回退到 Claude Code`);
+          this.engineType = 'claude-code';
+        } else {
+          console.log(`[WorkflowManager] 引擎 ${this.engineType} 初始化成功`);
+          this.emit('log', `引擎 ${this.engineType} 初始化成功`);
+        }
+      }
+    } catch (error) {
+      console.log(`[WorkflowManager] 引擎初始化失败: ${error}, 使用 Claude Code`);
+      this.emit('log', `引擎初始化失败: ${error}, 使用 Claude Code`);
+      this.engineType = 'claude-code';
+      this.currentEngine = null;
+    }
+  }
+
+  /**
+   * Execute a task using the configured engine
+   */
+  private async executeWithEngine(
+    processId: string,
+    agent: string,
+    step: string,
+    prompt: string,
+    systemPrompt: string,
+    model: string,
+    options: any
+  ): Promise<ClaudeJsonResult> {
+    // Use Claude Code (existing implementation)
+    if (this.engineType === 'claude-code' || !this.currentEngine) {
+      return await processManager.executeClaudeCli(
+        processId,
+        agent,
+        step,
+        prompt,
+        systemPrompt,
+        model,
+        options
+      );
+    }
+
+    // Use alternative engine (Kiro CLI, etc.)
+    this.emit('log', `使用 ${this.engineType} 引擎执行任务: ${step}`);
+
+    // Set up stream handler for the engine
+    const streamHandler = (event: EngineStreamEvent) => {
+      // Convert engine stream events to processManager format
+      processManager.emit('stream', {
+        id: processId,
+        step: step,
+        total: event.content,
+      });
+    };
+
+    this.currentEngine.on('stream', streamHandler);
+
+    try {
+      const result = await this.currentEngine.execute({
+        agent,
+        step,
+        prompt,
+        systemPrompt,
+        model,
+        workingDirectory: options.workingDirectory,
+        allowedTools: options.allowedTools,
+        timeoutMs: options.timeoutMs,
+        sessionId: options.resumeSessionId,
+        appendSystemPrompt: options.appendSystemPrompt,
+        runId: options.runId,
+      });
+
+      // Convert engine result to ClaudeJsonResult format
+      return {
+        result: result.success ? result.output : (result.error || result.output),
+        session_id: result.sessionId || '',
+        is_error: !result.success,
+        cost_usd: 0,
+        duration_ms: 0,
+        duration_api_ms: 0,
+        num_turns: 0,
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      };
+    } finally {
+      this.currentEngine.off('stream', streamHandler);
     }
   }
 
@@ -262,9 +470,29 @@ class WorkflowManager extends EventEmitter {
       // Load agent configs from configs/agents/*.yaml
       this.agentConfigs = await this.loadAgentConfigs();
 
+      // Initialize engine
+      await this.initializeEngine();
+
       // Discover workspace skills from projectRoot/.claude/skills/
       if (workflowConfig.context.projectRoot) {
         this.workspaceSkills = await this.discoverWorkspaceSkills(workflowConfig.context.projectRoot);
+
+        // Load workflow-level skills from context.skills
+        if (workflowConfig.context.skills && workflowConfig.context.skills.length > 0) {
+          this.workflowSkillsContent = await this.loadWorkflowSkills(
+            workflowConfig.context.skills,
+            workflowConfig.context.projectRoot
+          );
+        }
+      }
+
+      // Load workflow-level skills from context.skills
+      this.workflowSkillsContent = '';
+      if (workflowConfig.context.skills && workflowConfig.context.skills.length > 0) {
+        this.workflowSkillsContent = await this.loadWorkflowSkills(
+          workflowConfig.context.skills,
+          workflowConfig.context.projectRoot || ''
+        );
       }
 
       this.initializeAgents(workflowConfig);
@@ -591,21 +819,24 @@ class WorkflowManager extends EventEmitter {
 
     let startIter: number;
 
-    if (isSubsequentIteration) {
-      // Called from checkpoint "iterate" — skip initial defenders, jump to next iteration
-      startIter = iterState.currentIteration + 1;
-      console.log(`[iterPhase] Subsequent iteration: starting at iter=${startIter}`);
-    } else {
-      // Determine starting iteration (resume from where we left off)
-      if (iterState.currentIteration >= 1) {
-        // Check if all steps of the current iteration are in completedSteps
-        const curIter = iterState.currentIteration;
-        const iterStepNames = phase.steps.map(s => curIter >= 2 ? `${s.name}-迭代${curIter}` : s.name);
-        const allCompleted = iterStepNames.every(n => this.completedStepNames.includes(n));
+    // Determine starting iteration - always check if current iteration is complete
+    if (iterState.currentIteration >= 1) {
+      // Check if all steps of the current iteration are in completedSteps
+      const curIter = iterState.currentIteration;
+      const iterStepNames = phase.steps.map(s => curIter >= 2 ? `${s.name}-迭代${curIter}` : s.name);
+      const allCompleted = iterStepNames.every(n => this.completedStepNames.includes(n));
+      if (isSubsequentIteration) {
+        // Called from checkpoint "iterate" — start next iteration if current is complete
         startIter = allCompleted ? curIter + 1 : curIter;
+        console.log(`[iterPhase] Subsequent iteration: currentIter=${curIter}, allCompleted=${allCompleted}, starting at iter=${startIter}`);
       } else {
-        startIter = 1;
+        // Resume from where we left off
+        startIter = allCompleted ? curIter + 1 : curIter;
+        console.log(`[iterPhase] Resume: currentIter=${curIter}, allCompleted=${allCompleted}, starting at iter=${startIter}`);
       }
+    } else {
+      startIter = 1;
+      console.log(`[iterPhase] Fresh start: starting at iter=1`);
     }
 
     // Main iteration loop — execute steps in workflow.yaml order
@@ -989,7 +1220,7 @@ class WorkflowManager extends EventEmitter {
     }
 
     // Build main prompt that coordinates sub-agents
-    const mainPrompt = this.buildPrompt(step, workflowConfig, roleConfig, previousOutputs);
+    const mainPrompt = await this.buildPrompt(step, workflowConfig, roleConfig, previousOutputs);
     const coordinatorPrompt = `${mainPrompt}\n\n# 专家模式说明\n你现在处于专家模式。你有 ${subAgentNames.length} 个专家子 Agent 可以调用：\n\n${subAgentNames.map(name => `- @${name}: ${subAgents[name].description}`).join('\n')}\n\n请使用 @agent-name 语法调用这些专家，收集他们的分析结果，最后汇总形成综合结论。`;
 
     const processId = `${step.agent}-${step.name}-${Date.now()}`;
@@ -1012,7 +1243,7 @@ class WorkflowManager extends EventEmitter {
     processManager.on('stream', streamHandler);
 
     try {
-      const result = await processManager.executeClaudeCli(
+      const result = await this.executeWithEngine(
         processId,
         step.agent,
         step.name,
@@ -1061,7 +1292,7 @@ class WorkflowManager extends EventEmitter {
       } catch { /* non-critical */ }
     }
 
-    const prompt = this.buildPrompt(step, workflowConfig, roleConfig, previousOutputs);
+    const prompt = await this.buildPrompt(step, workflowConfig, roleConfig, previousOutputs);
     const processId = `${step.agent}-${step.name}-${Date.now()}`;
 
     // Check for existing session to resume (iterative phases)
@@ -1102,7 +1333,7 @@ class WorkflowManager extends EventEmitter {
       while (true) {
         let result: ClaudeJsonResult;
         try {
-          result = await processManager.executeClaudeCli(
+          result = await this.executeWithEngine(
             currentProcessId,
             step.agent,
             step.name,
@@ -1211,12 +1442,12 @@ class WorkflowManager extends EventEmitter {
     }
   }
 
-  buildPrompt(
+  async buildPrompt(
     step: WorkflowStep,
     workflowConfig: WorkflowConfig,
     roleConfig: RoleConfig,
     previousOutputs?: Record<string, string>
-  ): string {
+  ): Promise<string> {
     let prompt = `# 任务\n${step.task}\n\n`;
 
     if (workflowConfig.context.requirements) {
@@ -1247,12 +1478,54 @@ class WorkflowManager extends EventEmitter {
       }
     }
 
-    // Inject workspace skills (from projectRoot/.claude/skills/)
-    if (this.workspaceSkills) {
+    // Collect all skills: workspace + workflow + step-level, then merge and deduplicate
+    const allSkillNames = new Set<string>();
+
+    // 1. Workspace skills (already loaded and tracked)
+    this.workspaceSkillNames.forEach(name => allSkillNames.add(name));
+
+    // 2. Workflow-level skills (from context.skills)
+    if (workflowConfig.context.skills) {
+      workflowConfig.context.skills.forEach(name => allSkillNames.add(name));
+    }
+
+    // 3. Step-level skills (from step.skills)
+    if (step.skills) {
+      step.skills.forEach(name => allSkillNames.add(name));
+    }
+
+    // Load all skills content
+    if (allSkillNames.size > 0) {
       prompt += `## 必须使用的 Skills\n\n`;
-      prompt += `**重要：以下 Skills 是项目工作区预定义的工具（构建、测试、知识库等），你必须优先使用这些 Skills 来完成对应任务，而不是自己猜测命令或自行编写脚本。**\n\n`;
-      prompt += `请仔细阅读每个 Skill 的使用说明，按照其中的命令格式和参数要求执行。\n\n`;
-      prompt += this.workspaceSkills;
+      prompt += `⚠️ **重要提醒：以下 Skills 是本步骤/项目的核心工具，你必须严格遵循以下原则：**\n\n`;
+      prompt += `1. **优先阅读 Skills**：在执行任何任务前，请务必仔细阅读下方所有 Skills 的说明文档\n`;
+      prompt += `2. **使用 Skills 中的命令**：直接使用 Skills 中提供的命令格式和参数，**严禁**自行猜测命令或随意修改参数\n`;
+      prompt += `3. **Skills 包含最佳实践**：每个 Skill 都经过验证，代表了该领域的最佳实践，偏离 Skill 指导可能导致错误或性能问题\n`;
+      prompt += `4. **遇到问题先查 Skills**：如果遇到构建、测试、部署等问题，请首先检查是否有对应的 Skill 可用\n\n`;
+      prompt += `### 如何使用 Skills\n\n`;
+      prompt += `- **阅读 SKILL.md**：每个 Skill 目录下的 SKILL.md 包含完整使用说明\n`;
+      prompt += `- **查看 REFERENCE.md**：如需更多参数说明，参考同目录下的 REFERENCE.md\n`;
+      prompt += `- **复制粘贴命令**：直接使用 Skill 中给出的示例命令，确保参数格式正确\n\n`;
+
+      // Load and inject workspace skills content first (already cached)
+      if (this.workspaceSkills) {
+        prompt += this.workspaceSkills;
+      }
+
+      // Load workflow-level and step-level skills that are not in workspace
+      const additionalSkills = [...allSkillNames].filter(
+        name => !this.workspaceSkillNames.has(name)
+      );
+
+      if (additionalSkills.length > 0) {
+        const additionalSkillsContent = await this.loadStepSkills(
+          additionalSkills,
+          workflowConfig.context.projectRoot || ''
+        );
+        if (additionalSkillsContent) {
+          prompt += additionalSkillsContent;
+        }
+      }
     }
 
     if (roleConfig.capabilities && roleConfig.capabilities.length > 0) {
@@ -1557,6 +1830,14 @@ class WorkflowManager extends EventEmitter {
         agent.status = 'failed';
       }
     }
+    // Cancel current engine if using alternative engine
+    if (this.currentEngine) {
+      try {
+        this.currentEngine.cancel();
+      } catch (error) {
+        this.emit('log', `引擎取消失败: ${error}`);
+      }
+    }
     // Kill managed processes + orphan system claude processes
     await processManager.killAllSystem();
     // Small delay to let close events fire
@@ -1657,12 +1938,26 @@ class WorkflowManager extends EventEmitter {
     console.log(`[WorkflowManager.resume] completedSteps=`, this.completedStepNames);
     console.log(`[WorkflowManager.resume] iterationStates=`, JSON.stringify(runState.iterationStates));
 
+    // Initialize engine
+    await this.initializeEngine();
+
     // Load agent configs
     this.agentConfigs = await this.loadAgentConfigs();
 
     // Discover workspace skills from projectRoot/.claude/skills/
     if (workflowConfig.context.projectRoot) {
       this.workspaceSkills = await this.discoverWorkspaceSkills(workflowConfig.context.projectRoot);
+
+      // Load workflow-level skills from context.skills
+      if (workflowConfig.context.skills && workflowConfig.context.skills.length > 0) {
+        this.workflowSkillsContent = await this.loadWorkflowSkills(
+          workflowConfig.context.skills,
+          workflowConfig.context.projectRoot
+        );
+      }
+    } else {
+      this.workspaceSkills = '';
+      this.workflowSkillsContent = '';
     }
 
     this.initializeAgents(workflowConfig);

@@ -5,7 +5,7 @@ tags:
   - 测试
   - 质量保证
   - 自动化测试
-model: glm-5
+model: claude-sonnet-4-5-20250929
 temperature: 0.3
 allowedTools:
   - Bash

@@ -5,7 +5,7 @@ tags:
   - 压力测试
   - 稳定性测试
   - 极限测试
-model: glm-5
+model: claude-sonnet-4-5-20250929
 temperature: 0.8
 allowedTools:
   - Bash
