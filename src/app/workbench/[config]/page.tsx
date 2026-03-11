@@ -38,6 +38,14 @@ export default function WorkbenchPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const configFile = decodeURIComponent(params.config as string);
+
+  // 格式化状态名称
+  const formatStateName = (name: string) => {
+    if (name === '__origin__') return '开始';
+    if (name === '__human_approval__') return '人工审查';
+    return name;
+  };
+
   const initialMode = (searchParams.get('mode') as ViewMode) || 'run';
   const initialRunId = searchParams.get('run');
 
@@ -72,6 +80,8 @@ export default function WorkbenchPage() {
   const [smStateHistory, setSmStateHistory] = useState<any[]>([]);
   const [smIssueTracker, setSmIssueTracker] = useState<any[]>([]);
   const [smTransitionCount, setSmTransitionCount] = useState(0);
+  const [runStartTime, setRunStartTime] = useState<string | null>(null);
+  const [runEndTime, setRunEndTime] = useState<string | null>(null);
   const [humanApprovalData, setHumanApprovalData] = useState<{
     currentState: string;
     nextState: string;
@@ -183,6 +193,23 @@ export default function WorkbenchPage() {
           Object.entries(status.iterationStates).forEach(([phase, iterState]) => {
             dispatch({ type: 'SET_ITERATION_STATE', payload: { phase, state: iterState as any } });
           });
+        }
+
+        // Restore state machine specific data
+        if (status.stateHistory) {
+          setSmStateHistory(status.stateHistory);
+        }
+        if (status.issueTracker) {
+          setSmIssueTracker(status.issueTracker);
+        }
+        if (status.transitionCount !== undefined) {
+          setSmTransitionCount(status.transitionCount);
+        }
+        if (status.startTime) {
+          setRunStartTime(status.startTime);
+        }
+        if (status.endTime) {
+          setRunEndTime(status.endTime);
         }
       }
     } catch { /* server might not be ready */ }
@@ -417,6 +444,8 @@ export default function WorkbenchPage() {
       case 'status':
         dispatch({ type: 'SET_WORKFLOW_STATUS', payload: event.data.status });
         if (event.data.runId) dispatch({ type: 'SET_RUN_ID', payload: event.data.runId });
+        if (event.data.startTime) setRunStartTime(event.data.startTime);
+        if (event.data.endTime) setRunEndTime(event.data.endTime);
         addLog('system', 'info', event.data.message);
         break;
       case 'phase':
@@ -1087,7 +1116,8 @@ export default function WorkbenchPage() {
 
     // If currentStep matches this base step, prefer it (it's the active iteration)
     // Return currentStep even if stepResults doesn't have it yet (for running steps)
-    if (currentStep && (currentStep === effectiveBase || currentStep.startsWith(effectiveBase + '-迭代'))) {
+    if (currentStep && (currentStep === effectiveBase || currentStep.startsWith(effectiveBase + '-迭代')
+      || currentStep.endsWith('-' + effectiveBase))) {
       return currentStep;
     }
 
@@ -1661,7 +1691,9 @@ export default function WorkbenchPage() {
                             status={workflowStatus as any}
                             isRunning={isRunning}
                             focusedState={focusedState}
-                            onStateClick={(s) => dispatch({ type: 'SET_CURRENT_PHASE', payload: s })}
+                            startTime={runStartTime}
+                            endTime={runEndTime}
+                            onStateClick={(s) => setFocusedState(s)}
                             onStepClick={(step) => selectStep(step)}
                             onForceTransition={handleForceTransition}
                           />
@@ -1690,6 +1722,7 @@ export default function WorkbenchPage() {
                   const stepResult = selectedStep ? stepResults[stepKey] : null;
                   const isCurrentStepRunning = selectedStep && isRunning && (
                     currentStep === selectedStep.name || currentStep?.startsWith(selectedStep.name + '-迭代')
+                    || currentStep?.endsWith('-' + selectedStep.name)
                   );
                   // For steps with iteration suffix (e.g. "设计修复方案-迭代2"), also check the base name
                   // in completedSteps/failedSteps, since FlowDiagram marks non-last rounds as completed
@@ -1935,7 +1968,7 @@ export default function WorkbenchPage() {
                     等待步骤开始执行...
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
-                    当前状态: {currentPhase || '未知'}
+                    当前状态: {formatStateName(currentPhase || '') || '未知'}
                   </div>
                 </div>
               )}
@@ -2255,7 +2288,7 @@ export default function WorkbenchPage() {
           <div className="p-5 border-b"><h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">person</span>人工检查点</h3></div>
           <div className="p-5"><p className="text-sm mb-4 leading-relaxed">{checkpointMessage}</p>
             <div className="bg-muted p-4 rounded-md border-l-[3px] border-l-yellow-500 mb-4">
-              <p className="text-sm text-muted-foreground mb-2">当前阶段: <strong className="text-foreground">{currentPhase}</strong></p>
+              <p className="text-sm text-muted-foreground mb-2">当前阶段: <strong className="text-foreground">{formatStateName(currentPhase || '')}</strong></p>
               <p className="text-sm text-muted-foreground">请审查工作成果，决定是否继续执行</p>
             </div>
             {checkpointIsIterative && (

@@ -28,6 +28,8 @@ interface StateMachineRuntimePanelProps {
   transitionCount: number;
   maxTransitions: number;
   status: 'idle' | 'running' | 'completed' | 'failed';
+  startTime?: string | null;
+  endTime?: string | null;
 }
 
 export default function StateMachineRuntimePanel({
@@ -37,13 +39,18 @@ export default function StateMachineRuntimePanel({
   transitionCount,
   maxTransitions,
   status,
+  startTime,
+  endTime,
 }: StateMachineRuntimePanelProps) {
   const [selectedTransition, setSelectedTransition] = useState<StateTransitionRecord | null>(null);
 
+  // 过滤掉空描述的问题
+  const validIssues = issueTracker.filter(i => i.description?.trim());
+
   // 统计数据
-  const criticalIssues = issueTracker.filter(i => i.severity === 'critical').length;
-  const majorIssues = issueTracker.filter(i => i.severity === 'major').length;
-  const minorIssues = issueTracker.filter(i => i.severity === 'minor').length;
+  const criticalIssues = validIssues.filter(i => i.severity === 'critical').length;
+  const majorIssues = validIssues.filter(i => i.severity === 'major').length;
+  const minorIssues = validIssues.filter(i => i.severity === 'minor').length;
 
   // 状态访问次数统计
   const stateVisits = stateHistory.reduce((acc, record) => {
@@ -107,7 +114,7 @@ export default function StateMachineRuntimePanel({
             <span className="text-sm font-medium text-gray-600 dark:text-gray-400">发现问题</span>
           </div>
           <div className="text-2xl font-bold">
-            {issueTracker.length}
+            {validIssues.length}
           </div>
           <div className="flex gap-2 mt-2 text-xs">
             {criticalIssues > 0 && (
@@ -135,7 +142,7 @@ export default function StateMachineRuntimePanel({
             <span className="text-sm font-medium text-gray-600 dark:text-gray-400">执行时间</span>
           </div>
           <div className="text-2xl font-bold">
-            <LiveTimer status={status} />
+            <LiveTimer status={status} startTime={startTime} endTime={endTime} />
           </div>
           <div className="text-xs text-gray-500 mt-2">
             {status === 'completed' ? '已完成' : status === 'running' ? '进行中' : '待开始'}
@@ -223,17 +230,17 @@ export default function StateMachineRuntimePanel({
               <AlertTriangle className="w-5 h-5 text-orange-500" />
               问题追踪
             </h3>
-            <Badge variant="outline">{issueTracker.length} 个问题</Badge>
+            <Badge variant="outline">{validIssues.length} 个问题</Badge>
           </div>
 
           <div className="space-y-2 max-h-[400px] overflow-y-auto">
-            {issueTracker.length === 0 ? (
+            {validIssues.length === 0 ? (
               <div className="text-center py-8">
                 <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-2" />
                 <p className="text-sm text-gray-500">暂未发现问题</p>
               </div>
             ) : (
-              issueTracker.slice().reverse().map((issue, idx) => (
+              validIssues.slice().reverse().map((issue, idx) => (
                 <div
                   key={idx}
                   className="p-3 rounded-lg border border-gray-200 dark:border-gray-700"
@@ -290,7 +297,7 @@ export default function StateMachineRuntimePanel({
                   key={state}
                   className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700"
                 >
-                  <div className="text-sm font-medium mb-1">{state}</div>
+                  <div className="text-sm font-medium mb-1">{formatStateName(state)}</div>
                   <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
                     {count}
                   </div>
@@ -310,9 +317,9 @@ export default function StateMachineRuntimePanel({
             <div>
               <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">转移路径</div>
               <div className="flex items-center gap-2 text-lg font-semibold">
-                <span>{selectedTransition.from}</span>
+                <span>{formatStateName(selectedTransition.from)}</span>
                 <ArrowRight className="w-5 h-5 text-gray-400" />
-                <span className="text-blue-600 dark:text-blue-400">{selectedTransition.to}</span>
+                <span className="text-blue-600 dark:text-blue-400">{formatStateName(selectedTransition.to)}</span>
               </div>
             </div>
 
@@ -356,18 +363,30 @@ export default function StateMachineRuntimePanel({
 }
 
 // 实时计时器组件
-function LiveTimer({ status }: { status: string }) {
+function LiveTimer({ status, startTime, endTime }: { status: string; startTime?: string | null; endTime?: string | null }) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (status !== 'running') return;
+    // 计算初始已运行时间
+    if (startTime) {
+      const start = new Date(startTime).getTime();
+      const end = endTime ? new Date(endTime).getTime() : Date.now();
+      const initialElapsed = Math.floor((end - start) / 1000);
+      setElapsed(initialElapsed);
+    }
+
+    // 如果正在运行，每秒更新
+    if (status !== 'running' || !startTime) return;
 
     const interval = setInterval(() => {
-      setElapsed(prev => prev + 1);
+      const start = new Date(startTime).getTime();
+      const now = Date.now();
+      const currentElapsed = Math.floor((now - start) / 1000);
+      setElapsed(currentElapsed);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [status]);
+  }, [status, startTime, endTime]);
 
   const minutes = Math.floor(elapsed / 60);
   const seconds = elapsed % 60;

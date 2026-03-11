@@ -19,6 +19,11 @@ models:
     costMultiplier: 0.18
     endpoints:
       - anthropic
+  - value: claude-sonnet-4.5
+    label: Claude Sonnet 4.5 Kiro
+    costMultiplier: 0.1
+    endpoints:
+      - anthropic
   - value: glm-5
     label: GLM-5
     costMultiplier: 0.02
@@ -47,4 +52,3 @@ models:
     costMultiplier: 0.05
     endpoints:
       - openai
-

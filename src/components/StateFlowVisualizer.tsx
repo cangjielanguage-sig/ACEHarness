@@ -285,7 +285,7 @@ export default function StateFlowVisualizer({
                 key={state}
                 className="p-3 rounded-lg bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950 border border-blue-200 dark:border-blue-800"
               >
-                <div className="text-sm font-medium mb-1">{state}</div>
+                <div className="text-sm font-medium mb-1">{formatStateName(state)}</div>
                 <div className="flex items-center gap-2">
                   <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                     <div

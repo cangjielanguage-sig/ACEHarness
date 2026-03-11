@@ -24,6 +24,8 @@ interface StateMachineExecutionViewProps {
   status: 'idle' | 'running' | 'completed' | 'failed';
   isRunning?: boolean;
   focusedState?: string | null; // 新增：用于视图跳转
+  startTime?: string | null;
+  endTime?: string | null;
 
   // 回调
   onStateClick?: (stateName: string) => void;
@@ -43,6 +45,8 @@ export default function StateMachineExecutionView({
   status,
   isRunning = false,
   focusedState,
+  startTime,
+  endTime,
   onStateClick,
   onStepClick,
   onForceTransition,
@@ -82,6 +86,8 @@ export default function StateMachineExecutionView({
               transitionCount={transitionCount}
               maxTransitions={maxTransitions}
               status={status}
+              startTime={startTime}
+              endTime={endTime}
             />
 
             {/* 快速流转预览 */}

@@ -70,6 +70,10 @@ export interface PersistedRunState {
     checkpoint: string;
     message: string;
     isIterativePhase: boolean;
+    /** State machine: suggested next state for human approval */
+    suggestedNextState?: string;
+    /** State machine: available states to choose from */
+    availableStates?: string[];
   };
   globalContext?: string;
   phaseContexts?: Record<string, string>;

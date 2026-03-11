@@ -212,19 +212,19 @@ function StateNode({ data }: any) {
       {/* 步骤列表 */}
       <div className="space-y-0.5 mt-1.5">
         {state.steps.map((step: any, idx: number) => {
-          const isDone = completedSteps.includes(step.name);
-          const isRunning = currentStep === step.name;
+          const isDone = completedSteps.includes(step.name) || completedSteps.includes(`${state.name}-${step.name}`);
+          const isRunningStep = currentStep === step.name || currentStep === `${state.name}-${step.name}`;
           return (
             <div
               key={idx}
               onClick={(e) => { e.stopPropagation(); onStepClick?.(step); }}
               className={`
                 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] cursor-pointer transition-colors
-                ${isRunning ? 'bg-blue-500 text-white' : isDone ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'}
+                ${isRunningStep ? 'bg-blue-500 text-white' : isDone ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'}
               `}
             >
               <span className="material-symbols-outlined" style={{ fontSize: 11 }}>
-                {isRunning ? 'play_arrow' : isDone ? 'check_circle' : step.role === 'attacker' ? 'swords' : step.role === 'judge' ? 'gavel' : 'shield'}
+                {isRunningStep ? 'play_arrow' : isDone ? 'check_circle' : step.role === 'attacker' ? 'swords' : step.role === 'judge' ? 'gavel' : 'shield'}
               </span>
               <span className="truncate flex-1">{step.name}</span>
             </div>

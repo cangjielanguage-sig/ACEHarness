@@ -41,6 +41,12 @@ interface WorkflowStatusResponse {
   iterationStates: Record<string, any>;
   globalContext?: string;
   phaseContexts?: Record<string, string>;
+  // State machine specific fields
+  stateHistory?: any[];
+  issueTracker?: any[];
+  transitionCount?: number;
+  startTime?: string | null;
+  endTime?: string | null;
 }
 
 interface RunRecord {

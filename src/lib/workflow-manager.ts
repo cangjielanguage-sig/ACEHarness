@@ -1642,6 +1642,10 @@ class WorkflowManager extends EventEmitter {
         // Reset status to 'running' so resume won't skip this phase
         iterState.status = 'running';
         iterState.consecutiveCleanRounds = 0;
+        // Ensure at least one more iteration is allowed
+        if (iterState.currentIteration >= iterState.maxIterations) {
+          iterState.maxIterations = iterState.currentIteration + 1;
+        }
         this.iterationStates.set(this.currentPhase, iterState);
       }
     }

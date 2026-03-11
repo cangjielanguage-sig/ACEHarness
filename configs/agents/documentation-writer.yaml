@@ -6,7 +6,7 @@ tags:
   - 编写
   - 技术写作
   - 整理
-model: claude-sonnet-4-5-20250929
+model: claude-sonnet-4.5
 temperature: 0.6
 allowedTools:
   - Bash

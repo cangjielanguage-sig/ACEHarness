@@ -86,9 +86,12 @@ export class KiroCliEngine extends EventEmitter {
    * Start the Kiro CLI process and initialize connection
    */
   async start(): Promise<void> {
-    const args = ['acp'];
+    const args = ['acp', '-a'];
     if (this.options.agentName) {
       args.push('--agent', this.options.agentName);
+    }
+    if (this.options.model) {
+      args.push('--model', this.options.model);
     }
 
     this.process = spawn('kiro-cli', args, {
@@ -108,7 +111,9 @@ export class KiroCliEngine extends EventEmitter {
 
     // Handle stderr (logs)
     this.process.stderr.on('data', (data: Buffer) => {
-      this.emit('log', data.toString());
+      const msg = data.toString();
+      console.error(`[KiroCli stderr] ${msg.trim()}`);
+      this.emit('log', msg);
     });
 
     // Handle process exit
@@ -167,10 +172,21 @@ export class KiroCliEngine extends EventEmitter {
     const result = await this.sendRequest('session/new', params);
     this.sessionId = result.sessionId;
 
+    // Check if requested model is available
+    if (this.options.model && result.models?.availableModels) {
+      const available = result.models.availableModels.map((m: any) => m.modelId);
+      if (!available.includes(this.options.model)) {
+        const actual = result.models.currentModelId || 'auto';
+        console.warn(`[KiroCli] 请求的模型 "${this.options.model}" 不在可用列表中 [${available.join(', ')}]，实际使用: ${actual}`);
+        this.emit('log', `⚠️ 模型 "${this.options.model}" 不可用，回退到 ${actual}。可用模型: ${available.join(', ')}`);
+      }
+    }
+
     this.emit('session-created', {
       sessionId: this.sessionId,
       configOptions: result.configOptions,
       modes: result.modes,
+      models: result.models,
     });
 
     return this.sessionId!;
@@ -253,7 +269,7 @@ export class KiroCliEngine extends EventEmitter {
   /**
    * Send a JSON-RPC request
    */
-  private sendRequest(method: string, params: any): Promise<any> {
+  private sendRequest(method: string, params: any, timeoutMs?: number): Promise<any> {
     return new Promise((resolve, reject) => {
       const id = this.requestId++;
       const request = {
@@ -273,13 +289,14 @@ export class KiroCliEngine extends EventEmitter {
       const message = JSON.stringify(request) + '\n';
       this.process.stdin.write(message);
 
-      // Timeout after 30 seconds
+      // Default 30s for control requests, much longer for prompt execution
+      const timeout = timeoutMs || (method === 'session/prompt' ? 3600000 : 30000);
       setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
           reject(new Error(`Request timeout: ${method}`));
         }
-      }, 30000);
+      }, timeout);
     });
   }
 
@@ -332,7 +349,11 @@ export class KiroCliEngine extends EventEmitter {
         this.pendingRequests.delete(message.id);
 
         if (message.error) {
-          pending.reject(new Error(message.error.message || 'Unknown error'));
+          const errMsg = message.error.message || 'Unknown error';
+          const errData = message.error.data ? ` | data: ${JSON.stringify(message.error.data)}` : '';
+          const errCode = message.error.code ? ` (code: ${message.error.code})` : '';
+          console.error(`[KiroCli] JSON-RPC error for request ${message.id}: ${errMsg}${errCode}${errData}`);
+          pending.reject(new Error(`${errMsg}${errCode}${errData}`));
         } else {
           pending.resolve(message.result);
         }

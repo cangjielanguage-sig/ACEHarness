@@ -8,7 +8,7 @@ workflow:
     - name: 设计方案
       description: 设计 mimalloc 集成技术方案（已完成）
       requireHumanApproval: true
-      isInitial: true
+      isInitial: false
       isFinal: false
       position:
         x: 100
@@ -138,8 +138,7 @@ workflow:
 
     - name: 功能验证
       description: 验证 mimalloc 集成的基本功能
-      requireHumanApproval: true
-      isInitial: false
+      isInitial: true
       isFinal: false
       position:
         x: 500
