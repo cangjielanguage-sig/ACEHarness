@@ -14,7 +14,9 @@ import QuickActions, { QuickActionsBar } from '@/components/chat/QuickActions';
 export default function ChatPage() {
   const router = useRouter();
   const {
-    activeSession, sessions, createSession, sendMessage, loading,
+    activeSession, sessions, createSession, sendMessage, stopStreaming,
+    deleteMessage, retryFromMessage,
+    loading, streamingMessageId,
     model, setModel, confirmAction, rejectAction, undoActionById, retryAction,
     skillSettings,
   } = useChat();
@@ -118,24 +120,16 @@ export default function ChatPage() {
             <ChatMessage
               key={msg.id}
               message={msg}
+              isStreaming={msg.id === streamingMessageId}
               onConfirmAction={(actionId) => confirmAction(msg.id, actionId)}
               onRejectAction={(actionId) => rejectAction(msg.id, actionId)}
               onUndoAction={(actionId) => undoActionById(msg.id, actionId)}
               onRetryAction={(actionId) => retryAction(msg.id, actionId)}
               onAction={handleQuickAction}
+              onDelete={deleteMessage}
+              onRetryFromMessage={msg.role === 'user' ? retryFromMessage : undefined}
             />
           ))}
-          {loading && (
-            <div className="flex mb-4">
-              <div className="rounded-2xl rounded-bl-sm px-4 py-3 bg-muted">
-                <div className="flex gap-1 text-muted-foreground">
-                  <span className="animate-bounce">●</span>
-                  <span className="animate-bounce" style={{ animationDelay: '0.1s' }}>●</span>
-                  <span className="animate-bounce" style={{ animationDelay: '0.2s' }}>●</span>
-                </div>
-              </div>
-            </div>
-          )}
           <div ref={messagesEndRef} />
         </div>
 
@@ -155,9 +149,15 @@ export default function ChatPage() {
               rows={1}
               disabled={loading}
             />
-            <Button className="rounded-xl h-[42px] px-4" onClick={handleSend} disabled={loading || !input.trim()}>
-              <span className="material-symbols-outlined text-lg">send</span>
-            </Button>
+            {loading ? (
+              <Button className="rounded-xl h-[42px] px-4" variant="destructive" onClick={stopStreaming} title="停止生成">
+                <span className="material-symbols-outlined text-lg">stop</span>
+              </Button>
+            ) : (
+              <Button className="rounded-xl h-[42px] px-4" onClick={handleSend} disabled={!input.trim()}>
+                <span className="material-symbols-outlined text-lg">send</span>
+              </Button>
+            )}
           </div>
         </div>
       </div>

@@ -50,7 +50,11 @@ interface DashboardChatContextType {
   renameSession: (id: string, title: string) => void;
   setActiveSessionId: (id: string) => void;
   sendMessage: (text: string) => Promise<void>;
+  stopStreaming: () => void;
+  deleteMessage: (messageId: string) => void;
+  retryFromMessage: (messageId: string) => void;
   loading: boolean;
+  streamingMessageId: string | null;
   model: string;
   setModel: (m: string) => void;
   confirmAction: (messageId: string, actionId: string) => Promise<void>;
@@ -67,7 +71,9 @@ const DashboardChatContext = createContext<DashboardChatContextType>({
   sessions: [], activeSessionId: null, activeSession: null,
   createSession: () => '', deleteSession: () => {}, renameSession: () => {},
   setActiveSessionId: () => {},
-  sendMessage: async () => {}, loading: false,
+  sendMessage: async () => {}, stopStreaming: () => {},
+  deleteMessage: () => {}, retryFromMessage: () => {},
+  loading: false, streamingMessageId: null,
   model: 'claude-sonnet-4-6', setModel: () => {},
   confirmAction: async () => {}, rejectAction: () => {},
   undoActionById: async () => {}, retryAction: async () => {},
@@ -124,6 +130,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<ChatSession | null>(null);
   const [loading, setLoading] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [model, setModel] = useState('claude-sonnet-4-6');
   const [skillSettings, setSkillSettings] = useState<Record<string, boolean>>({ 'power-gitcode': true });
   const [discoveredSkills, setDiscoveredSkills] = useState<{ name: string; label: string; description: string }[]>([]);
@@ -151,6 +158,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Debounced save ref
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeSessionRef = useRef<ChatSession | null>(null);
+  const activeEventSourceRef = useRef<EventSource | null>(null);
+  const activeChatIdRef = useRef<string | null>(null);
   activeSessionRef.current = activeSession;
 
   // Load session list on mount
@@ -166,6 +175,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (!activeSessionId) { setActiveSession(null); return; }
     // If we already have it loaded (e.g. just created), skip
     if (activeSession?.id === activeSessionId) return;
+    // Close any active stream and reset loading state
+    if (activeEventSourceRef.current) {
+      activeEventSourceRef.current.close();
+      activeEventSourceRef.current = null;
+    }
+    setLoading(false);
+    setStreamingMessageId(null);
     apiLoadSession(activeSessionId).then(s => setActiveSession(s));
   }, [activeSessionId]);
 
@@ -275,55 +291,90 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
       }
     }
-    // Feed results back to AI for analysis and follow-up suggestions
+    // Feed results back to AI for analysis via streaming
     if (results.length > 0) {
       const summary = results.map(r => {
         const json = JSON.stringify(r.data, null, 2);
-        // Truncate large results to avoid token explosion
         const truncated = json.length > 4000 ? json.slice(0, 4000) + '\n...(truncated)' : json;
         return `[${r.type} 结果]:\n${truncated}`;
       }).join('\n\n');
       const followUpPrompt = `以下是刚才自动执行的操作返回的数据，请根据这些数据用 \`\`\`card 代码块生成结构化的可视化分析卡片，并在卡片的 actions 中给出 2-3 个上下文相关的后续操作建议：\n\n${summary}`;
 
+      const followUpMsgId = genId();
+      const followUpMsg: ChatMessage = {
+        id: followUpMsgId, role: 'assistant', content: '', timestamp: Date.now(),
+      };
+      updateActiveSession(s => ({ ...s, updatedAt: Date.now(), messages: [...s.messages, followUpMsg] }));
       setLoading(true);
+      setStreamingMessageId(followUpMsgId);
+
       try {
         const backendSid = activeSessionRef.current?.backendSessionId;
-        const res = await fetch('/api/chat', {
+        const startRes = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: followUpPrompt,
-            model,
-            sessionId: backendSid || undefined,
-            mode: 'dashboard',
-          }),
+          body: JSON.stringify({ message: followUpPrompt, model, sessionId: backendSid || undefined, mode: 'dashboard' }),
         });
-        const data = await res.json();
-        if (res.ok && !data.error) {
-          if (data.sessionId) {
-            updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
-          }
-          const { text: cleanText, actions: newActions, cards: newCards } = parseActions(data.result || '');
-          const newActionStates: ActionState[] = newActions.map(a => ({
-            id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
-          }));
-          const followUpMsg: ChatMessage = {
-            id: genId(), role: 'assistant', content: cleanText,
-            actions: newActionStates.length > 0 ? newActionStates : undefined,
-            cards: newCards.length > 0 ? newCards : undefined,
-            timestamp: Date.now(),
-          };
-          updateActiveSession(s => ({ ...s, updatedAt: Date.now(), messages: [...s.messages, followUpMsg] }));
-          if (newActionStates.length > 0) {
-            autoExecuteSafeActions(followUpMsg.id, newActionStates);
-          }
-        }
+        const { chatId } = await startRes.json();
+        if (!chatId) throw new Error('Failed to start stream');
+        activeChatIdRef.current = chatId;
+
+        await new Promise<void>((resolve, reject) => {
+          const es = new EventSource(`/api/chat/stream?id=${chatId}`);
+          activeEventSourceRef.current = es;
+          let accumulated = '';
+
+          es.addEventListener('delta', (e) => {
+            const { content } = JSON.parse(e.data);
+            accumulated += content;
+            updateActiveSession(s => ({
+              ...s, messages: s.messages.map(m => m.id === followUpMsgId ? { ...m, content: accumulated } : m),
+            }));
+          });
+
+          es.addEventListener('done', (e) => {
+            const data = JSON.parse(e.data);
+            es.close();
+            activeEventSourceRef.current = null;
+            activeChatIdRef.current = null;
+            if (data.sessionId) {
+              updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
+            }
+            const fullText = data.result || accumulated;
+            const { text: cleanText, actions: newActions, cards: newCards } = parseActions(fullText);
+            const newActionStates: ActionState[] = newActions.map(a => ({
+              id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
+            }));
+            updateActiveSession(s => ({
+              ...s, updatedAt: Date.now(),
+              messages: s.messages.map(m => m.id === followUpMsgId ? {
+                ...m, content: cleanText,
+                actions: newActionStates.length > 0 ? newActionStates : undefined,
+                cards: newCards.length > 0 ? newCards : undefined,
+              } : m),
+            }));
+            if (newActionStates.length > 0) {
+              autoExecuteSafeActions(followUpMsgId, newActionStates);
+            }
+            resolve();
+          });
+
+          es.addEventListener('error', (e) => {
+            es.close();
+            activeEventSourceRef.current = null;
+            activeChatIdRef.current = null;
+            reject(new Error('Stream error'));
+          });
+
+          es.onerror = () => { es.close(); activeEventSourceRef.current = null; activeChatIdRef.current = null; reject(new Error('SSE connection error')); };
+        });
       } catch { /* follow-up failed silently */ }
       setLoading(false);
+      setStreamingMessageId(null);
     }
   }, [updateAction, model, updateActiveSession]);
 
-  // --- Send message ---
+  // --- Send message (streaming) ---
   const sendMessage = useCallback(async (text: string) => {
     let sid = activeSessionId;
     if (!sid) { sid = createSession(); }
@@ -336,50 +387,93 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       messages: [...s.messages, userMsg],
     }));
 
+    const assistantMsgId = genId();
+    const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', timestamp: Date.now() };
+    updateActiveSession(s => ({ ...s, updatedAt: Date.now(), messages: [...s.messages, assistantMsg] }));
     setLoading(true);
+    setStreamingMessageId(assistantMsgId);
+
     try {
       const backendSid = activeSessionRef.current?.backendSessionId;
-      const res = await fetch('/api/chat', {
+      const startRes = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          model,
-          sessionId: backendSid || undefined,
-          mode: 'dashboard',
-        }),
+        body: JSON.stringify({ message: text, model, sessionId: backendSid || undefined, mode: 'dashboard' }),
       });
-      const data = await res.json();
-
-      if (!res.ok || data.error) {
-        const errMsg: ChatMessage = { id: genId(), role: 'error', content: data.error || `HTTP ${res.status}`, timestamp: Date.now() };
-        updateActiveSession(s => ({ ...s, updatedAt: Date.now(), messages: [...s.messages, errMsg] }));
-      } else {
-        if (data.sessionId) {
-          updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
-        }
-        const { text: cleanText, actions, cards } = parseActions(data.result || '');
-        const actionStates: ActionState[] = actions.map(a => ({
-          id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
+      const startData = await startRes.json();
+      if (!startRes.ok || startData.error) {
+        updateActiveSession(s => ({
+          ...s, updatedAt: Date.now(),
+          messages: s.messages.map(m => m.id === assistantMsgId ? { ...m, role: 'error' as const, content: startData.error || `HTTP ${startRes.status}` } : m),
         }));
-        const assistantMsg: ChatMessage = {
-          id: genId(), role: 'assistant', content: cleanText,
-          actions: actionStates.length > 0 ? actionStates : undefined,
-          cards: cards.length > 0 ? cards : undefined,
-          costUsd: data.costUsd, durationMs: data.durationMs, usage: data.usage,
-          timestamp: Date.now(),
-        };
-        updateActiveSession(s => ({ ...s, updatedAt: Date.now(), messages: [...s.messages, assistantMsg] }));
-
-        if (actionStates.length > 0) {
-          autoExecuteSafeActions(assistantMsg.id, actionStates);
-        }
+        setLoading(false);
+        setStreamingMessageId(null);
+        return;
       }
+
+      const { chatId } = startData;
+      activeChatIdRef.current = chatId;
+      await new Promise<void>((resolve, reject) => {
+        const es = new EventSource(`/api/chat/stream?id=${chatId}`);
+        activeEventSourceRef.current = es;
+        let accumulated = '';
+
+        es.addEventListener('delta', (e) => {
+          const { content } = JSON.parse(e.data);
+          accumulated += content;
+          updateActiveSession(s => ({
+            ...s, messages: s.messages.map(m => m.id === assistantMsgId ? { ...m, content: accumulated } : m),
+          }));
+        });
+
+        es.addEventListener('done', (e) => {
+          const data = JSON.parse(e.data);
+          es.close();
+          activeEventSourceRef.current = null;
+          activeChatIdRef.current = null;
+          if (data.sessionId) {
+            updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
+          }
+          const fullText = data.result || accumulated;
+          const { text: cleanText, actions, cards } = parseActions(fullText);
+          const actionStates: ActionState[] = actions.map(a => ({
+            id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
+          }));
+          updateActiveSession(s => ({
+            ...s, updatedAt: Date.now(),
+            messages: s.messages.map(m => m.id === assistantMsgId ? {
+              ...m, content: cleanText,
+              actions: actionStates.length > 0 ? actionStates : undefined,
+              cards: cards.length > 0 ? cards : undefined,
+              costUsd: data.costUsd, durationMs: data.durationMs, usage: data.usage,
+            } : m),
+          }));
+          if (actionStates.length > 0) {
+            autoExecuteSafeActions(assistantMsgId, actionStates);
+          }
+          resolve();
+        });
+
+        es.addEventListener('error', () => {
+          es.close();
+          activeEventSourceRef.current = null;
+          activeChatIdRef.current = null;
+          reject(new Error('Stream error'));
+        });
+
+        es.onerror = () => { es.close(); activeEventSourceRef.current = null; activeChatIdRef.current = null; reject(new Error('SSE connection error')); };
+      });
     } catch (err: any) {
-      const errMsg: ChatMessage = { id: genId(), role: 'error', content: err.message || '请求失败', timestamp: Date.now() };
-      updateActiveSession(s => ({ ...s, updatedAt: Date.now(), messages: [...s.messages, errMsg] }));
+      // If the assistant message is still empty, convert to error
+      updateActiveSession(s => ({
+        ...s, updatedAt: Date.now(),
+        messages: s.messages.map(m => m.id === assistantMsgId && !m.content
+          ? { ...m, role: 'error' as const, content: err.message || '请求失败' }
+          : m),
+      }));
     }
     setLoading(false);
+    setStreamingMessageId(null);
   }, [activeSessionId, createSession, model, updateActiveSession, autoExecuteSafeActions]);
 
   // --- Confirm / Reject / Undo / Retry ---
@@ -413,12 +507,54 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     await runAction(messageId, actionState);
   }, [activeSession, runAction]);
 
+  // --- Stop streaming ---
+  const stopStreaming = useCallback(() => {
+    if (activeEventSourceRef.current) {
+      activeEventSourceRef.current.close();
+      activeEventSourceRef.current = null;
+    }
+    if (activeChatIdRef.current) {
+      fetch(`/api/chat/stream?id=${encodeURIComponent(activeChatIdRef.current)}`, { method: 'DELETE' }).catch(() => {});
+      activeChatIdRef.current = null;
+    }
+    setLoading(false);
+    setStreamingMessageId(null);
+  }, []);
+
+  // --- Delete message ---
+  const deleteMessage = useCallback((messageId: string) => {
+    if (loading) return;
+    updateActiveSession(s => ({
+      ...s, updatedAt: Date.now(),
+      messages: s.messages.filter(m => m.id !== messageId),
+    }));
+  }, [loading, updateActiveSession]);
+
+  // --- Retry from user message ---
+  const retryFromMessage = useCallback((messageId: string) => {
+    if (loading) return;
+    const session = activeSessionRef.current;
+    if (!session) return;
+    const msgIndex = session.messages.findIndex(m => m.id === messageId);
+    if (msgIndex < 0) return;
+    const targetMsg = session.messages[msgIndex];
+    if (targetMsg.role !== 'user') return;
+    // Truncate everything after this user message
+    updateActiveSession(s => ({
+      ...s, updatedAt: Date.now(),
+      messages: s.messages.slice(0, msgIndex),
+    }));
+    // Re-send the same text
+    sendMessage(targetMsg.content);
+  }, [loading, updateActiveSession, sendMessage]);
+
   return (
     <DashboardChatContext.Provider value={{
       isOpen, openChat, closeChat, toggleChat,
       sessions, activeSessionId, activeSession,
       createSession, deleteSession, renameSession, setActiveSessionId,
-      sendMessage, loading, model, setModel,
+      sendMessage, stopStreaming, deleteMessage, retryFromMessage,
+      loading, streamingMessageId, model, setModel,
       confirmAction, rejectAction, undoActionById, retryAction,
       skillSettings, discoveredSkills, toggleSkill,
     }}>
