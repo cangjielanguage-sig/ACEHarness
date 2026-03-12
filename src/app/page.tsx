@@ -16,6 +16,7 @@ export default function ChatPage() {
   const {
     activeSession, sessions, createSession, sendMessage, loading,
     model, setModel, confirmAction, rejectAction, undoActionById, retryAction,
+    skillSettings,
   } = useChat();
   const [input, setInput] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -110,7 +111,7 @@ export default function ChatPage() {
                   通过对话管理工作流、Agent、模型和 Skills
                 </motion.p>
               </div>
-              <QuickActions onAction={handleQuickAction} />
+              <QuickActions onAction={handleQuickAction} skillSettings={skillSettings} />
             </div>
           )}
           {messages.map(msg => (
@@ -141,7 +142,7 @@ export default function ChatPage() {
         {/* Input area */}
         <div className="shrink-0 border-t bg-background/80 backdrop-blur px-4 py-3 md:px-8 lg:px-16">
           {messages.length > 0 && (
-            <QuickActionsBar onAction={handleQuickAction} />
+            <QuickActionsBar onAction={handleQuickAction} skillSettings={skillSettings} />
           )}
           <div className="flex items-end gap-2 max-w-4xl mx-auto">
             <textarea

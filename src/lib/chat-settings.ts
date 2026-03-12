@@ -1,0 +1,83 @@
+/**
+ * Chat 技能设置持久化 - 存储到 data/chat-settings.yaml
+ * 自动发现 skills/.claude/skills/ 下的所有技能目录，从 SKILL.md 提取元数据
+ */
+
+import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
+import { resolve, dirname } from 'path';
+import { parse, stringify } from 'yaml';
+
+const SETTINGS_PATH = resolve(process.cwd(), 'data', 'chat-settings.yaml');
+const SKILLS_DIR = resolve(process.cwd(), 'skills', '.claude', 'skills');
+
+export interface SkillInfo {
+  name: string;        // 目录名，如 power-gitcode
+  label: string;       // 显示名，从 SKILL.md # 标题提取
+  description: string; // 简介，从 SKILL.md 第一段提取
+  enabled: boolean;
+}
+
+export interface ChatSettings {
+  skills: Record<string, boolean>;
+}
+
+/** 从 SKILL.md 提取标题和描述 */
+function parseSkillMd(content: string): { label: string; description: string } {
+  const lines = content.split('\n');
+  let label = '';
+  let description = '';
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!label && trimmed.startsWith('# ')) {
+      label = trimmed.slice(2).trim();
+      continue;
+    }
+    if (label && !description && trimmed && !trimmed.startsWith('#')) {
+      description = trimmed;
+      break;
+    }
+  }
+  return { label, description };
+}
+
+/** 扫描 skills/.claude/skills/ 目录，发现所有技能并提取元数据 */
+export async function discoverSkills(): Promise<SkillInfo[]> {
+  const skills: SkillInfo[] = [];
+  try {
+    const entries = await readdir(SKILLS_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const name = entry.name;
+      let label = name;
+      let description = '';
+      try {
+        const skillMd = await readFile(resolve(SKILLS_DIR, name, 'SKILL.md'), 'utf-8');
+        const parsed = parseSkillMd(skillMd);
+        if (parsed.label) label = parsed.label;
+        if (parsed.description) description = parsed.description;
+      } catch { /* no SKILL.md */ }
+      skills.push({ name, label, description, enabled: true });
+    }
+  } catch { /* skills dir doesn't exist */ }
+  return skills;
+}
+
+export async function loadChatSettings(): Promise<ChatSettings> {
+  const discovered = await discoverSkills();
+  const defaults: Record<string, boolean> = {};
+  const DEFAULT_ENABLED = ['power-gitcode', 'aceflow-chat-card'];
+  for (const s of discovered) defaults[s.name] = DEFAULT_ENABLED.includes(s.name);
+
+  try {
+    const content = await readFile(SETTINGS_PATH, 'utf-8');
+    const parsed = parse(content);
+    return { skills: { ...defaults, ...parsed?.skills } };
+  } catch {
+    return { skills: defaults };
+  }
+}
+
+export async function saveChatSettings(settings: ChatSettings): Promise<void> {
+  await mkdir(dirname(SETTINGS_PATH), { recursive: true });
+  await writeFile(SETTINGS_PATH, stringify(settings), 'utf-8');
+}

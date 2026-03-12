@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 interface QuickActionsProps {
   onAction: (text: string) => void;
+  skillSettings?: Record<string, boolean>;
 }
 
 const CATEGORIES = [
@@ -39,7 +40,22 @@ const CATEGORIES = [
   },
 ];
 
+const GITCODE_CATEGORY = {
+  title: 'GitCode',
+  icon: 'code',
+  skill: 'power-gitcode',
+  actions: [
+    { icon: 'merge_type', label: '分析 PR', prompt: '帮我分析一个 GitCode PR', color: 'from-blue-600 to-indigo-600' },
+    { icon: 'bug_report', label: '创建 Issue', prompt: '帮我在 GitCode 上创建一个 Issue', color: 'from-orange-500 to-red-500' },
+    { icon: 'upload', label: '提交 PR', prompt: '帮我在 GitCode 上创建一个 PR', color: 'from-green-500 to-teal-500' },
+    { icon: 'comment', label: 'PR 评论', prompt: '帮我在 GitCode PR 上发表评论', color: 'from-violet-500 to-purple-500' },
+    { icon: 'label', label: '管理标签', prompt: '帮我管理 GitCode 仓库的标签', color: 'from-pink-500 to-rose-500' },
+    { icon: 'fork_right', label: 'Fork 仓库', prompt: '帮我 Fork 一个 GitCode 仓库', color: 'from-cyan-500 to-blue-500' },
+  ],
+};
+
 const ALL_ACTIONS = CATEGORIES.flatMap(c => c.actions);
+const ALL_ACTIONS_WITH_GITCODE = [...ALL_ACTIONS, ...GITCODE_CATEGORY.actions];
 
 const containerVariants = {
   hidden: {},
@@ -51,7 +67,11 @@ const itemVariants = {
   show: { opacity: 1, y: 0, scale: 1 },
 };
 
-export default function QuickActions({ onAction }: QuickActionsProps) {
+export default function QuickActions({ onAction, skillSettings }: QuickActionsProps) {
+  const allCategories = skillSettings?.['power-gitcode']
+    ? [...CATEGORIES, GITCODE_CATEGORY]
+    : CATEGORIES;
+
   return (
     <motion.div
       className="w-full max-w-2xl space-y-5"
@@ -59,7 +79,7 @@ export default function QuickActions({ onAction }: QuickActionsProps) {
       initial="hidden"
       animate="show"
     >
-      {CATEGORIES.map(cat => (
+      {allCategories.map(cat => (
         <div key={cat.title}>
           <div className="flex items-center gap-1.5 mb-2 px-1">
             <span className="material-symbols-outlined text-sm text-muted-foreground">{cat.icon}</span>
@@ -91,8 +111,9 @@ export default function QuickActions({ onAction }: QuickActionsProps) {
 }
 
 /** Compact horizontal bar version — shown above input when messages exist */
-export function QuickActionsBar({ onAction }: QuickActionsProps) {
+export function QuickActionsBar({ onAction, skillSettings }: QuickActionsProps) {
   const [expanded, setExpanded] = useState(false);
+  const actions = skillSettings?.['power-gitcode'] ? ALL_ACTIONS_WITH_GITCODE : ALL_ACTIONS;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -106,7 +127,7 @@ export function QuickActionsBar({ onAction }: QuickActionsProps) {
             className="overflow-hidden mb-2"
           >
             <div className="flex flex-wrap gap-1.5 pb-1">
-              {ALL_ACTIONS.map(a => (
+              {actions.map(a => (
                 <motion.button
                   key={a.label}
                   whileHover={{ scale: 1.05 }}

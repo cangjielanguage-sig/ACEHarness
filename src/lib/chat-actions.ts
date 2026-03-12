@@ -14,7 +14,18 @@ export type ActionType =
   | 'navigate'
   | 'skill.list'
   | 'prompt.analyze' | 'prompt.optimize'
-  | 'wizard.workflow' | 'wizard.agent' | 'wizard.skill';
+  | 'wizard.workflow' | 'wizard.agent' | 'wizard.skill'
+  // GitCode actions
+  | 'gitcode.get_pr' | 'gitcode.get_issue' | 'gitcode.get_pr_commits'
+  | 'gitcode.get_pr_changed_files' | 'gitcode.get_pr_comments' | 'gitcode.get_issues_by_pr'
+  | 'gitcode.get_prs_by_issue' | 'gitcode.check_pr_mergeable' | 'gitcode.check_repo_public'
+  | 'gitcode.list_issue_templates' | 'gitcode.get_issue_template' | 'gitcode.get_pr_template'
+  | 'gitcode.get_commit_title' | 'gitcode.parse_issue_template'
+  | 'gitcode.create_pr' | 'gitcode.create_issue' | 'gitcode.post_pr_comment'
+  | 'gitcode.add_pr_labels' | 'gitcode.remove_pr_labels' | 'gitcode.add_issue_labels'
+  | 'gitcode.assign_pr_testers' | 'gitcode.create_label' | 'gitcode.fork_repo'
+  | 'gitcode.create_release'
+  | 'gitcode.merge_pr';
 
 // 风险等级
 export type RiskLevel = 'safe' | 'mutating' | 'destructive';
@@ -43,6 +54,34 @@ export const RISK_MAP: Record<ActionType, RiskLevel> = {
   'wizard.workflow': 'safe',
   'wizard.agent': 'safe',
   'wizard.skill': 'safe',
+  // GitCode - safe (read-only)
+  'gitcode.get_pr': 'safe',
+  'gitcode.get_issue': 'safe',
+  'gitcode.get_pr_commits': 'safe',
+  'gitcode.get_pr_changed_files': 'safe',
+  'gitcode.get_pr_comments': 'safe',
+  'gitcode.get_issues_by_pr': 'safe',
+  'gitcode.get_prs_by_issue': 'safe',
+  'gitcode.check_pr_mergeable': 'safe',
+  'gitcode.check_repo_public': 'safe',
+  'gitcode.list_issue_templates': 'safe',
+  'gitcode.get_issue_template': 'safe',
+  'gitcode.get_pr_template': 'safe',
+  'gitcode.get_commit_title': 'safe',
+  'gitcode.parse_issue_template': 'safe',
+  // GitCode - mutating
+  'gitcode.create_pr': 'mutating',
+  'gitcode.create_issue': 'mutating',
+  'gitcode.post_pr_comment': 'mutating',
+  'gitcode.add_pr_labels': 'mutating',
+  'gitcode.remove_pr_labels': 'mutating',
+  'gitcode.add_issue_labels': 'mutating',
+  'gitcode.assign_pr_testers': 'mutating',
+  'gitcode.create_label': 'mutating',
+  'gitcode.fork_repo': 'mutating',
+  'gitcode.create_release': 'mutating',
+  // GitCode - destructive
+  'gitcode.merge_pr': 'destructive',
 };
 
 // Action Block 接口
@@ -67,11 +106,13 @@ export interface ActionState {
 
 // --- 解析 ---
 
-/** 从 AI 回复 markdown 中提取 action blocks */
-export function parseActions(markdown: string): { text: string; actions: ActionBlock[] } {
+/** 从 AI 回复 markdown 中提取 action blocks 和 card blocks */
+export function parseActions(markdown: string): { text: string; actions: ActionBlock[]; cards: any[] } {
   const actions: ActionBlock[] = [];
+  const cards: any[] = [];
+
   // Match ```action ... ``` blocks
-  const text = markdown.replace(/```action\s*\n([\s\S]*?)```/g, (_match, json: string) => {
+  let text = markdown.replace(/```action\s*\n([\s\S]*?)```/g, (_match, json: string) => {
     try {
       const parsed = JSON.parse(json.trim());
       if (parsed.type && parsed.description) {
@@ -82,12 +123,25 @@ export function parseActions(markdown: string): { text: string; actions: ActionB
         });
       }
     } catch {
-      // Invalid JSON, leave as text
       return _match;
     }
-    return ''; // Remove action block from text
+    return '';
   });
-  return { text: text.trim(), actions };
+
+  // Match ```card ... ``` blocks
+  text = text.replace(/```card\s*\n([\s\S]*?)```/g, (_match, json: string) => {
+    try {
+      const parsed = JSON.parse(json.trim());
+      if (parsed.blocks || parsed.header) {
+        cards.push(parsed);
+      }
+    } catch {
+      return _match;
+    }
+    return '';
+  });
+
+  return { text: text.trim(), actions, cards };
 }
 
 /** 判断 action 是否安全（自动执行） */
@@ -198,14 +252,29 @@ async function executeActionInner(type: ActionType, params: Record<string, any>)
 
     // Wizards - return structured step data for UI rendering
     case 'wizard.workflow':
-      return { wizardType: 'workflow', step: params.step || 1, totalSteps: 4, data: params };
+      return { wizardType: 'workflow', step: params.step || 1, totalSteps: params.totalSteps || 6, data: params };
     case 'wizard.agent':
       return { wizardType: 'agent', step: params.step || 1, totalSteps: 3, data: params };
     case 'wizard.skill':
       return { wizardType: 'skill', step: params.step || 1, totalSteps: 3, data: params };
 
-    default:
+    default: {
+      // GitCode actions - route to /api/gitcode
+      if (type.startsWith('gitcode.')) {
+        const command = type.replace('gitcode.', '');
+        const res = await fetch('/api/gitcode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command, args: params }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || '执行 GitCode 命令失败');
+        }
+        return data.data;
+      }
       throw new Error(`Unknown action type: ${type}`);
+    }
   }
 }
 

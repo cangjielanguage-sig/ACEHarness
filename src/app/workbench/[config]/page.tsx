@@ -971,6 +971,7 @@ export default function WorkbenchPage() {
         // Use running process step name to track step changes across iterations
         const runningProc = processes.find((p: any) => p.status === 'running');
         const activeStep = runningProc?.step || currentStep || selectedStep?.name;
+        console.log(`[LiveStream] rid=${rid}, activeStep=${activeStep}, runningProc=${runningProc?.id}, processes=${processes.length}, streamContentLen=${runningProc?.streamContent?.length || 0}`);
         if (rid && activeStep) {
           // Detect step change — reset stream state when a new step starts
           if (activeStep !== liveStreamStepRef.current) {
@@ -979,6 +980,7 @@ export default function WorkbenchPage() {
             setLiveStream([]);
           }
           content = await streamApi.getStreamContent(rid, activeStep);
+          console.log(`[LiveStream] streamApi content length: ${content?.length || 0}`);
         }
         if (!content) {
           // Fallback: try in-memory process
@@ -1004,7 +1006,7 @@ export default function WorkbenchPage() {
         if (!processes.some((p: any) => p.status === 'running') && !isRunning) {
           stopLiveStream();
         }
-      } catch { /* ignore */ }
+      } catch (e) { console.error('[LiveStream] polling error:', e); }
     }, 1000);
   };
 
@@ -1146,13 +1148,22 @@ export default function WorkbenchPage() {
     }
 
     // Find highest iteration number in stepResults for the effective base name
+    // Also check state-machine format keys like "stateName-stepName"
     let latest = effectiveBase;
     let maxIter = 0;
     for (const key of Object.keys(stepResults)) {
       if (key === effectiveBase) { if (maxIter === 0) latest = key; continue; }
+      // Match state-machine format: "stateName-stepName" (key ends with "-baseName")
+      if (key.endsWith('-' + effectiveBase)) { if (maxIter === 0) latest = key; continue; }
       const m = key.match(new RegExp(`^${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
       if (m) {
         const n = parseInt(m[1], 10);
+        if (n > maxIter) { maxIter = n; latest = key; }
+      }
+      // Also match state-machine iteration format: "stateName-stepName-迭代N"
+      const sm = key.match(new RegExp(`-${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
+      if (sm) {
+        const n = parseInt(sm[1], 10);
         if (n > maxIter) { maxIter = n; latest = key; }
       }
     }

@@ -5,7 +5,7 @@ tags:
   - 设计
   - 修复方案
   - 缺陷修复
-model: claude-sonnet-4.5
+model: claude-sonnet-4-6
 temperature: 0.5
 allowedTools:
   - Read

@@ -447,12 +447,27 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     // Use alternative engine (Kiro CLI, etc.)
     console.log(`[StateMachineWorkflowManager] 使用 ${this.engineType} 引擎执行: ${step}`);
+
+    // Register process in processManager so it's visible to the frontend
+    const proc = processManager.registerExternalProcess(processId, agent, step, options.runId);
+
     const streamHandler = (event: EngineStreamEvent) => {
+      // Accumulate stream content on the registered process
+      const rawProc = processManager.getProcessRaw(processId);
+      if (rawProc) {
+        rawProc.streamContent += event.content;
+      }
       processManager.emit('stream', {
         id: processId,
         step,
-        total: event.content,
+        delta: event.content,
+        total: rawProc?.streamContent || event.content,
       });
+      // Persist stream content periodically
+      if (this.currentRunId && rawProc?.streamContent) {
+        const smStepName = this.currentState ? `${this.currentState}-${step}` : step;
+        saveStreamContent(this.currentRunId, smStepName, rawProc.streamContent).catch(() => {});
+      }
     };
 
     this.currentEngine.on('stream', streamHandler);
@@ -468,10 +483,20 @@ export class StateMachineWorkflowManager extends EventEmitter {
         runId: options.runId,
       });
 
+      // Mark process as completed
+      const rawProc = processManager.getProcessRaw(processId);
+      if (rawProc) {
+        rawProc.status = 'completed';
+        rawProc.endTime = new Date();
+        rawProc.output = result.output || rawProc.streamContent;
+        rawProc.sessionId = result.sessionId;
+      }
+
       // If engine reports failure, throw so the step is marked as failed
       if (!result.success) {
         const errorMsg = result.error || '引擎执行失败（无输出）';
         console.error(`[StateMachineWorkflowManager] ${this.engineType} 引擎执行失败: ${errorMsg}`);
+        if (rawProc) { rawProc.status = 'failed'; rawProc.error = errorMsg; }
         throw new Error(`${this.engineType} 引擎执行失败: ${errorMsg}`);
       }
 
@@ -951,7 +976,28 @@ export class StateMachineWorkflowManager extends EventEmitter {
     }];
     await this.persistState();
 
+    // Set up periodic stream content flushing to disk (so frontend can read it)
+    let lastFlush = 0;
+    const streamFlushHandler = (data: { id: string; step: string; total: string }) => {
+      if (data.id !== currentProcessId) return;
+      const now = Date.now();
+      if (this.currentRunId && now - lastFlush > 2000) {
+        lastFlush = now;
+        const proc = processManager.getProcess(currentProcessId);
+        const content = proc?.streamContent || data.total;
+        if (content) {
+          const fullStream = accumulatedStream
+            ? accumulatedStream + '\n\n<!-- chunk-boundary -->\n\n' + content
+            : content;
+          const streamStepName = this.currentState ? `${this.currentState}-${step.name}` : step.name;
+          saveStreamContent(this.currentRunId, streamStepName, fullStream).catch(() => {});
+        }
+      }
+    };
+    processManager.on('stream', streamFlushHandler);
+
     // Feedback loop: run agent, handle interrupts and pending feedback
+    try {
     while (true) {
       let result: ClaudeJsonResult;
       try {
@@ -986,7 +1032,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
           const feedbackTimestamp = new Date().toISOString();
           accumulatedStream += `\n\n<!-- chunk-boundary -->\n\n<!-- human-feedback: ${feedbackTimestamp} -->\n${feedbackPrompt}`;
           if (this.currentRunId) {
-            saveStreamContent(this.currentRunId, `${step.name}`, accumulatedStream).catch(() => {});
+            const streamStepName2 = this.currentState ? `${this.currentState}-${step.name}` : step.name;
+            saveStreamContent(this.currentRunId, streamStepName2, accumulatedStream).catch(() => {});
           }
           currentSessionId = sessionId;
           currentPrompt = `## 人工实时反馈（紧急打断）\n用户紧急打断了当前执行，请立即处理以下反馈：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
@@ -1018,7 +1065,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
         accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
       }
       if (this.currentRunId) {
-        saveStreamContent(this.currentRunId, `${step.name}`, accumulatedStream).catch(() => {});
+        const streamStepName3 = this.currentState ? `${this.currentState}-${step.name}` : step.name;
+        saveStreamContent(this.currentRunId, streamStepName3, accumulatedStream).catch(() => {});
       }
 
       accumulatedOutput += (accumulatedOutput ? '\n\n---\n\n' : '') + (result.result || '');
@@ -1033,7 +1081,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
         const feedbackTimestamp = new Date().toISOString();
         accumulatedStream += `\n\n<!-- chunk-boundary -->\n\n<!-- human-feedback: ${feedbackTimestamp} -->\n${feedbackPrompt}`;
         if (this.currentRunId) {
-          saveStreamContent(this.currentRunId, `${step.name}`, accumulatedStream).catch(() => {});
+          const streamStepName4 = this.currentState ? `${this.currentState}-${step.name}` : step.name;
+          saveStreamContent(this.currentRunId, streamStepName4, accumulatedStream).catch(() => {});
         }
         currentSessionId = sessionId;
         currentPrompt = `## 人工实时反馈\n以下是用户在你执行过程中提供的反馈意见，请基于这些反馈继续处理当前任务：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
@@ -1054,7 +1103,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       break;
     }
-
+    } finally {
+      processManager.off('stream', streamFlushHandler);
+    }
     return accumulatedOutput;
   }
 

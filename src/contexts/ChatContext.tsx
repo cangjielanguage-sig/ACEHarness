@@ -10,6 +10,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'error';
   content: string;
   actions?: ActionState[];
+  cards?: any[];
   costUsd?: number;
   durationMs?: number;
   usage?: { input_tokens: number; output_tokens: number };
@@ -56,6 +57,9 @@ interface DashboardChatContextType {
   rejectAction: (messageId: string, actionId: string) => void;
   undoActionById: (messageId: string, actionId: string) => Promise<void>;
   retryAction: (messageId: string, actionId: string) => Promise<void>;
+  skillSettings: Record<string, boolean>;
+  discoveredSkills: { name: string; label: string; description: string }[];
+  toggleSkill: (skill: string) => void;
 }
 
 const DashboardChatContext = createContext<DashboardChatContextType>({
@@ -67,6 +71,7 @@ const DashboardChatContext = createContext<DashboardChatContextType>({
   model: 'claude-sonnet-4-6', setModel: () => {},
   confirmAction: async () => {}, rejectAction: () => {},
   undoActionById: async () => {}, retryAction: async () => {},
+  skillSettings: { 'power-gitcode': true }, discoveredSkills: [], toggleSkill: () => {},
 });
 
 const genId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -120,6 +125,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [activeSession, setActiveSession] = useState<ChatSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [model, setModel] = useState('claude-sonnet-4-6');
+  const [skillSettings, setSkillSettings] = useState<Record<string, boolean>>({ 'power-gitcode': true });
+  const [discoveredSkills, setDiscoveredSkills] = useState<{ name: string; label: string; description: string }[]>([]);
+
+  // Load skill settings on mount
+  useEffect(() => {
+    fetch('/api/chat/settings').then(r => r.json()).then(data => {
+      if (data.skills) setSkillSettings(data.skills);
+      if (data.discoveredSkills) setDiscoveredSkills(data.discoveredSkills);
+    }).catch(() => {});
+  }, []);
+
+  const toggleSkill = useCallback((skill: string) => {
+    setSkillSettings(prev => {
+      const next = { ...prev, [skill]: !prev[skill] };
+      fetch('/api/chat/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skills: next }),
+      }).catch(() => {});
+      return next;
+    });
+  }, []);
 
   // Debounced save ref
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -235,18 +262,66 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [updateAction]);
 
   const autoExecuteSafeActions = useCallback(async (messageId: string, actions: ActionState[]) => {
+    const results: { type: string; data: any }[] = [];
     for (const a of actions) {
       if (isSafeAction(a.action)) {
         updateAction(messageId, a.id, { status: 'auto_executing' });
         try {
           const { result } = await executeAction(a.action);
           updateAction(messageId, a.id, { status: 'success', result });
+          results.push({ type: a.action.type, data: result });
         } catch (err: any) {
           updateAction(messageId, a.id, { status: 'error', error: err.message });
         }
       }
     }
-  }, [updateAction]);
+    // Feed results back to AI for analysis and follow-up suggestions
+    if (results.length > 0) {
+      const summary = results.map(r => {
+        const json = JSON.stringify(r.data, null, 2);
+        // Truncate large results to avoid token explosion
+        const truncated = json.length > 4000 ? json.slice(0, 4000) + '\n...(truncated)' : json;
+        return `[${r.type} 结果]:\n${truncated}`;
+      }).join('\n\n');
+      const followUpPrompt = `以下是刚才自动执行的操作返回的数据，请根据这些数据用 \`\`\`card 代码块生成结构化的可视化分析卡片，并在卡片的 actions 中给出 2-3 个上下文相关的后续操作建议：\n\n${summary}`;
+
+      setLoading(true);
+      try {
+        const backendSid = activeSessionRef.current?.backendSessionId;
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: followUpPrompt,
+            model,
+            sessionId: backendSid || undefined,
+            mode: 'dashboard',
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && !data.error) {
+          if (data.sessionId) {
+            updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
+          }
+          const { text: cleanText, actions: newActions, cards: newCards } = parseActions(data.result || '');
+          const newActionStates: ActionState[] = newActions.map(a => ({
+            id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
+          }));
+          const followUpMsg: ChatMessage = {
+            id: genId(), role: 'assistant', content: cleanText,
+            actions: newActionStates.length > 0 ? newActionStates : undefined,
+            cards: newCards.length > 0 ? newCards : undefined,
+            timestamp: Date.now(),
+          };
+          updateActiveSession(s => ({ ...s, updatedAt: Date.now(), messages: [...s.messages, followUpMsg] }));
+          if (newActionStates.length > 0) {
+            autoExecuteSafeActions(followUpMsg.id, newActionStates);
+          }
+        }
+      } catch { /* follow-up failed silently */ }
+      setLoading(false);
+    }
+  }, [updateAction, model, updateActiveSession]);
 
   // --- Send message ---
   const sendMessage = useCallback(async (text: string) => {
@@ -283,13 +358,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (data.sessionId) {
           updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
         }
-        const { text: cleanText, actions } = parseActions(data.result || '');
+        const { text: cleanText, actions, cards } = parseActions(data.result || '');
         const actionStates: ActionState[] = actions.map(a => ({
           id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
         }));
         const assistantMsg: ChatMessage = {
           id: genId(), role: 'assistant', content: cleanText,
           actions: actionStates.length > 0 ? actionStates : undefined,
+          cards: cards.length > 0 ? cards : undefined,
           costUsd: data.costUsd, durationMs: data.durationMs, usage: data.usage,
           timestamp: Date.now(),
         };
@@ -344,6 +420,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       createSession, deleteSession, renameSession, setActiveSessionId,
       sendMessage, loading, model, setModel,
       confirmAction, rejectAction, undoActionById, retryAction,
+      skillSettings, discoveredSkills, toggleSkill,
     }}>
       {children}
     </DashboardChatContext.Provider>

@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processManager } from '@/lib/process-manager';
 import { createEngine, getConfiguredEngine } from '@/lib/engines/engine-factory';
+import { buildDashboardSystemPrompt } from '@/lib/chat-system-prompt';
+import { loadChatSettings } from '@/lib/chat-settings';
+
+const DEFAULT_PROMPT = '你是一个 AI 助手，简洁回答问题。';
 
 export async function POST(request: NextRequest) {
   try {
-    const { message, model, sessionId } = await request.json();
+    const { message, model, sessionId, mode } = await request.json();
 
     if (!message?.trim()) {
       return NextResponse.json({ error: '消息不能为空' }, { status: 400 });
@@ -12,11 +16,21 @@ export async function POST(request: NextRequest) {
 
     const id = `chat-${Date.now()}`;
     const useModel = model || '';
+
+    // Build system prompt based on mode
+    let systemPrompt = DEFAULT_PROMPT;
+    if (mode === 'dashboard') {
+      const settings = await loadChatSettings();
+      const enabledSkills = Object.entries(settings.skills)
+        .filter(([, v]) => v)
+        .map(([k]) => k);
+      systemPrompt = await buildDashboardSystemPrompt(enabledSkills);
+    }
+
     const engineType = await getConfiguredEngine();
     const engine = await createEngine(engineType);
 
     if (engine) {
-      // Use configured engine (e.g. kiro-cli)
       const chunks: string[] = [];
       engine.on('stream', (event: any) => {
         if (event.type === 'text') chunks.push(event.content);
@@ -26,7 +40,7 @@ export async function POST(request: NextRequest) {
         agent: 'chat',
         step: 'chat',
         prompt: message,
-        systemPrompt: '你是一个 AI 助手，简洁回答问题。',
+        systemPrompt,
         model: useModel,
         workingDirectory: process.cwd(),
         sessionId: sessionId || undefined,
@@ -47,7 +61,7 @@ export async function POST(request: NextRequest) {
       'chat-test',
       'chat',
       message,
-      '你是一个 AI 助手，简洁回答问题。',
+      systemPrompt,
       useModel,
       {
         resumeSessionId: sessionId || undefined,

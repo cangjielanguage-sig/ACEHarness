@@ -3,6 +3,7 @@
 import { ActionState } from '@/lib/chat-actions';
 import Markdown from '@/components/Markdown';
 import ActionCard from './ActionCard';
+import UniversalCard from './cards/UniversalCard';
 
 interface ChatMessageProps {
   message: {
@@ -10,6 +11,7 @@ interface ChatMessageProps {
     role: 'user' | 'assistant' | 'error';
     content: string;
     actions?: ActionState[];
+    cards?: any[];
     costUsd?: number;
     durationMs?: number;
     usage?: { input_tokens: number; output_tokens: number };
@@ -62,6 +64,9 @@ export default function ChatMessage({ message, onConfirmAction, onRejectAction, 
             onRetry={() => onRetryAction(action.id)}
             onAction={onAction}
           />
+        ))}
+        {message.cards?.map((card, i) => (
+          <UniversalCard key={i} card={card} onAction={onAction} />
         ))}
         {(message.usage || message.costUsd !== undefined || message.durationMs !== undefined) && (
           <div className="text-xs text-muted-foreground px-1 opacity-60">

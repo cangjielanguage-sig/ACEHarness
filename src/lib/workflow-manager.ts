@@ -308,13 +308,21 @@ class WorkflowManager extends EventEmitter {
     // Use alternative engine (Kiro CLI, etc.)
     this.emit('log', `使用 ${this.engineType} 引擎执行任务: ${step}`);
 
+    // Register process in processManager so it's visible to the frontend
+    const proc = processManager.registerExternalProcess(processId, agent, step, options.runId);
+
     // Set up stream handler for the engine
     const streamHandler = (event: EngineStreamEvent) => {
-      // Convert engine stream events to processManager format
+      // Accumulate stream content on the registered process
+      const rawProc = processManager.getProcessRaw(processId);
+      if (rawProc) {
+        rawProc.streamContent += event.content;
+      }
       processManager.emit('stream', {
         id: processId,
         step: step,
-        total: event.content,
+        delta: event.content,
+        total: rawProc?.streamContent || event.content,
       });
     };
 
@@ -334,6 +342,16 @@ class WorkflowManager extends EventEmitter {
         appendSystemPrompt: options.appendSystemPrompt,
         runId: options.runId,
       });
+
+      // Mark process as completed
+      const rawProc = processManager.getProcessRaw(processId);
+      if (rawProc) {
+        rawProc.status = result.success ? 'completed' : 'failed';
+        rawProc.endTime = new Date();
+        rawProc.output = result.output || rawProc.streamContent;
+        rawProc.sessionId = result.sessionId;
+        if (!result.success) rawProc.error = result.error || '';
+      }
 
       // Convert engine result to ClaudeJsonResult format
       return {
