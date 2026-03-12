@@ -128,17 +128,18 @@ export function parseActions(markdown: string): { text: string; actions: ActionB
     return '';
   });
 
-  // Match ```card ... ``` blocks
-  text = text.replace(/```card\s*\n([\s\S]*?)```/g, (_match, json: string) => {
+  // Match ```card ... ``` blocks (also catch ```json blocks that look like cards)
+  text = text.replace(/```(?:card|json)\s*\n([\s\S]*?)```/g, (_match, json: string) => {
     try {
       const parsed = JSON.parse(json.trim());
       if (parsed.blocks || parsed.header) {
         cards.push(parsed);
+        return '';
       }
     } catch {
-      return _match;
+      // not valid JSON or not a card
     }
-    return '';
+    return _match;
   });
 
   return { text: text.trim(), actions, cards };
