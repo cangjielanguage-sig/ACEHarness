@@ -1,6 +1,5 @@
 'use client';
 
-import { Badge } from '@/components/ui/badge';
 import ConfigCard from './cards/ConfigCard';
 import AgentCard from './cards/AgentCard';
 import ModelCard from './cards/ModelCard';
@@ -9,6 +8,9 @@ import WorkflowStatusCard from './cards/WorkflowStatusCard';
 import SkillCard from './cards/SkillCard';
 import WizardCard from './cards/WizardCard';
 import PromptAnalysisCard from './cards/PromptAnalysisCard';
+import ConfigDetailCard from './cards/ConfigDetailCard';
+import AgentDetailCard from './cards/AgentDetailCard';
+import FollowUpSuggestions from './cards/FollowUpSuggestions';
 
 interface ResultRendererProps {
   type: string;
@@ -55,6 +57,13 @@ export default function ResultRenderer({ type, result, onAction }: ResultRendere
           <ConfigCard key={c.filename} config={c} onAction={onAction} />
         ))}
         {result.configs.length === 0 && <div className="text-xs text-muted-foreground">暂无配置</div>}
+        <FollowUpSuggestions
+          suggestions={[
+            { label: '创建新工作流', prompt: '帮我创建一个新的工作流', icon: 'add' },
+            { label: '介绍这些工作流', prompt: '帮我介绍一下当前所有工作流的用途', icon: 'info' },
+          ]}
+          onAction={onAction}
+        />
       </div>
     );
   }
@@ -67,6 +76,14 @@ export default function ResultRenderer({ type, result, onAction }: ResultRendere
           <AgentCard key={a.name} agent={a} onAction={onAction} />
         ))}
         {result.agents.length === 0 && <div className="text-xs text-muted-foreground">暂无 Agent</div>}
+        <FollowUpSuggestions
+          suggestions={[
+            { label: '创建新 Agent', prompt: '帮我创建一个新的 Agent', icon: 'add' },
+            { label: '介绍这些 Agent', prompt: '帮我介绍一下当前所有 Agent 的角色和用途', icon: 'info' },
+            { label: '批量替换模型', prompt: '帮我批量替换 Agent 使用的模型', icon: 'swap_horiz' },
+          ]}
+          onAction={onAction}
+        />
       </div>
     );
   }
@@ -76,7 +93,7 @@ export default function ResultRenderer({ type, result, onAction }: ResultRendere
     return (
       <div className="grid gap-2 mt-2">
         {result.models.map((m: any) => (
-          <ModelCard key={m.value} model={m} />
+          <ModelCard key={m.value} model={m} onAction={onAction} />
         ))}
       </div>
     );
@@ -90,6 +107,13 @@ export default function ResultRenderer({ type, result, onAction }: ResultRendere
           <RunCard key={r.id} run={r} onAction={onAction} />
         ))}
         {result.runs.length === 0 && <div className="text-xs text-muted-foreground">暂无运行记录</div>}
+        <FollowUpSuggestions
+          suggestions={[
+            { label: '启动新运行', prompt: '帮我启动一个工作流', icon: 'play_arrow' },
+            { label: '查看运行状态', prompt: '查看当前工作流运行状态', icon: 'monitoring' },
+          ]}
+          onAction={onAction}
+        />
       </div>
     );
   }
@@ -121,22 +145,45 @@ export default function ResultRenderer({ type, result, onAction }: ResultRendere
     return <WizardCard result={result} onAction={onAction} />;
   }
 
-  // config.get / agent.get - show as formatted JSON
-  if ((type === 'config.get' || type === 'agent.get') && (result.config || result.agent)) {
-    const data = result.config || result.agent;
+  // config.get - rich detail card with visual/source tabs
+  if (type === 'config.get' && result.config) {
     return (
-      <pre className="mt-2 p-2 rounded border bg-background text-xs overflow-x-auto max-h-60 overflow-y-auto">
-        {typeof result.raw === 'string' ? result.raw : JSON.stringify(data, null, 2)}
-      </pre>
+      <ConfigDetailCard
+        config={result.config}
+        raw={typeof result.raw === 'string' ? result.raw : JSON.stringify(result.config, null, 2)}
+        agents={result.agents}
+        filename={result.config?.workflow?.name}
+        onAction={onAction}
+      />
+    );
+  }
+
+  // agent.get - rich detail card with visual/source tabs
+  if (type === 'agent.get' && result.agent) {
+    return (
+      <AgentDetailCard
+        agent={result.agent}
+        raw={typeof result.raw === 'string' ? result.raw : JSON.stringify(result.agent, null, 2)}
+        onAction={onAction}
+      />
     );
   }
 
   // Success message for mutations
   if (result.success !== undefined) {
     return (
-      <div className="mt-2 text-xs text-green-600 flex items-center gap-1">
-        <span className="material-symbols-outlined text-sm">check</span>
-        {result.message || '操作成功'}
+      <div className="mt-2">
+        <div className="text-xs text-green-600 flex items-center gap-1">
+          <span className="material-symbols-outlined text-sm">check</span>
+          {result.message || '操作成功'}
+        </div>
+        <FollowUpSuggestions
+          suggestions={[
+            { label: '查看当前状态', prompt: '查看当前工作流运行状态', icon: 'monitoring' },
+            { label: '还能做什么', prompt: '我接下来可以做什么？', icon: 'lightbulb' },
+          ]}
+          onAction={onAction}
+        />
       </div>
     );
   }

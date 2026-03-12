@@ -43,11 +43,12 @@ export default function ChatPage() {
   };
 
   const handleQuickAction = (prompt: string) => {
-    setInput(prompt);
-    inputRef.current?.focus();
-    // Auto-send if it looks like a direct command
     if (prompt && !prompt.includes('\n')) {
-      setTimeout(() => sendMessage(prompt), 100);
+      setInput('');
+      sendMessage(prompt);
+    } else {
+      setInput(prompt);
+      inputRef.current?.focus();
     }
   };
 

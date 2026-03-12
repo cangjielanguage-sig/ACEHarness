@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import FollowUpSuggestions from './FollowUpSuggestions';
 
 interface WorkflowStatusCardProps {
   initialStatus: { status: string; currentConfigFile?: string; currentPhase?: string; currentStep?: string; completedSteps?: string[]; runId?: string };
@@ -88,6 +89,16 @@ export default function WorkflowStatusCard({ initialStatus, onAction }: Workflow
           )}
         </div>
       )}
+
+      <FollowUpSuggestions
+        suggestions={[
+          ...(isRunning ? [{ label: '查看运行日志', prompt: `查看运行 ${status.runId || ''} 的详细日志`, icon: 'article' }] : []),
+          ...(status.status === 'idle' ? [{ label: '启动工作流', prompt: '帮我启动一个工作流', icon: 'play_arrow' }] : []),
+          ...(status.status === 'completed' || status.status === 'failed' ? [{ label: '查看运行记录', prompt: `查看 ${status.currentConfigFile || ''} 的运行记录`, icon: 'history' }] : []),
+          { label: '查看配置列表', prompt: '列出所有工作流配置', icon: 'list' },
+        ]}
+        onAction={onAction}
+      />
     </motion.div>
   );
 }

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Badge } from '@/components/ui/badge';
+import FollowUpSuggestions from './FollowUpSuggestions';
 
 interface RunCardProps {
   run: { id: string; configFile?: string; configName?: string; status: string; startTime: string; currentPhase?: string; completedSteps?: number; totalSteps?: number };
@@ -77,6 +78,16 @@ export default function RunCard({ run: initialRun, onAction }: RunCardProps) {
             </div>
           </div>
         )}
+
+        <FollowUpSuggestions
+          suggestions={[
+            { label: '查看详情', prompt: `查看运行 ${run.id} 的详细信息`, icon: 'info' },
+            ...(run.status === 'running' ? [{ label: '查看实时状态', prompt: '查看当前工作流运行状态', icon: 'monitoring' }] : []),
+            ...(run.status === 'failed' ? [{ label: '分析失败原因', prompt: `帮我分析运行 ${run.id} 的失败原因`, icon: 'bug_report' }] : []),
+            ...(run.status === 'completed' ? [{ label: '分析运行结果', prompt: `帮我分析运行 ${run.id} 的结果`, icon: 'analytics' }] : []),
+          ]}
+          onAction={onAction}
+        />
       </div>
     </motion.div>
   );

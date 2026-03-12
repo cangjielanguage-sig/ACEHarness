@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Badge } from '@/components/ui/badge';
+import FollowUpSuggestions from './FollowUpSuggestions';
 
 interface SkillCardProps {
   skill: { name: string; description?: string; tags?: string[]; version?: string; platforms?: string[]; detailedDescription?: string };
@@ -59,6 +60,14 @@ export default function SkillCard({ skill, onAction }: SkillCardProps) {
             </motion.div>
           )}
         </AnimatePresence>
+
+        <FollowUpSuggestions
+          suggestions={[
+            { label: '创建新 Skill', prompt: '帮我创建一个新的 Skill', icon: 'add' },
+            { label: '介绍此 Skill', prompt: `帮我介绍一下 Skill ${skill.name} 的用途和使用方法`, icon: 'info' },
+          ]}
+          onAction={onAction}
+        />
       </div>
     </motion.div>
   );
