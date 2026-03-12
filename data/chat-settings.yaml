@@ -1,6 +1,24 @@
 skills:
+  aceflow-chat-card: true
+  algorithmic-art: false
+  brand-guidelines: false
   build-cangjie: false
+  canvas-design: false
+  claude-api: false
+  doc-coauthoring: false
+  docx: false
+  frontend-design: false
+  internal-comms: false
+  mcp-builder: false
+  pdf: false
   power-gitcode: true
+  pptx: false
   profile-cangjie: false
   run-cangjie-tests: false
-  use-knowledge-base: false
+  skill-creator: false
+  slack-gif-creator: false
+  theme-factory: false
+  use-knowledge-base: true
+  web-artifacts-builder: false
+  webapp-testing: false
+  xlsx: false

@@ -62,7 +62,7 @@ interface DashboardChatContextType {
   undoActionById: (messageId: string, actionId: string) => Promise<void>;
   retryAction: (messageId: string, actionId: string) => Promise<void>;
   skillSettings: Record<string, boolean>;
-  discoveredSkills: { name: string; label: string; description: string }[];
+  discoveredSkills: { name: string; label: string; description: string; source?: string; tags?: string[] }[];
   toggleSkill: (skill: string) => void;
 }
 
@@ -133,7 +133,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [model, setModel] = useState('claude-sonnet-4-6');
   const [skillSettings, setSkillSettings] = useState<Record<string, boolean>>({ 'power-gitcode': true });
-  const [discoveredSkills, setDiscoveredSkills] = useState<{ name: string; label: string; description: string }[]>([]);
+  const [discoveredSkills, setDiscoveredSkills] = useState<{ name: string; label: string; description: string; source?: string; tags?: string[] }[]>([]);
 
   // Load skill settings on mount
   useEffect(() => {
