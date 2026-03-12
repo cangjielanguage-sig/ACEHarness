@@ -76,7 +76,7 @@ function PromptSection({ label, icon, content, agentName, promptKey, onAction }:
                     size="sm"
                     variant="outline"
                     className="text-xs h-7 gap-1 hover:bg-primary/5 hover:border-primary/40"
-                    onClick={(e) => { e.stopPropagation(); onAction(`帮我优化 Agent ${agentName} 的${label}，当前内容如下：\n\n${content}`); }}
+                    onClick={(e) => { e.stopPropagation(); onAction(`优化 Agent ${agentName} 的${label}`); }}
                   >
                     <span className="material-symbols-outlined text-xs">auto_fix_high</span>
                     优化此提示词
@@ -85,7 +85,7 @@ function PromptSection({ label, icon, content, agentName, promptKey, onAction }:
                     size="sm"
                     variant="ghost"
                     className="text-xs h-7 gap-1"
-                    onClick={(e) => { e.stopPropagation(); onAction(`帮我分析 Agent ${agentName} 的${label}的优缺点`); }}
+                    onClick={(e) => { e.stopPropagation(); onAction(`分析 Agent ${agentName} 的${label}的优缺点`); }}
                   >
                     <span className="material-symbols-outlined text-xs">analytics</span>
                     分析

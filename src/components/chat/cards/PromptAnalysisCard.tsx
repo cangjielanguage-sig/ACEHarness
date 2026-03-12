@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import FollowUpSuggestions from './FollowUpSuggestions';
 
 interface PromptAnalysisCardProps {
   result: {
@@ -102,17 +103,32 @@ export default function PromptAnalysisCard({ result, onAction }: PromptAnalysisC
 
         {analysis.optimizedPrompt && (
           <div className="mt-3 pt-3 border-t">
+            <div className="text-xs font-medium text-purple-500 mb-1.5 flex items-center gap-1">
+              <span className="material-symbols-outlined text-xs">auto_fix_high</span>
+              优化后的提示词
+            </div>
+            <div className="p-2.5 rounded border bg-muted/30 text-xs text-muted-foreground max-h-40 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+              {analysis.optimizedPrompt}
+            </div>
             <Button
               size="sm"
-              variant="outline"
-              className="text-xs h-7 gap-1"
-              onClick={() => onAction?.(`应用优化后的提示词:\n${analysis.optimizedPrompt}`)}
+              className="text-xs h-7 gap-1 mt-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white"
+              onClick={() => onAction?.(`请将优化后的提示词应用到 Agent${result.agentName ? ' ' + result.agentName : ''} 的配置中`)}
             >
-              <span className="material-symbols-outlined text-xs">auto_fix_high</span>
-              应用优化建议
+              <span className="material-symbols-outlined text-xs">check</span>
+              应用此优化版本
             </Button>
           </div>
         )}
+
+        <FollowUpSuggestions
+          suggestions={[
+            { label: '继续优化', prompt: `继续优化这个提示词，方向是更精确更简洁`, icon: 'auto_fix_high' },
+            { label: '换个方向优化', prompt: `用不同的方向重新优化这个提示词`, icon: 'refresh' },
+            ...(result.agentName ? [{ label: '查看 Agent 配置', prompt: `查看 Agent ${result.agentName} 的详细配置`, icon: 'info' }] : []),
+          ]}
+          onAction={onAction}
+        />
       </div>
     </motion.div>
   );
