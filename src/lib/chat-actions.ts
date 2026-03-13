@@ -107,6 +107,14 @@ export interface ActionState {
 
 // --- 解析 ---
 
+/** Check if a parsed JSON object looks like a card */
+function isCardLike(obj: any): boolean {
+  return obj && typeof obj === 'object' && (
+    (obj.header && typeof obj.header === 'object') ||
+    (Array.isArray(obj.blocks) && obj.blocks.length > 0)
+  );
+}
+
 /** 从 AI 回复 markdown 中提取 action blocks 和 card blocks */
 export function parseActions(markdown: string): { text: string; actions: ActionBlock[]; cards: any[] } {
   const actions: ActionBlock[] = [];
@@ -122,6 +130,12 @@ export function parseActions(markdown: string): { text: string; actions: ActionB
           params: parsed.params || {},
           description: parsed.description,
         });
+        return '';
+      }
+      // Not a valid action — check if it's a card
+      if (isCardLike(parsed)) {
+        cards.push(parsed);
+        return '';
       }
     } catch {
       return _match;
@@ -129,11 +143,11 @@ export function parseActions(markdown: string): { text: string; actions: ActionB
     return '';
   });
 
-  // Match ```card ... ``` blocks (also catch ```json blocks that look like cards)
-  text = text.replace(/```(?:card|json)\s*\n([\s\S]*?)```/g, (_match, json: string) => {
+  // Match ```card```, ```json```, or any other code block that contains card-like JSON
+  text = text.replace(/```(?:card|json|)\s*\n([\s\S]*?)```/g, (_match, json: string) => {
     try {
       const parsed = JSON.parse(json.trim());
-      if (parsed.blocks || parsed.header) {
+      if (isCardLike(parsed)) {
         cards.push(parsed);
         return '';
       }

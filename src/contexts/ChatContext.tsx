@@ -185,7 +185,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     setLoading(false);
     setStreamingMessageId(null);
-    apiLoadSession(activeSessionId).then(s => setActiveSession(s));
+    apiLoadSession(activeSessionId).then(s => {
+      if (!s) { setActiveSession(null); return; }
+      // Re-parse messages that have unparsed action/card blocks in content
+      const reparsed = {
+        ...s,
+        messages: s.messages.map(m => {
+          if (m.role !== 'assistant' || !m.content) return m;
+          const hasUnparsed = /```(?:action|card)\s*\n/.test(m.content);
+          if (!hasUnparsed) return m;
+          const { text, actions, cards } = parseActions(m.content);
+          const actionStates: ActionState[] = actions.map(a => ({
+            id: genId(), action: a, status: 'pending' as ActionStatus, timestamp: m.timestamp,
+          }));
+          return {
+            ...m,
+            content: text,
+            actions: actionStates.length > 0 ? [...(m.actions || []), ...actionStates] : m.actions,
+            cards: cards.length > 0 ? [...(m.cards || []), ...cards] : m.cards,
+          };
+        }),
+      };
+      setActiveSession(reparsed);
+    });
   }, [activeSessionId]);
 
   // Debounced persist to server
