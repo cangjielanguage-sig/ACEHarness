@@ -85,21 +85,6 @@ export default function ChatPage() {
     };
   }, [isResizing]);
 
-  // --- Swipe gesture for mobile ---
-  const touchStartX = useRef(0);
-  const touchStartY = useRef(0);
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-    touchStartY.current = e.touches[0].clientY;
-  }, []);
-  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    const dy = Math.abs(e.changedTouches[0].clientY - touchStartY.current);
-    if (dy > 80) return; // ignore vertical swipes
-    if (dx > 60 && !sidebarOpen) setSidebarOpen(true);
-    if (dx < -60 && sidebarOpen) setSidebarOpen(false);
-  }, [sidebarOpen]);
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeSession?.messages, loading]);
@@ -133,7 +118,7 @@ export default function ChatPage() {
   const messages = activeSession?.messages || [];
 
   return (
-    <div ref={containerRef} className="h-screen flex overflow-hidden bg-background" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+    <div ref={containerRef} className="h-screen flex overflow-hidden bg-background">
       {/* Mobile overlay backdrop */}
       {isMobile && sidebarOpen && (
         <div className="fixed inset-0 bg-black/40 z-30" onClick={() => setSidebarOpen(false)} />
@@ -179,9 +164,9 @@ export default function ChatPage() {
               <span className="material-symbols-outlined text-sm">add</span>
             </Button>
             <ThemeToggle />
-            <Button size="sm" variant="outline" onClick={() => router.push('/dashboard')} title="切换到控制台" className="hidden sm:inline-flex">
-              <span className="material-symbols-outlined text-sm mr-1">dashboard</span>
-              控制台
+            <Button size="sm" variant="outline" onClick={() => router.push('/dashboard')} title="切换到控制台">
+              <span className="material-symbols-outlined text-sm sm:mr-1">dashboard</span>
+              <span className="hidden sm:inline">控制台</span>
             </Button>
           </div>
         </div>
