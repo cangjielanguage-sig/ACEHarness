@@ -173,6 +173,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Re-parse messages with unparsed action/card blocks in content
+  const reparseSession = useCallback((s: ChatSession): ChatSession => {
+    let changed = false;
+    const messages = s.messages.map(m => {
+      if (m.role !== 'assistant' || !m.content) return m;
+      const hasUnparsed = /```(?:action|card|json|)\s*\n\s*\{/.test(m.content);
+      if (!hasUnparsed) return m;
+      const { text, actions, cards } = parseActions(m.content);
+      if (actions.length === 0 && cards.length === 0) return m;
+      changed = true;
+      const actionStates: ActionState[] = actions.map(a => ({
+        id: genId(), action: a, status: 'pending' as ActionStatus, timestamp: m.timestamp,
+      }));
+      return {
+        ...m,
+        content: text,
+        actions: actionStates.length > 0 ? [...(m.actions || []), ...actionStates] : m.actions,
+        cards: cards.length > 0 ? [...(m.cards || []), ...cards] : m.cards,
+      };
+    });
+    return changed ? { ...s, messages } : s;
+  }, []);
+
   // Load full session when activeSessionId changes
   useEffect(() => {
     if (!activeSessionId) { setActiveSession(null); return; }
@@ -187,26 +210,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setStreamingMessageId(null);
     apiLoadSession(activeSessionId).then(s => {
       if (!s) { setActiveSession(null); return; }
-      // Re-parse messages that have unparsed action/card blocks in content
-      const reparsed = {
-        ...s,
-        messages: s.messages.map(m => {
-          if (m.role !== 'assistant' || !m.content) return m;
-          const hasUnparsed = /```(?:action|card)\s*\n/.test(m.content);
-          if (!hasUnparsed) return m;
-          const { text, actions, cards } = parseActions(m.content);
-          const actionStates: ActionState[] = actions.map(a => ({
-            id: genId(), action: a, status: 'pending' as ActionStatus, timestamp: m.timestamp,
-          }));
-          return {
-            ...m,
-            content: text,
-            actions: actionStates.length > 0 ? [...(m.actions || []), ...actionStates] : m.actions,
-            cards: cards.length > 0 ? [...(m.cards || []), ...cards] : m.cards,
-          };
-        }),
-      };
-      setActiveSession(reparsed);
+      setActiveSession(reparseSession(s));
     });
   }, [activeSessionId]);
 
