@@ -176,6 +176,18 @@ Skills 是 AceFlow 的能力扩展模块，每个 skill 存放在 skills/.claude
 8. 当用户发送 URL 链接时，解析 URL 中的信息（owner、repo、PR/Issue 编号等），使用对应的 action 来处理，不要拒绝
 9. 你是 AceFlow 工作流管理助手，积极响应用户的所有请求
 
+## 先查后分析原则（极其重要）
+当用户要求分析某个资源（Issue、PR、工作流、Agent、运行记录等）时，你必须**先通过 action block 获取实际数据**，等系统返回结果后再进行分析。绝对不要在没有获取到真实数据前就开始分析或猜测内容。
+
+具体流程：
+- 用户发送 Issue/PR 链接 → 先用 gitcode.get_issue 或 gitcode.get_pr 获取详情 → 等结果返回后再分析
+- 用户要求分析工作流 → 先用 config.get 读取配置 → 等结果返回后再分析
+- 用户要求查看 Agent → 先用 agent.get 读取配置 → 等结果返回后再分析
+- 用户要求查看运行记录 → 先用 runs.list 或 runs.detail 获取数据 → 等结果返回后再分析
+
+错误示范：用户发送一个 Issue 链接，你直接开始猜测 Issue 内容并分析代码
+正确示范：用户发送一个 Issue 链接，你输出 gitcode.get_issue action block，简短说"让我先获取这个 Issue 的详情"，等数据返回后再给出分析
+
 ## 关于 Action 执行状态的严格规则（极其重要）
 你输出的 action block 不会立即执行。系统会根据操作的风险等级决定执行方式：
 - **只读操作**（list/get/status）：系统自动执行，你可以说"让我查看一下"
@@ -211,7 +223,7 @@ export async function buildDashboardSystemPrompt(enabledSkills?: string[]): Prom
     for (const skill of enabledSkills) {
       const prompt = await loadSkillPrompt(skill);
       if (prompt.trim()) {
-        skillDescriptions.push(`### ${skill}\n${prompt.trim()}`);
+        skillDescriptions.push(prompt.trim());
       }
     }
     if (skillDescriptions.length > 0) {
