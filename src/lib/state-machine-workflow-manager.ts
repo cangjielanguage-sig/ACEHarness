@@ -21,6 +21,14 @@ import type {
 import { formatTimestamp } from './utils';
 import { createEngine, getConfiguredEngine, type Engine, type EngineType } from './engines';
 import type { EngineStreamEvent } from './engines/engine-interface';
+import {
+  parseNeedInfo,
+  isPlanDone,
+  routeInfoRequest,
+  type AgentSummary,
+  type InfoRequest,
+  type RouteDecision,
+} from './supervisor-router';
 
 export interface TokenUsage {
   inputTokens: number;
@@ -90,6 +98,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private currentEngine: Engine | null = null;
   /** Current engine type */
   private engineType: EngineType = 'claude-code';
+
+  // ========== B-Lite Plan 循环相关 ==========
+  /** 待解答的用户问题 Promise 解析器 */
+  private pendingUserQuestionResolver: ((answer: string) => void) | null = null;
+  /** 当前等待解答的问题 */
+  private pendingUserQuestion: { question: string; fromAgent: string; round: number } | null = null;
 
   constructor() {
     super();
@@ -697,7 +711,13 @@ export class StateMachineWorkflowManager extends EventEmitter {
         await new Promise(r => setTimeout(r, 30000));
       }
 
-      const output = await this.executeStep(step, state, config, requirements);
+      // ========== B-Lite: 判断是否启用 Plan 循环 ==========
+      let output: string;
+      if (step.enablePlanLoop) {
+        output = await this.executeStepWithInfoGathering(step, state, config, requirements);
+      } else {
+        output = await this.executeStep(step, state, config, requirements);
+      }
       stepOutputs.push(output);
 
       // Parse issues from output
@@ -730,7 +750,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
     step: WorkflowStep,
     state: StateMachineState,
     config: StateMachineWorkflowConfig,
-    requirements?: string
+    requirements?: string,
+    extraContext?: string
   ): Promise<string> {
     const agent = this.agents.find(a => a.name === step.agent);
     if (!agent) {
@@ -751,7 +772,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     try {
       // Build context (now async)
-      const context = await this.buildStepContext(step, state, config, requirements);
+      const context = await this.buildStepContext(step, state, config, requirements, extraContext);
 
       // Execute step (reuse existing process manager logic)
       const output = await this.runAgentStep(step, context, config);
@@ -811,7 +832,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
     step: WorkflowStep,
     state: StateMachineState,
     config: StateMachineWorkflowConfig,
-    requirements?: string
+    requirements?: string,
+    extraContext?: string
   ): Promise<string> {
     const parts: string[] = [];
 
@@ -915,6 +937,31 @@ export class StateMachineWorkflowManager extends EventEmitter {
           parts.push(conclusions.join('\n\n'));
         }
       } catch { /* non-critical */ }
+    }
+
+    // ========== B-Lite: 注入可选的下一状态 ==========
+    if (state.transitions && state.transitions.length > 0) {
+      parts.push(`\n# 可选的下一状态`);
+      for (const t of state.transitions) {
+        const targetState = config.workflow.states.find(s => s.name === t.to);
+        parts.push(`- ${t.to}: ${targetState?.description || '无描述'}`);
+      }
+    }
+
+    // ========== B-Lite: 注入信息请求协议 ==========
+    if (step.enablePlanLoop) {
+      parts.push(`\n# 信息请求协议`);
+      parts.push(`在执行任务前，请先评估你是否有足够的信息。`);
+      parts.push(`如果信息不足，请使用以下格式声明：`);
+      parts.push(`- 需要技术/专业信息：[NEED_INFO] 问题描述`);
+      parts.push(`- 需要用户/人工确认：[NEED_INFO:human] 问题描述`);
+      parts.push(`- 信息已充分可以执行：[PLAN_DONE]`);
+      parts.push(`\n注意：你不需要指定由谁来回答技术问题，系统会自动路由到合适的专家。`);
+    }
+
+    // ========== B-Lite: 注入额外上下文（信息收集循环） ==========
+    if (extraContext) {
+      parts.push(`\n# 补充信息\n${extraContext}`);
     }
 
     return parts.join('\n');
@@ -1515,6 +1562,161 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     // Continue execution from this state
     await this.executeStateMachine(workflowConfig, runState.requirements);
+  }
+
+  // ========== B-Lite Plan 循环实现 ==========
+
+  private async executeStepWithInfoGathering(
+    step: WorkflowStep,
+    state: StateMachineState,
+    config: StateMachineWorkflowConfig,
+    requirements?: string
+  ): Promise<string> {
+    const maxRounds = step.maxPlanRounds || 3;
+    let round = 0;
+    let extraContext = '';
+
+    while (round < maxRounds) {
+      const output = await this.executeStep(step, state, config, requirements, extraContext);
+
+      const infoRequests = parseNeedInfo(output);
+      if (infoRequests.length === 0 || isPlanDone(output)) {
+        return output;
+      }
+
+      for (const req of infoRequests) {
+        if (req.isHuman) {
+          this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
+          const answer = await this.waitForUserAnswer(req.question, step.agent, round);
+          extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
+        } else {
+          const agentSummaries = this.buildAgentSummaries();
+          const decision = await routeInfoRequest(
+            req,
+            agentSummaries,
+            step.name,
+            this.callLightweightLLM.bind(this)
+          );
+          this.emit('route-decision', { ...decision, round });
+
+          const answer = await this.queryAgent(decision.route_to, decision.question, config);
+          extraContext += `\n\n[${decision.route_to} 回答] ${decision.question}\n${answer}`;
+        }
+      }
+
+      this.emit('plan-round', { step: step.name, round: round + 1, maxRounds, infoRequests });
+      round++;
+    }
+
+    extraContext += '\n\n[系统] 信息收集已达轮次上限，请基于现有信息执行任务。';
+    return this.executeStep(step, state, config, requirements, extraContext);
+  }
+
+  private buildAgentSummaries(): AgentSummary[] {
+    return this.agentConfigs
+      .filter(c => c.name)
+      .map(c => ({
+        name: c.name,
+        description: c.description || '',
+        keywords: c.keywords || [],
+      }));
+  }
+
+  private async queryAgent(
+    agentName: string,
+    question: string,
+    config: StateMachineWorkflowConfig
+  ): Promise<string> {
+    const roleConfig = this.agentConfigs.find(r => r.name === agentName)
+      || config.roles?.find(r => r.name === agentName);
+
+    if (!roleConfig) {
+      return `[错误] 找不到 Agent 配置: ${agentName}`;
+    }
+
+    const prompt = `# 问题\n${question}\n\n请直接回答这个问题，不需要执行其他任务。`;
+    const model = roleConfig.model || 'claude-opus-4-6';
+    const systemPrompt = roleConfig.systemPrompt || `你是一个 AI 助手。`;
+
+    const processId = `query-${agentName}-${Date.now()}`;
+
+    try {
+      const result = await this.executeWithEngine(
+        processId,
+        agentName,
+        'query',
+        prompt,
+        systemPrompt,
+        model,
+        {
+          workingDirectory: config.context?.projectRoot
+            ? resolve(process.cwd(), config.context.projectRoot)
+            : process.cwd(),
+          timeoutMs: 60000,
+        }
+      );
+      return result.result || '[无输出]';
+    } catch (error) {
+      return `[错误] 查询 Agent 失败: ${error}`;
+    }
+  }
+
+  private async callLightweightLLM(prompt: string): Promise<string> {
+    const processId = `router-llm-${Date.now()}`;
+
+    try {
+      const result = await this.executeWithEngine(
+        processId,
+        'router',
+        'route',
+        prompt,
+        '你是一个路由器，根据问题选择最合适的 Agent。',
+        'claude-haiku-2024-05-20',
+        {
+          workingDirectory: process.cwd(),
+          timeoutMs: 30000,
+        }
+      );
+      return result.result || '';
+    } catch (error) {
+      console.error('[SupervisorRouter] LLM 调用失败:', error);
+      return '';
+    }
+  }
+
+  private async waitForUserAnswer(question: string, fromAgent: string, round: number): Promise<string> {
+    this.pendingUserQuestion = { question, fromAgent, round };
+
+    return new Promise((resolve) => {
+      this.pendingUserQuestionResolver = resolve;
+
+      const checkInterval = setInterval(() => {
+        if (!this.pendingUserQuestionResolver) {
+          clearInterval(checkInterval);
+        }
+      }, 500);
+
+      setTimeout(() => {
+        if (this.pendingUserQuestionResolver) {
+          this.pendingUserQuestionResolver('[超时] 用户未回答');
+          this.pendingUserQuestionResolver = null;
+          this.pendingUserQuestion = null;
+          clearInterval(checkInterval);
+        }
+      }, 300000);
+    });
+  }
+
+  submitUserAnswer(answer: string): void {
+    if (this.pendingUserQuestionResolver) {
+      this.pendingUserQuestionResolver(answer);
+      this.pendingUserQuestionResolver = null;
+      this.pendingUserQuestion = null;
+    }
+  }
+
+  getPendingUserQuestion(): { question: string; fromAgent: string; round: number } | null {
+    return this.pendingUserQuestion;
   }
 }
 

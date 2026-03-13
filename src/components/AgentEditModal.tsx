@@ -34,6 +34,9 @@ interface AgentConfig {
   capabilities?: string[];
   constraints?: string[];
   reviewPanel?: ReviewPanel;
+  // B-Lite 新增
+  keywords?: string[];
+  description?: string;
 }
 
 interface AgentEditModalProps {
@@ -286,6 +289,39 @@ export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentE
                 </Badge>
               ))}
             </div>
+          </div>
+
+          {/* Keywords (B-Lite) */}
+          <div>
+            <Label>
+              路由关键词
+              <span className="text-xs text-muted-foreground ml-2">
+                （B-Lite 架构用，逗号分隔）
+              </span>
+            </Label>
+            <Input
+              value={formData.keywords?.join(', ') || ''}
+              onChange={(e) => setFormData({ 
+                ...formData, 
+                keywords: e.target.value.split(',').map(s => s.trim()).filter(Boolean) 
+              })}
+              placeholder="如：架构, 接口, 模块, API"
+            />
+          </div>
+
+          {/* Description (B-Lite) */}
+          <div>
+            <Label>
+              Agent 描述
+              <span className="text-xs text-muted-foreground ml-2">
+                （B-Lite 架构用，不注入 prompt）
+              </span>
+            </Label>
+            <Input
+              value={formData.description || ''}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              placeholder="如：负责系统架构设计"
+            />
           </div>
 
           {/* Expert Panel Configuration */}

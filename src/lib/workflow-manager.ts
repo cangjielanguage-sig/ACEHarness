@@ -19,6 +19,12 @@ import type { WorkflowConfig, WorkflowPhase, WorkflowStep, RoleConfig, Iteration
 import { formatTimestamp } from './utils';
 import { createEngine, getConfiguredEngine, type Engine, type EngineType } from './engines';
 import type { EngineStreamEvent } from './engines/engine-interface';
+import {
+  parseNeedInfo,
+  isPlanDone,
+  routeInfoRequest,
+  type AgentSummary,
+} from './supervisor-router';
 
 export interface TokenUsage {
   inputTokens: number;
@@ -99,6 +105,12 @@ class WorkflowManager extends EventEmitter {
   private currentEngine: Engine | null = null;
   /** Current engine type */
   private engineType: EngineType = 'claude-code';
+
+  // ========== B-Lite Plan 循环相关 ==========
+  /** 待解答的用户问题 Promise 解析器 */
+  private pendingUserQuestionResolver: ((answer: string) => void) | null = null;
+  /** 当前等待解答的问题 */
+  private pendingUserQuestion: { question: string; fromAgent: string; round: number } | null = null;
 
   /**
    * Load a single skill's content from either project or system skills directory
@@ -1004,8 +1016,16 @@ class WorkflowManager extends EventEmitter {
     await this.persistState();
 
     try {
-      const jsonResult = await this.executeStep(step, workflowConfig);
-      const resultText = jsonResult.result;
+      // ========== B-Lite: 判断是否启用 Plan 循环 ==========
+      let resultText: string;
+      let jsonResult: ClaudeJsonResult;
+      if (step.enablePlanLoop) {
+        jsonResult = await this.executeStepWithInfoGathering(step, workflowConfig);
+        resultText = jsonResult.result;
+      } else {
+        jsonResult = await this.executeStep(step, workflowConfig);
+        resultText = jsonResult.result;
+      }
 
       const tokenUsage: TokenUsage = {
         inputTokens: jsonResult.usage.input_tokens,
@@ -1165,7 +1185,7 @@ class WorkflowManager extends EventEmitter {
     return !last || last.status !== 'failed';
   }
 
-  async executeStep(step: WorkflowStep, workflowConfig: WorkflowConfig): Promise<ClaudeJsonResult> {
+  async executeStep(step: WorkflowStep, workflowConfig: WorkflowConfig, extraContext?: string): Promise<ClaudeJsonResult> {
     const roleConfig = this.agentConfigs.find((r) => r.name === step.agent)
       || workflowConfig.roles?.find((r) => r.name === step.agent);
     if (!roleConfig) {
@@ -1177,17 +1197,18 @@ class WorkflowManager extends EventEmitter {
 
     if (enableReviewPanel && roleConfig.reviewPanel?.subAgents) {
       // Execute review panel mode: run multiple sub-agents in parallel
-      return await this.executeReviewPanel(step, workflowConfig, roleConfig);
+      return await this.executeReviewPanel(step, workflowConfig, roleConfig, extraContext);
     }
 
     // Normal single-agent execution
-    return await this.executeSingleAgent(step, workflowConfig, roleConfig);
+    return await this.executeSingleAgent(step, workflowConfig, roleConfig, extraContext);
   }
 
   private async executeReviewPanel(
     step: WorkflowStep,
     workflowConfig: WorkflowConfig,
-    roleConfig: RoleConfig
+    roleConfig: RoleConfig,
+    extraContext?: string
   ): Promise<ClaudeJsonResult> {
     const subAgents = roleConfig.reviewPanel!.subAgents;
     const subAgentNames = Object.keys(subAgents);
@@ -1276,7 +1297,8 @@ class WorkflowManager extends EventEmitter {
   private async executeSingleAgent(
     step: WorkflowStep,
     workflowConfig: WorkflowConfig,
-    roleConfig: RoleConfig
+    roleConfig: RoleConfig,
+    extraContext?: string
   ): Promise<ClaudeJsonResult> {
     // Load previous step outputs for context injection — only completed steps
     let previousOutputs: Record<string, string> = {};
@@ -1292,7 +1314,7 @@ class WorkflowManager extends EventEmitter {
       } catch { /* non-critical */ }
     }
 
-    const prompt = await this.buildPrompt(step, workflowConfig, roleConfig, previousOutputs);
+    const prompt = await this.buildPrompt(step, workflowConfig, roleConfig, previousOutputs, extraContext);
     const processId = `${step.agent}-${step.name}-${Date.now()}`;
 
     // Check for existing session to resume (iterative phases)
@@ -1446,7 +1468,8 @@ class WorkflowManager extends EventEmitter {
     step: WorkflowStep,
     workflowConfig: WorkflowConfig,
     roleConfig: RoleConfig,
-    previousOutputs?: Record<string, string>
+    previousOutputs?: Record<string, string>,
+    extraContext?: string
   ): Promise<string> {
     let prompt = `# 任务\n${step.task}\n\n`;
 
@@ -1606,6 +1629,22 @@ class WorkflowManager extends EventEmitter {
       prompt += `1. **迭代改进分析**（单独文件，如 \`迭代改进分析-迭代N.md\`）：本轮发现的问题、改进点对比、修复方案选择等分析过程。\n`;
       prompt += `2. **最终完整方案**（单独文件，如 \`最终设计方案.md\` 或 \`最终代码.md\`）：融合所有历史迭代改进后的完整最终产出。这份文档中不得出现任何"补丁"、"增量修改"、"相比上一轮"等措辞，它必须是一份从零可读的、独立完整的最终文档，读者无需了解迭代历史即可理解全貌。\n\n`;
       prompt += `最终方案文档是你最重要的交付物，请确保它的质量和完整性。\n\n`;
+    }
+
+    // ========== B-Lite: 注入信息请求协议 ==========
+    if (step.enablePlanLoop) {
+      prompt += `## 信息请求协议\n`;
+      prompt += `在执行任务前，请先评估你是否有足够的信息。\n`;
+      prompt += `如果信息不足，请使用以下格式声明：\n`;
+      prompt += `- 需要技术/专业信息：[NEED_INFO] 问题描述\n`;
+      prompt += `- 需要用户/人类确认：[NEED_INFO:human] 问题描述\n`;
+      prompt += `- 信息已充分可以执行：[PLAN_DONE]\n`;
+      prompt += `\n注意：你不需要指定由谁来回答技术问题，系统会自动路由到合适的专家。\n\n`;
+    }
+
+    // ========== B-Lite: 注入额外上下文（信息收集循环） ==========
+    if (extraContext) {
+      prompt += `## 补充信息\n${extraContext}\n\n`;
     }
 
     return prompt;
@@ -2293,6 +2332,160 @@ class WorkflowManager extends EventEmitter {
 
   getIterationStates(): Map<string, IterationState> {
     return this.iterationStates;
+  }
+
+  // ========== B-Lite Plan 循环实现 ==========
+
+  private async executeStepWithInfoGathering(
+    step: WorkflowStep,
+    workflowConfig: WorkflowConfig
+  ): Promise<ClaudeJsonResult> {
+    const maxRounds = step.maxPlanRounds || 3;
+    let round = 0;
+    let extraContext = '';
+
+    while (round < maxRounds) {
+      const jsonResult = await this.executeStep(step, workflowConfig, extraContext);
+      const output = jsonResult.result;
+
+      const infoRequests = parseNeedInfo(output);
+      if (infoRequests.length === 0 || isPlanDone(output)) {
+        return jsonResult;
+      }
+
+      for (const req of infoRequests) {
+        if (req.isHuman) {
+          this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
+          const answer = await this.waitForUserAnswer(req.question, step.agent, round);
+          extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
+        } else {
+          const agentSummaries = this.buildAgentSummaries();
+          const decision = await routeInfoRequest(
+            req,
+            agentSummaries,
+            step.name,
+            this.callLightweightLLM.bind(this)
+          );
+          this.emit('route-decision', { ...decision, round });
+
+          const answer = await this.queryAgent(decision.route_to, decision.question, workflowConfig);
+          extraContext += `\n\n[${decision.route_to} 回答] ${decision.question}\n${answer}`;
+        }
+      }
+
+      this.emit('plan-round', { step: step.name, round: round + 1, maxRounds, infoRequests });
+      round++;
+    }
+
+    extraContext += '\n\n[系统] 信息收集已达轮次上限，请基于现有信息执行任务。';
+    return this.executeStep(step, workflowConfig, extraContext);
+  }
+
+  private buildAgentSummaries(): AgentSummary[] {
+    return this.agentConfigs
+      .filter(c => c.name)
+      .map(c => ({
+        name: c.name,
+        description: c.description || '',
+        keywords: c.keywords || [],
+      }));
+  }
+
+  private async queryAgent(
+    agentName: string,
+    question: string,
+    workflowConfig: WorkflowConfig
+  ): Promise<string> {
+    const roleConfig = this.agentConfigs.find(r => r.name === agentName)
+      || workflowConfig.roles?.find(r => r.name === agentName);
+
+    if (!roleConfig) {
+      return `[错误] 找不到 Agent 配置: ${agentName}`;
+    }
+
+    const prompt = `# 问题\n${question}\n\n请直接回答这个问题，不需要执行其他任务。`;
+    const model = roleConfig.model || 'claude-opus-4-6';
+    const systemPrompt = roleConfig.systemPrompt || `你是一个 AI 助手。`;
+
+    const processId = `query-${agentName}-${Date.now()}`;
+
+    try {
+      const result = await this.executeWithEngine(
+        processId,
+        agentName,
+        'query',
+        prompt,
+        systemPrompt,
+        model,
+        {
+          workingDirectory: workflowConfig.context?.projectRoot
+            ? resolve(process.cwd(), workflowConfig.context.projectRoot)
+            : process.cwd(),
+          timeoutMs: 60000,
+        }
+      );
+      return result.result || '[无输出]';
+    } catch (error) {
+      return `[错误] 查询 Agent 失败: ${error}`;
+    }
+  }
+
+  private async callLightweightLLM(prompt: string): Promise<string> {
+    const processId = `router-llm-${Date.now()}`;
+
+    try {
+      const result = await this.executeWithEngine(
+        processId,
+        'router',
+        'route',
+        prompt,
+        '你是一个路由器，根据问题选择最合适的 Agent。',
+        'claude-haiku-2024-05-20',
+        {
+          workingDirectory: process.cwd(),
+          timeoutMs: 30000,
+        }
+      );
+      return result.result || '';
+    } catch (error) {
+      console.error('[SupervisorRouter] LLM 调用失败:', error);
+      return '';
+    }
+  }
+
+  private async waitForUserAnswer(question: string, fromAgent: string, round: number): Promise<string> {
+    this.pendingUserQuestion = { question, fromAgent, round };
+
+    return new Promise((resolve) => {
+      this.pendingUserQuestionResolver = resolve;
+
+      const checkInterval = setInterval(() => {
+        if (!this.pendingUserQuestionResolver) {
+          clearInterval(checkInterval);
+        }
+      }, 500);
+
+      setTimeout(() => {
+        if (this.pendingUserQuestionResolver) {
+          this.pendingUserQuestionResolver('[超时] 用户未回答');
+          this.pendingUserQuestionResolver = null;
+          this.pendingUserQuestion = null;
+          clearInterval(checkInterval);
+        }
+      }, 300000);
+    });
+  }
+
+  submitUserAnswer(answer: string): void {
+    if (this.pendingUserQuestionResolver) {
+      this.pendingUserQuestionResolver(answer);
+      this.pendingUserQuestionResolver = null;
+      this.pendingUserQuestion = null;
+    }
+  }
+
+  getPendingUserQuestion(): { question: string; fromAgent: string; round: number } | null {
+    return this.pendingUserQuestion;
   }
 }
 

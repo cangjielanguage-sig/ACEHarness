@@ -1,0 +1,15 @@
+name: simple-reviewer
+team: blue
+model: claude-sonnet-4-6
+temperature: 0.7
+capabilities:
+  - 代码审查
+systemPrompt: |
+  你是一个简单的代码审查员，负责审查代码质量。
+keywords:
+  - 代码审查
+  - 质量
+  - 问题
+  - 改进
+description: 可以回答代码审查相关问题
+_file: simple-reviewer.yaml
