@@ -62,8 +62,21 @@ export async function GET(request: NextRequest) {
 
   const stream = new ReadableStream({
     start(controller) {
+      let closed = false;
+
       const send = (event: string, data: any) => {
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
+
+      const cleanup = () => {
+        closed = true;
+        processManager.off('stream', onStream);
+        try { controller.close(); } catch {}
       };
 
       // Stream handler — forward text deltas
@@ -92,14 +105,12 @@ export async function GET(request: NextRequest) {
           send('error', { message: err.message || '执行失败' });
         })
         .finally(() => {
-          processManager.off('stream', onStream);
-          try { controller.close(); } catch {}
+          cleanup();
         });
 
-      // Cleanup on client disconnect
+      // Cleanup on client disconnect (but don't kill the process — let it finish)
       request.signal.addEventListener('abort', () => {
-        processManager.off('stream', onStream);
-        try { controller.close(); } catch {}
+        cleanup();
       });
     },
   });

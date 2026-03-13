@@ -363,60 +363,81 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         activeChatIdRef.current = chatId;
 
         await new Promise<void>((resolve, reject) => {
-          const es = new EventSource(`/api/chat/stream?id=${chatId}`);
-          activeEventSourceRef.current = es;
           let accumulated = '';
+          let reconnectAttempts = 0;
+          const MAX_RECONNECTS = 3;
 
-          es.addEventListener('delta', (e) => {
-            const { content } = JSON.parse(e.data);
-            accumulated += content;
-            updateActiveSession(s => ({
-              ...s, messages: s.messages.map(m => m.id === followUpMsgId ? { ...m, content: accumulated } : m),
-            }));
-          });
+          const connectSSE = () => {
+            const es = new EventSource(`/api/chat/stream?id=${chatId}`);
+            activeEventSourceRef.current = es;
 
-          es.addEventListener('done', (e) => {
-            const data = JSON.parse(e.data);
-            es.close();
-            activeEventSourceRef.current = null;
-            activeChatIdRef.current = null;
-            if (data.sessionId) {
-              updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
-            }
-            const fullText = data.result || accumulated;
-            const { text: cleanText, actions: newActions, cards: newCards } = parseActions(fullText);
-            const newActionStates: ActionState[] = newActions.map(a => ({
-              id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
-            }));
-            updateActiveSession(s => ({
-              ...s, updatedAt: Date.now(),
-              messages: s.messages.map(m => m.id === followUpMsgId ? {
-                ...m, content: cleanText,
-                actions: newActionStates.length > 0 ? newActionStates : undefined,
-                cards: newCards.length > 0 ? newCards : undefined,
-              } : m),
-            }));
-            if (newActionStates.length > 0) {
-              autoExecuteSafeActions(followUpMsgId, newActionStates);
-            }
-            // If no cards and content is substantial, trigger a card-format retry
-            if (newCards.length === 0 && cleanText.length > 200 && retryCount < 1) {
-              resolve(); // resolve first, then retry below
-              const retryPrompt = `你刚才的回复没有使用 \`\`\`card 代码块来展示结构化内容。请将上面的分析结果重新用 \`\`\`card 代码块格式输出为可视化卡片（不要用 \`\`\`json）。card 格式示例：{"header":{"icon":"图标","title":"标题","gradient":"from-blue-500 to-cyan-500"},"blocks":[...],"actions":[{"label":"按钮","prompt":"消息"}]}`;
-              // Fire-and-forget: send correction as a new user-invisible follow-up
-              sendMessageRef.current?.(retryPrompt);
-            }
-            resolve();
-          });
+            es.addEventListener('delta', (e) => {
+              const { content } = JSON.parse(e.data);
+              accumulated += content;
+              updateActiveSession(s => ({
+                ...s, messages: s.messages.map(m => m.id === followUpMsgId ? { ...m, content: accumulated } : m),
+              }));
+            });
 
-          es.addEventListener('error', (e) => {
-            es.close();
-            activeEventSourceRef.current = null;
-            activeChatIdRef.current = null;
-            reject(new Error('Stream error'));
-          });
+            es.addEventListener('done', (e) => {
+              const data = JSON.parse(e.data);
+              es.close();
+              activeEventSourceRef.current = null;
+              activeChatIdRef.current = null;
+              if (data.sessionId) {
+                updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
+              }
+              const fullText = data.result || accumulated;
+              const { text: cleanText, actions: newActions, cards: newCards } = parseActions(fullText);
+              const newActionStates: ActionState[] = newActions.map(a => ({
+                id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
+              }));
+              updateActiveSession(s => ({
+                ...s, updatedAt: Date.now(),
+                messages: s.messages.map(m => m.id === followUpMsgId ? {
+                  ...m, content: cleanText,
+                  actions: newActionStates.length > 0 ? newActionStates : undefined,
+                  cards: newCards.length > 0 ? newCards : undefined,
+                } : m),
+              }));
+              if (newActionStates.length > 0) {
+                autoExecuteSafeActions(followUpMsgId, newActionStates);
+              }
+              // If no cards and content is substantial, trigger a card-format retry
+              if (newCards.length === 0 && cleanText.length > 200 && retryCount < 1) {
+                resolve(); // resolve first, then retry below
+                const retryPrompt = `你刚才的回复没有使用 \`\`\`card 代码块来展示结构化内容。请将上面的分析结果重新用 \`\`\`card 代码块格式输出为可视化卡片（不要用 \`\`\`json）。card 格式示例：{"header":{"icon":"图标","title":"标题","gradient":"from-blue-500 to-cyan-500"},"blocks":[...],"actions":[{"label":"按钮","prompt":"消息"}]}`;
+                sendMessageRef.current?.(retryPrompt);
+              }
+              resolve();
+            });
 
-          es.onerror = () => { es.close(); activeEventSourceRef.current = null; activeChatIdRef.current = null; reject(new Error('SSE connection error')); };
+            es.addEventListener('error', () => {
+              es.close();
+              activeEventSourceRef.current = null;
+              if (reconnectAttempts < MAX_RECONNECTS) {
+                reconnectAttempts++;
+                setTimeout(connectSSE, 1000 * reconnectAttempts);
+              } else {
+                activeChatIdRef.current = null;
+                reject(new Error('Stream error'));
+              }
+            });
+
+            es.onerror = () => {
+              es.close();
+              activeEventSourceRef.current = null;
+              if (reconnectAttempts < MAX_RECONNECTS) {
+                reconnectAttempts++;
+                setTimeout(connectSSE, 1000 * reconnectAttempts);
+              } else {
+                activeChatIdRef.current = null;
+                reject(new Error('SSE connection error'));
+              }
+            };
+          };
+
+          connectSSE();
         });
       } catch { /* follow-up failed silently */ }
       setLoading(false);
@@ -464,54 +485,77 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const { chatId } = startData;
       activeChatIdRef.current = chatId;
       await new Promise<void>((resolve, reject) => {
-        const es = new EventSource(`/api/chat/stream?id=${chatId}`);
-        activeEventSourceRef.current = es;
         let accumulated = '';
+        let reconnectAttempts = 0;
+        const MAX_RECONNECTS = 3;
 
-        es.addEventListener('delta', (e) => {
-          const { content } = JSON.parse(e.data);
-          accumulated += content;
-          updateActiveSession(s => ({
-            ...s, messages: s.messages.map(m => m.id === assistantMsgId ? { ...m, content: accumulated } : m),
-          }));
-        });
+        const connectSSE = () => {
+          const es = new EventSource(`/api/chat/stream?id=${chatId}`);
+          activeEventSourceRef.current = es;
 
-        es.addEventListener('done', (e) => {
-          const data = JSON.parse(e.data);
-          es.close();
-          activeEventSourceRef.current = null;
-          activeChatIdRef.current = null;
-          if (data.sessionId) {
-            updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
-          }
-          const fullText = data.result || accumulated;
-          const { text: cleanText, actions, cards } = parseActions(fullText);
-          const actionStates: ActionState[] = actions.map(a => ({
-            id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
-          }));
-          updateActiveSession(s => ({
-            ...s, updatedAt: Date.now(),
-            messages: s.messages.map(m => m.id === assistantMsgId ? {
-              ...m, content: cleanText,
-              actions: actionStates.length > 0 ? actionStates : undefined,
-              cards: cards.length > 0 ? cards : undefined,
-              costUsd: data.costUsd, durationMs: data.durationMs, usage: data.usage,
-            } : m),
-          }));
-          if (actionStates.length > 0) {
-            autoExecuteSafeActions(assistantMsgId, actionStates);
-          }
-          resolve();
-        });
+          es.addEventListener('delta', (e) => {
+            const { content } = JSON.parse(e.data);
+            accumulated += content;
+            updateActiveSession(s => ({
+              ...s, messages: s.messages.map(m => m.id === assistantMsgId ? { ...m, content: accumulated } : m),
+            }));
+          });
 
-        es.addEventListener('error', () => {
-          es.close();
-          activeEventSourceRef.current = null;
-          activeChatIdRef.current = null;
-          reject(new Error('Stream error'));
-        });
+          es.addEventListener('done', (e) => {
+            const data = JSON.parse(e.data);
+            es.close();
+            activeEventSourceRef.current = null;
+            activeChatIdRef.current = null;
+            if (data.sessionId) {
+              updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
+            }
+            const fullText = data.result || accumulated;
+            const { text: cleanText, actions, cards } = parseActions(fullText);
+            const actionStates: ActionState[] = actions.map(a => ({
+              id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
+            }));
+            updateActiveSession(s => ({
+              ...s, updatedAt: Date.now(),
+              messages: s.messages.map(m => m.id === assistantMsgId ? {
+                ...m, content: cleanText,
+                actions: actionStates.length > 0 ? actionStates : undefined,
+                cards: cards.length > 0 ? cards : undefined,
+                costUsd: data.costUsd, durationMs: data.durationMs, usage: data.usage,
+              } : m),
+            }));
+            if (actionStates.length > 0) {
+              autoExecuteSafeActions(assistantMsgId, actionStates);
+            }
+            resolve();
+          });
 
-        es.onerror = () => { es.close(); activeEventSourceRef.current = null; activeChatIdRef.current = null; reject(new Error('SSE connection error')); };
+          es.addEventListener('error', (e) => {
+            es.close();
+            activeEventSourceRef.current = null;
+            // Try to reconnect if we haven't exceeded max attempts
+            if (reconnectAttempts < MAX_RECONNECTS) {
+              reconnectAttempts++;
+              setTimeout(connectSSE, 1000 * reconnectAttempts);
+            } else {
+              activeChatIdRef.current = null;
+              reject(new Error('Stream error'));
+            }
+          });
+
+          es.onerror = () => {
+            es.close();
+            activeEventSourceRef.current = null;
+            if (reconnectAttempts < MAX_RECONNECTS) {
+              reconnectAttempts++;
+              setTimeout(connectSSE, 1000 * reconnectAttempts);
+            } else {
+              activeChatIdRef.current = null;
+              reject(new Error('SSE connection error'));
+            }
+          };
+        };
+
+        connectSSE();
       });
     } catch (err: any) {
       // If the assistant message is still empty, convert to error
