@@ -504,8 +504,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const msg = activeSession?.messages.find(m => m.id === messageId);
     const actionState = msg?.actions?.find(a => a.id === actionId);
     if (!actionState) return;
-    await runAction(messageId, actionState);
-  }, [activeSession, runAction]);
+
+    updateAction(messageId, actionState.id, { status: 'executing' });
+    try {
+      const { result, snapshot } = await executeAction(actionState.action);
+      updateAction(messageId, actionState.id, { status: 'success', result, snapshot });
+    } catch (err: any) {
+      const errorMsg = err.message || '执行失败';
+      updateAction(messageId, actionState.id, { status: 'error', error: errorMsg });
+      // Feed error back to AI so it can self-correct
+      const { type, params } = actionState.action;
+      const errorPrompt = `刚才执行的操作失败了，请根据错误信息修正后重试：\n\n操作类型: ${type}\n参数: ${JSON.stringify(params)}\n错误: ${errorMsg}\n\n请分析错误原因并给出正确的操作。`;
+      sendMessage(errorPrompt);
+    }
+  }, [activeSession, updateAction, sendMessage]);
 
   // --- Stop streaming ---
   const stopStreaming = useCallback(() => {

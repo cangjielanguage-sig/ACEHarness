@@ -70,7 +70,15 @@ export const configApi = {
 
   async getConfig(filename: string): Promise<ConfigResponse> {
     const response = await fetch(`${API_BASE}/configs/${filename}`);
-    if (!response.ok) throw new Error('读取配置失败');
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      const available = data?.availableConfigs;
+      let msg = data?.message || `读取配置失败: ${filename} 不存在或无法读取`;
+      if (available?.length) {
+        msg += `。可用的配置文件: ${available.join(', ')}`;
+      }
+      throw new Error(msg);
+    }
     return response.json();
   },
 

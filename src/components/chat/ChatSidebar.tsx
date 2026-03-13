@@ -29,7 +29,7 @@ export default function ChatSidebar() {
   const enabledCount = discoveredSkills.filter(s => !!skillSettings[s.name]).length;
 
   return (
-    <div className="w-64 border-r bg-muted/30 flex flex-col h-full">
+    <div className="w-full bg-muted/30 flex flex-col h-full">
       <div className="p-3 border-b flex items-center justify-between">
         <span className="text-sm font-semibold">会话</span>
         <Button size="sm" variant="ghost" onClick={() => createSession()} title="新建会话">
