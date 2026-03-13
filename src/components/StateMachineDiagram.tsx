@@ -211,7 +211,7 @@ function StateNode({ data }: any) {
 
       {/* 步骤列表 */}
       <div className="space-y-0.5 mt-1.5">
-        {state.steps.map((step: any, idx: number) => {
+        {(state.steps || []).map((step: any, idx: number) => {
           const isDone = completedSteps.includes(step.name) || completedSteps.includes(`${state.name}-${step.name}`);
           const isRunningStep = currentStep === step.name || currentStep === `${state.name}-${step.name}`;
           return (

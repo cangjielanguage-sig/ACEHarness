@@ -377,7 +377,7 @@ export default function StateMachineDesignPanel({
 
   const handleDeleteStep = (index: number) => {
     if (!selectedState) return;
-    updateState({ ...selectedState, steps: selectedState.steps.filter((_, i) => i !== index) });
+    updateState({ ...selectedState, steps: (selectedState.steps || []).filter((_, i) => i !== index) });
     setEditingStep(null);
   };
 
@@ -387,20 +387,20 @@ export default function StateMachineDesignPanel({
     const newT: StateTransition = {
       to: target?.name ?? '',
       condition: {},
-      priority: (selectedState.transitions.length + 1) * 10,
+      priority: ((selectedState.transitions?.length ?? 0) + 1) * 10,
     };
-    updateState({ ...selectedState, transitions: [...selectedState.transitions, newT] });
+    updateState({ ...selectedState, transitions: [...(selectedState.transitions || []), newT] });
   };
 
   const handleUpdateTransition = (index: number, t: StateTransition) => {
     if (!selectedState) return;
-    const transitions = selectedState.transitions.map((old, i) => i === index ? t : old);
+    const transitions = (selectedState.transitions || []).map((old, i) => i === index ? t : old);
     updateState({ ...selectedState, transitions });
   };
 
   const handleDeleteTransition = (index: number) => {
     if (!selectedState) return;
-    updateState({ ...selectedState, transitions: selectedState.transitions.filter((_, i) => i !== index) });
+    updateState({ ...selectedState, transitions: (selectedState.transitions || []).filter((_, i) => i !== index) });
   };
 
   // 编辑步骤时的初始数据
@@ -442,7 +442,7 @@ export default function StateMachineDesignPanel({
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">{state.name}</div>
                 <div className={`text-xs ${selectedStateName === state.name ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                  {state.steps.length}步 · {state.transitions.length}转移
+                  {state.steps?.length ?? 0}步 · {state.transitions?.length ?? 0}转移
                 </div>
               </div>
               <div className="flex gap-0.5 ml-1">
@@ -542,9 +542,9 @@ export default function StateMachineDesignPanel({
               </Button>
             </div>
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-              <SortableContext items={selectedState.steps.map((_, i) => String(i))} strategy={verticalListSortingStrategy}>
+              <SortableContext items={(selectedState.steps || []).map((_, i) => String(i))} strategy={verticalListSortingStrategy}>
                 <div className="space-y-1.5">
-                  {selectedState.steps.map((step, index) => (
+                  {(selectedState.steps || []).map((step, index) => (
                     <SortableStepRow
                       key={index}
                       step={step}
@@ -556,7 +556,7 @@ export default function StateMachineDesignPanel({
                 </div>
               </SortableContext>
             </DndContext>
-            {selectedState.steps.length === 0 && (
+            {(selectedState.steps?.length ?? 0) === 0 && (
               <div className="text-center text-sm text-muted-foreground py-6 border border-dashed border-border rounded-lg">
                 暂无步骤，点击添加
               </div>
@@ -575,7 +575,7 @@ export default function StateMachineDesignPanel({
               </Button>
             </div>
             <div className="space-y-2">
-              {selectedState.transitions.map((transition, index) => (
+              {(selectedState.transitions || []).map((transition, index) => (
                 <TransitionRow
                   key={index}
                   transition={transition}
@@ -586,7 +586,7 @@ export default function StateMachineDesignPanel({
                   onDelete={() => handleDeleteTransition(index)}
                 />
               ))}
-              {selectedState.transitions.length === 0 && (
+              {(selectedState.transitions?.length ?? 0) === 0 && (
                 <div className="text-center text-sm text-muted-foreground py-6 border border-dashed border-border rounded-lg">
                   暂无转移规则，点击添加
                 </div>
