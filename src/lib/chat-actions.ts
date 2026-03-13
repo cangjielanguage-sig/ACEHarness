@@ -115,47 +115,88 @@ function isCardLike(obj: any): boolean {
   );
 }
 
+/**
+ * Extract a balanced JSON object starting at position `start` in `str`.
+ * Returns the JSON substring or null if not found.
+ */
+function extractBalancedJson(str: string, start: number): string | null {
+  const openIdx = str.indexOf('{', start);
+  if (openIdx === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = openIdx; i < str.length; i++) {
+    const ch = str[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    if (ch === '}') { depth--; if (depth === 0) return str.substring(openIdx, i + 1); }
+  }
+  return null;
+}
+
 /** 从 AI 回复 markdown 中提取 action blocks 和 card blocks */
 export function parseActions(markdown: string): { text: string; actions: ActionBlock[]; cards: any[] } {
   const actions: ActionBlock[] = [];
   const cards: any[] = [];
+  const removals: [number, number][] = [];
 
-  // Match ```action ... ``` blocks
-  let text = markdown.replace(/```action\s*\n([\s\S]*?)```/g, (_match, json: string) => {
+  // Find all code blocks: ```lang\n...\n```
+  // Only match relevant languages (action, card, json, or unmarked)
+  const codeBlockRegex = /```(action|card|json|)\s*\n/g;
+  let match;
+  while ((match = codeBlockRegex.exec(markdown)) !== null) {
+    const lang = match[1];
+    const contentStart = match.index + match[0].length;
+
+    // Use balanced brace matching to extract JSON
+    const jsonStr = extractBalancedJson(markdown, contentStart);
+    if (!jsonStr) continue;
+
+    // The JSON starts at some offset from contentStart
+    const jsonStartInContent = markdown.indexOf('{', contentStart);
+    const jsonEnd = jsonStartInContent + jsonStr.length;
+
+    // Find the closing ``` — must be on its own line after the JSON
+    // Search from jsonEnd, skip whitespace/newlines
+    let searchPos = jsonEnd;
+    while (searchPos < markdown.length && (markdown[searchPos] === ' ' || markdown[searchPos] === '\n' || markdown[searchPos] === '\r')) {
+      searchPos++;
+    }
+    // The closing ``` should be right here (or very close)
+    const closingIdx = markdown.indexOf('```', searchPos);
+    // Only accept if closing is within a reasonable distance (not a different code block)
+    const blockEnd = (closingIdx !== -1 && closingIdx - jsonEnd < 10) ? closingIdx + 3 : jsonEnd;
+
     try {
-      const parsed = JSON.parse(json.trim());
-      if (parsed.type && parsed.description) {
-        actions.push({
-          type: parsed.type,
-          params: parsed.params || {},
-          description: parsed.description,
-        });
-        return '';
+      const parsed = JSON.parse(jsonStr);
+
+      if (lang === 'action' && parsed.type && parsed.description) {
+        actions.push({ type: parsed.type, params: parsed.params || {}, description: parsed.description });
+        removals.push([match.index, blockEnd]);
+        // Advance regex past this block to avoid re-matching nested ```
+        codeBlockRegex.lastIndex = blockEnd;
+        continue;
       }
-      // Not a valid action — check if it's a card
+
       if (isCardLike(parsed)) {
         cards.push(parsed);
-        return '';
+        removals.push([match.index, blockEnd]);
+        codeBlockRegex.lastIndex = blockEnd;
+        continue;
       }
     } catch {
-      return _match;
+      // not valid JSON, leave as-is
     }
-    return '';
-  });
+  }
 
-  // Match ```card```, ```json```, or any other code block that contains card-like JSON
-  text = text.replace(/```(?:card|json|)\s*\n([\s\S]*?)```/g, (_match, json: string) => {
-    try {
-      const parsed = JSON.parse(json.trim());
-      if (isCardLike(parsed)) {
-        cards.push(parsed);
-        return '';
-      }
-    } catch {
-      // not valid JSON or not a card
-    }
-    return _match;
-  });
+  // Remove matched blocks from text (in reverse order to preserve indices)
+  let text = markdown;
+  for (const [start, end] of removals.sort((a, b) => b[0] - a[0])) {
+    text = text.substring(0, start) + text.substring(end);
+  }
 
   return { text: text.trim(), actions, cards };
 }

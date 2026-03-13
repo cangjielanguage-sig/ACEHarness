@@ -88,7 +88,11 @@ export const configApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config }),
     });
-    if (!response.ok) throw new Error('保存配置失败');
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      const details = data?.details?.map((d: any) => `${d.path?.join('.')}: ${d.message}`).join('; ');
+      throw new Error(data?.error ? `${data.error}${details ? ` (${details})` : ''}` : '保存配置失败');
+    }
     return response.json();
   },
 
