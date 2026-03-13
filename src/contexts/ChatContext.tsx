@@ -160,7 +160,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const activeSessionRef = useRef<ChatSession | null>(null);
   const activeEventSourceRef = useRef<EventSource | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
+  const skillSettingsRef = useRef(skillSettings);
+  const sendMessageRef = useRef<((text: string) => Promise<void>) | null>(null);
   activeSessionRef.current = activeSession;
+  skillSettingsRef.current = skillSettings;
 
   // Load session list on mount
   useEffect(() => {
@@ -267,23 +270,37 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }));
   }, [updateActiveSession]);
 
+  // Inject context into actions before execution (e.g., filter skill.list by enabled skills)
+  const enrichAction = useCallback((action: ActionBlock): ActionBlock => {
+    if (action.type === 'skill.list') {
+      const enabledSkills = Object.entries(skillSettingsRef.current)
+        .filter(([, v]) => v)
+        .map(([k]) => k);
+      return { ...action, params: { ...action.params, enabledSkills } };
+    }
+    return action;
+  }, []);
+
   const runAction = useCallback(async (messageId: string, actionState: ActionState) => {
     updateAction(messageId, actionState.id, { status: 'executing' });
     try {
-      const { result, snapshot } = await executeAction(actionState.action);
+      const enriched = enrichAction(actionState.action);
+      const { result, snapshot } = await executeAction({ ...actionState, action: enriched }.action);
       updateAction(messageId, actionState.id, { status: 'success', result, snapshot });
     } catch (err: any) {
       updateAction(messageId, actionState.id, { status: 'error', error: err.message });
     }
-  }, [updateAction]);
+  }, [updateAction, enrichAction]);
 
-  const autoExecuteSafeActions = useCallback(async (messageId: string, actions: ActionState[]) => {
+  const autoExecuteSafeActions = useCallback(async (messageId: string, actions: ActionState[], _retryCount?: number) => {
+    const retryCount = _retryCount || 0;
     const results: { type: string; data: any }[] = [];
     for (const a of actions) {
       if (isSafeAction(a.action)) {
         updateAction(messageId, a.id, { status: 'auto_executing' });
         try {
-          const { result } = await executeAction(a.action);
+          const enriched = enrichAction(a.action);
+          const { result } = await executeAction(enriched);
           updateAction(messageId, a.id, { status: 'success', result });
           results.push({ type: a.action.type, data: result });
         } catch (err: any) {
@@ -355,6 +372,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             }));
             if (newActionStates.length > 0) {
               autoExecuteSafeActions(followUpMsgId, newActionStates);
+            }
+            // If no cards and content is substantial, trigger a card-format retry
+            if (newCards.length === 0 && cleanText.length > 200 && retryCount < 1) {
+              resolve(); // resolve first, then retry below
+              const retryPrompt = `你刚才的回复没有使用 \`\`\`card 代码块来展示结构化内容。请将上面的分析结果重新用 \`\`\`card 代码块格式输出为可视化卡片（不要用 \`\`\`json）。card 格式示例：{"header":{"icon":"图标","title":"标题","gradient":"from-blue-500 to-cyan-500"},"blocks":[...],"actions":[{"label":"按钮","prompt":"消息"}]}`;
+              // Fire-and-forget: send correction as a new user-invisible follow-up
+              sendMessageRef.current?.(retryPrompt);
             }
             resolve();
           });
@@ -475,8 +499,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setLoading(false);
     setStreamingMessageId(null);
   }, [activeSessionId, createSession, model, updateActiveSession, autoExecuteSafeActions]);
-
-  // --- Confirm / Reject / Undo / Retry ---
+  sendMessageRef.current = sendMessage;
   const confirmAction = useCallback(async (messageId: string, actionId: string) => {
     const msg = activeSession?.messages.find(m => m.id === messageId);
     const actionState = msg?.actions?.find(a => a.id === actionId);

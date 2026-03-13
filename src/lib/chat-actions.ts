@@ -24,7 +24,7 @@ export type ActionType =
   | 'gitcode.create_pr' | 'gitcode.create_issue' | 'gitcode.post_pr_comment'
   | 'gitcode.add_pr_labels' | 'gitcode.remove_pr_labels' | 'gitcode.add_issue_labels'
   | 'gitcode.assign_pr_testers' | 'gitcode.create_label' | 'gitcode.fork_repo'
-  | 'gitcode.create_release'
+  | 'gitcode.create_release' | 'gitcode.post_issue_comment'
   | 'gitcode.merge_pr';
 
 // 风险等级
@@ -80,6 +80,7 @@ export const RISK_MAP: Record<ActionType, RiskLevel> = {
   'gitcode.create_label': 'mutating',
   'gitcode.fork_repo': 'mutating',
   'gitcode.create_release': 'mutating',
+  'gitcode.post_issue_comment': 'mutating',
   // GitCode - destructive
   'gitcode.merge_pr': 'destructive',
 };
@@ -237,7 +238,12 @@ async function executeActionInner(type: ActionType, params: Record<string, any>)
     // Skills
     case 'skill.list': {
       const res = await fetch('/api/skills');
-      return res.json();
+      const data = await res.json();
+      // Filter by enabled skills if provided
+      if (params.enabledSkills && Array.isArray(params.enabledSkills) && data.skills) {
+        data.skills = data.skills.filter((s: any) => params.enabledSkills.includes(s.name));
+      }
+      return data;
     }
 
     // Prompt analysis
