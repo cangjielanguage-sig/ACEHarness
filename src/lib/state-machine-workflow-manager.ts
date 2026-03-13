@@ -12,7 +12,7 @@ import type { ClaudeJsonResult } from './process-manager';
 import { createRun, updateRun } from './run-store';
 import {
   saveRunState, saveProcessOutput, saveOutputToWorkspace, saveStreamContent,
-  loadRunState, loadStepOutputs, type PersistedRunState, type PersistedProcessInfo,
+  loadRunState, loadStepOutputs, type PersistedRunState, type PersistedProcessInfo, type PersistedStepLog,
 } from './run-state-persistence';
 import type {
   StateMachineWorkflowConfig, StateMachineState, StateTransition,
@@ -86,6 +86,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private currentStep: string | null = null;
   private completedSteps: string[] = [];
   private currentProcesses: PersistedProcessInfo[] = [];
+  private stepLogs: PersistedStepLog[] = [];
   /** Current engine instance (Kiro CLI, etc.) */
   private currentEngine: Engine | null = null;
   /** Current engine type */
@@ -183,6 +184,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.issueTracker = [];
       this.transitionCount = 0;
       this.completedSteps = [];
+      this.stepLogs = [];
       this.runStartTime = new Date().toISOString();
       this.currentConfigFile = configFile;
       this.currentRequirements = requirements || '';
@@ -363,7 +365,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         currentStep: this.currentStep,
         completedSteps: this.completedSteps,
         failedSteps: [],
-        stepLogs: [],
+        stepLogs: [...this.stepLogs],
         agents: this.agents.map(a => ({
           name: a.name,
           team: a.team,
@@ -779,14 +781,29 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const context = await this.buildStepContext(step, state, config, requirements);
 
       // Execute step (reuse existing process manager logic)
-      const output = await this.runAgentStep(step, context, config);
+      const stepResult = await this.runAgentStep(step, context, config);
+      const output = stepResult.output;
 
       agent.status = 'completed';
       agent.completedTasks++;
       agent.lastOutput = output;
       this.currentStep = null;
-      this.completedSteps.push(`${state.name}-${step.name}`);
+      const stepKey = `${state.name}-${step.name}`;
+      this.completedSteps.push(stepKey);
       this.currentProcesses = [];
+
+      // Record step log for persistence
+      this.stepLogs.push({
+        stepName: stepKey,
+        agent: step.agent,
+        status: 'completed',
+        output,
+        error: '',
+        costUsd: stepResult.costUsd,
+        durationMs: stepResult.durationMs,
+        timestamp: new Date().toISOString(),
+      });
+
       this.emit('agents', { agents: this.agents });
       await this.persistState();
 
@@ -795,11 +812,13 @@ export class StateMachineWorkflowManager extends EventEmitter {
         step: step.name,
         agent: step.agent,
         output,
+        costUsd: stepResult.costUsd,
+        durationMs: stepResult.durationMs,
       });
 
       // Save output to file system
       if (this.currentRunId) {
-        const stepFileName = `${state.name}-${step.name}`;
+        const stepFileName = stepKey;
         await saveProcessOutput(this.currentRunId, stepFileName, output).catch(() => {});
 
         // Also save to workspace if projectRoot is configured
@@ -818,14 +837,27 @@ export class StateMachineWorkflowManager extends EventEmitter {
       agent.status = 'failed';
       this.currentStep = null;
       this.currentProcesses = [];
+
+      // Record failed step log
+      const stepKey = `${state.name}-${step.name}`;
+      const errorMsg = error.message || String(error);
+      this.stepLogs.push({
+        stepName: stepKey,
+        agent: step.agent,
+        status: 'failed',
+        output: '',
+        error: errorMsg,
+        costUsd: 0,
+        durationMs: 0,
+        timestamp: new Date().toISOString(),
+      });
+
       this.emit('agents', { agents: this.agents });
       await this.persistState();
 
       // Save error output
       if (this.currentRunId) {
-        const stepFileName = `${state.name}-${step.name}`;
-        const errorMsg = error.message || String(error);
-        await saveProcessOutput(this.currentRunId, stepFileName, `ERROR: ${errorMsg}`).catch(() => {});
+        await saveProcessOutput(this.currentRunId, stepKey, `ERROR: ${errorMsg}`).catch(() => {});
       }
 
       throw error;
@@ -871,7 +903,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
     // Add document output path
     if (this.currentRunId && config.context?.projectRoot) {
       const outputPath = `${config.context.projectRoot}/.ace-outputs/${this.currentRunId}/`;
-      parts.push(`\n# 文档输出要求\n请将你产出的所有文档、报告、分析结果等写入以下目录：\n\`${outputPath}\`\n\n文件命名建议使用步骤名或有意义的名称，格式为 Markdown (.md)。这样其他 Agent 和人类审阅者都能方便地查看你的产出。`);
+      const safeName = `${state.name}-${step.name}`.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+      const fullPath = `${outputPath}${safeName}.md`;
+      parts.push(`\n# 文档输出要求\n请将你产出的所有文档、报告、分析结果等写入以下目录：\n\`${outputPath}\`\n\n本步骤的文档路径: \`${fullPath}\`\n文件格式为 Markdown (.md)。这样其他 Agent 和人类审阅者都能方便地查看你的产出。`);
+    }
+
+    // Add structured JSON output requirement for attacker/judge roles
+    if (step.role === 'attacker' || step.role === 'judge') {
+      parts.push(`\n# 结构化输出要求\n在你的回复最末尾，请务必输出以下 JSON 块（用 \`\`\`json 包裹），用于自动化流程判断：\n\n\`\`\`json\n{\n  "verdict": "pass | conditional_pass | fail",\n  "remaining_issues": 0,\n  "summary": "一句话总结"\n}\n\`\`\`\n\n字段说明：\n- \`verdict\`: \`"pass"\` 表示无问题可通过，\`"conditional_pass"\` 表示有条件通过（存在需修复的问题但方向正确），\`"fail"\` 表示存在严重问题需要重做\n- \`remaining_issues\`: 剩余未解决的问题数量（整数）\n- \`summary\`: 一句话总结你的评估结论`);
     }
 
     // Add workspace skills (index summary only)
@@ -949,7 +988,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     step: WorkflowStep,
     context: string,
     config: StateMachineWorkflowConfig
-  ): Promise<string> {
+  ): Promise<{ output: string; costUsd: number; durationMs: number }> {
     // Find agent config for system prompt and model
     const roleConfig = this.agentConfigs.find(r => r.name === step.agent)
       || config.roles?.find(r => r.name === step.agent);
@@ -965,6 +1004,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
     let currentSessionId: string | undefined;
     let accumulatedOutput = '';
     let accumulatedStream = '';
+    let accumulatedCost = 0;
+    let accumulatedDuration = 0;
 
     // Track process
     this.currentProcesses = [{
@@ -1070,6 +1111,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       }
 
       accumulatedOutput += (accumulatedOutput ? '\n\n---\n\n' : '') + (result.result || '');
+      accumulatedCost += result.cost_usd || 0;
+      accumulatedDuration += result.duration_ms || 0;
 
       // Check for pending live feedback after completion
       if (this.liveFeedback.length > 0 && !this.shouldStop) {
@@ -1106,7 +1149,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     } finally {
       processManager.off('stream', streamFlushHandler);
     }
-    return accumulatedOutput;
+    return { output: accumulatedOutput, costUsd: accumulatedCost, durationMs: accumulatedDuration };
   }
 
   private async evaluateTransitions(
@@ -1311,6 +1354,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.issueTracker = (runState.issueTracker || []) as Issue[];
     this.transitionCount = runState.transitionCount || 0;
     this.completedSteps = runState.completedSteps || [];
+    this.stepLogs = runState.stepLogs || [];
     this.runStartTime = runState.startTime || null;
     this.globalContext = runState.globalContext || '';
     this.stateContexts = new Map(Object.entries(runState.phaseContexts || {}));
@@ -1465,7 +1509,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     if (running) {
       processManager.killProcess(running.id);
-      this.emit('feedback-interrupted', { message, timestamp: new Date().toISOString() });
+      this.emit('feedback-injected', { message, timestamp: new Date().toISOString() });
       return true;
     }
 
@@ -1538,6 +1582,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.issueTracker = (runState.issueTracker || []) as Issue[];
     this.transitionCount = stateIndex + 1;
     this.completedSteps = runState.completedSteps || [];
+    this.stepLogs = runState.stepLogs || [];
     this.runStartTime = runState.startTime || null;
     this.globalContext = runState.globalContext || '';
     this.stateContexts = new Map(Object.entries(runState.phaseContexts || {}));
