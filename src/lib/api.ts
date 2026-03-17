@@ -249,11 +249,11 @@ export const workflowApi = {
     return response.json();
   },
 
-  async resume(runId: string, action?: 'approve' | 'iterate', feedback?: string): Promise<ApiResponse> {
+  async resume(runId: string, action?: 'approve' | 'iterate' | 'force-transition', feedback?: string, targetState?: string, instruction?: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runId, action, feedback }),
+      body: JSON.stringify({ runId, action, feedback, targetState, instruction }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));

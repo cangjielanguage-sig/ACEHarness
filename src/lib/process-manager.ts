@@ -29,6 +29,10 @@ function fmtMs(ms: number): string {
  */
 function formatToolUseSummary(toolName: string, inputJson: string): string {
   try {
+    // Debug: log Write tool input
+    if (toolName === 'Write' || toolName === 'write') {
+      console.log(`[formatToolUseSummary] Write raw inputJson length: ${inputJson.length}, first 200: ${inputJson.slice(0, 200)}, last 200: ${inputJson.slice(-200)}`);
+    }
     const input = JSON.parse(inputJson);
     switch (toolName) {
       case 'Write':
@@ -416,6 +420,9 @@ class ProcessManager extends EventEmitter {
         if (!line.trim()) return;
         try {
           const obj = JSON.parse(line);
+          // Debug: log every line type received from claude CLI
+          const logType = obj.type + (obj.subtype ? `.${obj.subtype}` : '') + (obj.event?.type ? ` evt=${obj.event.type}` : '');
+          proc.logLines.push(`[${ts()}] 📥 ${logType}`);
 
           if (obj.type === 'system' && obj.subtype === 'init') {
             proc.sessionId = obj.session_id;
@@ -477,6 +484,11 @@ class ProcessManager extends EventEmitter {
             // Tool result from CLI — display the output
             const toolResult = obj.tool_use_result;
             const msgContent = obj.message?.content;
+            // Debug: log Write tool results
+            if (lastToolName.toLowerCase() === 'write') {
+              console.log(`[ProcessManager] Write tool_result:`, JSON.stringify(toolResult)?.slice(0, 500));
+              console.log(`[ProcessManager] Write msgContent:`, JSON.stringify(msgContent)?.slice(0, 500));
+            }
             if (toolResult || msgContent) {
               let resultBlock = '';
               // Format based on tool type
@@ -566,7 +578,12 @@ class ProcessManager extends EventEmitter {
             proc.logLines.push(`[${ts()}] 未处理事件: type=${obj.type}, subtype=${obj.subtype || ''}, keys=${Object.keys(obj).join(',')}`);
           }
         } catch {
-          // Not valid JSON — might be partial line or stderr leak
+          // Not valid JSON — check for API error messages in plain text
+          const trimmed = line.trim();
+          if (trimmed.toLowerCase().includes('api error') || trimmed.toLowerCase().includes('error:')) {
+            proc.error += (proc.error ? '\n' : '') + trimmed;
+            proc.logLines.push(`[${ts()}] ⚠ CLI输出: ${trimmed.substring(0, 300)}`);
+          }
         }
       };
 
@@ -792,6 +809,31 @@ class ProcessManager extends EventEmitter {
       ...p,
       childProcess: undefined, // Don't serialize
     }));
+  }
+
+  /**
+   * Register an external process (e.g. from alternative engines like Kiro CLI)
+   * so it appears in getAllProcesses() and getProcess().
+   */
+  registerExternalProcess(id: string, agent: string, step: string, runId?: string): ProcessInfo {
+    const proc: ProcessInfo = {
+      id, agent, step,
+      status: 'running',
+      startTime: new Date(),
+      output: '', error: '',
+      streamContent: '',
+      logLines: [`[${new Date().toISOString()}] 外部引擎进程已注册`],
+      runId,
+    };
+    this.processes.set(id, proc);
+    return proc;
+  }
+
+  /**
+   * Get the raw (mutable) process reference for direct streamContent updates.
+   */
+  getProcessRaw(id: string): ProcessInfo | undefined {
+    return this.processes.get(id);
   }
 
   getProcess(id: string): ProcessInfo | undefined {

@@ -405,6 +405,31 @@ export default function WorkbenchPage() {
       } else {
         setPendingCheckpointPhase(null);
       }
+
+      // Restore state-machine human approval dialog when viewing a historical run
+      if (detail.mode === 'state-machine' && detail.currentState === '__human_approval__') {
+        const approvalTransition = (detail.stateHistory || []).findLast?.((item: any) => item.to === '__human_approval__');
+        const currentStateName = detail.currentState || '__human_approval__';
+        const workflowStates = (workflowConfig as any)?.workflow?.states?.map((state: any) => state.name) || [];
+        const restoredAvailableStates = detail.pendingCheckpoint?.availableStates
+          || workflowStates.filter((stateName: string) => stateName !== '__human_approval__');
+        const suggestedNextState = detail.pendingCheckpoint?.suggestedNextState
+          || restoredAvailableStates[0]
+          || '完成';
+        setHumanApprovalData({
+          currentState: currentStateName,
+          nextState: suggestedNextState,
+          result: {
+            verdict: approvalTransition?.issues?.length > 0 ? 'conditional_pass' : 'pass',
+            issues: approvalTransition?.issues || [],
+            summary: approvalTransition?.reason || '等待人工审查',
+            stepOutputs: [],
+          },
+          availableStates: restoredAvailableStates,
+        });
+      } else {
+        setHumanApprovalData(null);
+      }
       addLog('system', 'info', `查看历史运行: ${runId}`);
     } catch (error: any) {
       addLog('system', 'error', `加载历史运行失败: ${error.message}`);
@@ -655,10 +680,34 @@ export default function WorkbenchPage() {
   const executeForceTransition = async () => {
     if (!forceTransitionModal) return;
     try {
-      await workflowApi.forceTransition(forceTransitionModal.targetState, forceTransitionModal.instruction || undefined);
+      const rid = runId || selectedRun?.id;
+
+      // 先查后端内存里的实际状态，避免重复 resume
+      const liveStatus = await workflowApi.getStatus();
+      const alreadyRunningInMemory = liveStatus.status === 'running';
+
+      if (!alreadyRunningInMemory && rid) {
+        // 内存里没有运行中的 workflow，先 resume 再 force-transition
+        setViewingHistoryRun(false);
+        dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'running' });
+        dispatch({ type: 'SET_FAILED_STEPS', payload: [] });
+        await workflowApi.resume(
+          rid,
+          'force-transition',
+          undefined,
+          forceTransitionModal.targetState,
+          forceTransitionModal.instruction || undefined
+        );
+        dispatch({ type: 'SET_VIEW_MODE', payload: 'run' });
+        fetchCurrentStatus();
+      } else {
+        // 内存里已经有运行中的 workflow，直接 force-transition
+        await workflowApi.forceTransition(forceTransitionModal.targetState, forceTransitionModal.instruction || undefined);
+      }
       toast('success', `已请求跳转到: ${forceTransitionModal.targetState}`);
       setForceTransitionModal(null);
-      setHumanApprovalData(null); // 关闭人工审查弹框
+      setHumanApprovalData(null);
+      setPendingCheckpointPhase(null);
     } catch (e: any) {
       toast('error', e.message);
     }
@@ -696,11 +745,29 @@ export default function WorkbenchPage() {
 
   const approveCheckpoint = async () => {
     try {
-      if (isRunning) {
-        await workflowApi.approve();
-      } else {
-        // Workflow not running (restored from pendingCheckpoint) — resume with approve action
-        const rid = runId || selectedRun?.id;
+      const rid = runId || selectedRun?.id;
+
+      // 先查后端内存里的实际状态，避免重复 resume
+      const liveStatus = await workflowApi.getStatus();
+      const alreadyRunningInMemory = liveStatus.status === 'running';
+
+      if (!alreadyRunningInMemory) {
+        // 内存里没有运行中的 workflow，先弹确认再 resume
+        dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const confirmed = await confirm({
+          title: '恢复运行后继续批准？',
+          description: '检测到该工作流当前可能未在服务内存中运行。这通常发生在服务重启或打开历史运行记录时。是否先恢复该运行，再自动执行"批准"？',
+          confirmLabel: '恢复并批准',
+          cancelLabel: '取消',
+        });
+
+        if (!confirmed) {
+          dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
+          return;
+        }
+
         if (rid) {
           setViewingHistoryRun(false);
           dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'running' });
@@ -709,9 +776,13 @@ export default function WorkbenchPage() {
           dispatch({ type: 'SET_VIEW_MODE', payload: 'run' });
           fetchCurrentStatus();
         }
+      } else {
+        // 内存里已经有运行中的 workflow，直接 approve
+        await workflowApi.approve();
       }
+
       dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
-      setIterationFeedback(''); // 清空反馈
+      setIterationFeedback('');
       setPendingCheckpointPhase(null);
       addLog('system', 'success', '✓ 检查点已批准，继续执行');
     } catch (error: any) {
@@ -982,6 +1053,7 @@ export default function WorkbenchPage() {
         // Use running process step name to track step changes across iterations
         const runningProc = processes.find((p: any) => p.status === 'running');
         const activeStep = runningProc?.step || currentStep || selectedStep?.name;
+        console.log(`[LiveStream] rid=${rid}, activeStep=${activeStep}, runningProc=${runningProc?.id}, processes=${processes.length}, streamContentLen=${runningProc?.streamContent?.length || 0}`);
         if (rid && activeStep) {
           // Detect step change — reset stream state when a new step starts
           if (activeStep !== liveStreamStepRef.current) {
@@ -990,6 +1062,7 @@ export default function WorkbenchPage() {
             setLiveStream([]);
           }
           content = await streamApi.getStreamContent(rid, activeStep);
+          console.log(`[LiveStream] streamApi content length: ${content?.length || 0}`);
         }
         if (!content) {
           // Fallback: try in-memory process
@@ -1015,7 +1088,7 @@ export default function WorkbenchPage() {
         if (!processes.some((p: any) => p.status === 'running') && !isRunning) {
           stopLiveStream();
         }
-      } catch { /* ignore */ }
+      } catch (e) { console.error('[LiveStream] polling error:', e); }
     }, 1000);
   };
 
@@ -1157,13 +1230,22 @@ export default function WorkbenchPage() {
     }
 
     // Find highest iteration number in stepResults for the effective base name
+    // Also check state-machine format keys like "stateName-stepName"
     let latest = effectiveBase;
     let maxIter = 0;
     for (const key of Object.keys(stepResults)) {
       if (key === effectiveBase) { if (maxIter === 0) latest = key; continue; }
+      // Match state-machine format: "stateName-stepName" (key ends with "-baseName")
+      if (key.endsWith('-' + effectiveBase)) { if (maxIter === 0) latest = key; continue; }
       const m = key.match(new RegExp(`^${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
       if (m) {
         const n = parseInt(m[1], 10);
+        if (n > maxIter) { maxIter = n; latest = key; }
+      }
+      // Also match state-machine iteration format: "stateName-stepName-迭代N"
+      const sm = key.match(new RegExp(`-${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
+      if (sm) {
+        const n = parseInt(sm[1], 10);
         if (n > maxIter) { maxIter = n; latest = key; }
       }
     }
@@ -1976,7 +2058,7 @@ export default function WorkbenchPage() {
                     <span className="material-symbols-outlined text-xs">sync</span> 工作流运行中
                   </div>
                   <div className="text-xs text-muted-foreground mt-2">
-                    等待步骤开始执行...
+                    {currentPhase === '__human_approval__' ? '等待人工审查...' : '等待步骤开始执行...'}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
                     当前状态: {formatStateName(currentPhase || '') || '未知'}
@@ -2742,6 +2824,25 @@ export default function WorkbenchPage() {
                   )}
                 </div>
               </div>
+
+              {/* Agent 输出内容 */}
+              {humanApprovalData.result?.stepOutputs?.length > 0 && (
+                <div className="mb-4">
+                  <div className="text-sm font-medium mb-2">Agent 输出</div>
+                  <div className="space-y-2">
+                    {humanApprovalData.result.stepOutputs.map((output: string, idx: number) => (
+                      <details key={idx} open={humanApprovalData.result.stepOutputs.length === 1}>
+                        <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground py-1">
+                          步骤 {idx + 1} 输出 ({output.length > 200 ? `${Math.ceil(output.length / 1024)}KB` : `${output.length} 字符`})
+                        </summary>
+                        <div className="mt-1 p-3 bg-muted/20 rounded border text-xs font-mono whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+                          {output}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* AI 建议的下一步 */}
               <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">

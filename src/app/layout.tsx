@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { ChatProvider } from '@/contexts/ChatContext';
-import ChatModal from '@/components/ChatModal';
+import ChatModalWrapper from '@/components/ChatModalWrapper';
 import { ThemeProvider } from '@/components/theme-provider';
 import { ToastProvider } from '@/components/ui/toast';
 
@@ -40,7 +40,7 @@ export default function RootLayout({
           <ChatProvider>
             <ToastProvider>
               {children}
-              <ChatModal />
+              <ChatModalWrapper />
             </ToastProvider>
           </ChatProvider>
         </ThemeProvider>

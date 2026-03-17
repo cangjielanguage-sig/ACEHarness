@@ -37,3 +37,10 @@ next-env.d.ts
 /src/main.ts
 /src/frontend/*.vue
 vite.config.ts
+
+
+.ace-outputs/
+
+runs/
+
+.claude/

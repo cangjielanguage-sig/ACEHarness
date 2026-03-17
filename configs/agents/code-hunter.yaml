@@ -5,7 +5,7 @@ tags:
   - 测试
   - 漏洞挖掘
   - 安全测试
-model: claude-sonnet-4.5
+model: claude-sonnet-4-6
 temperature: 0.8
 allowedTools:
   - Bash

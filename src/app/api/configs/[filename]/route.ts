@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFile, readdir, writeFile, unlink } from 'fs/promises';
 import { resolve } from 'path';
 import { parse, stringify } from 'yaml';
-import { workflowConfigSchema } from '@/lib/schemas';
+import { unifiedWorkflowConfigSchema } from '@/lib/schemas';
 
 export async function GET(
   request: NextRequest,
@@ -50,7 +50,7 @@ export async function POST(
     const { roles, ...configWithoutRoles } = config;
 
     // Validate config (roles is optional now)
-    const validationResult = workflowConfigSchema.safeParse(configWithoutRoles);
+    const validationResult = unifiedWorkflowConfigSchema.safeParse(configWithoutRoles);
     if (!validationResult.success) {
       return NextResponse.json(
         {
