@@ -58,7 +58,7 @@ workflow:
           task: |
             你需要修改当前 Hello World 程序的输出，向人工进行提问是否需要添加人工的姓名，添加到Hello World的输出中。提问用户是否需要添加姓名。
             收到回答后输出 [PLAN_DONE]。
-            请使用 [NEED_INFO：human]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要在问题前添加该agent的关键词，例如你需要向用户询问问题，你需要说"我需要向用户提问：xxx"。
+            请使用 [NEED_INFO:human]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要在问题前添加该agent的关键词，例如你需要向用户询问问题，你需要说"我需要向用户提问：xxx"。
           enablePlanLoop: true
           maxPlanRounds: 2
       transitions: []
@@ -78,7 +78,6 @@ roles:
     systemPrompt: |
       你是一个简单的程序员，负责编写代码。
     keywords:
-      - 代码
       - 实现
       - 写
       - 编程

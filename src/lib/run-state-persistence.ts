@@ -98,6 +98,15 @@ export interface PersistedRunState {
     foundByAgent?: string;
   }>;
   requirements?: string;
+  supervisorFlow?: Array<{
+    type: string;
+    from: string;
+    to: string;
+    question?: string;
+    method?: string;
+    round: number;
+    timestamp: string;
+  }>;
 }
 
 function runDir(runId: string): string {

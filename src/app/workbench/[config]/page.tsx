@@ -187,6 +187,9 @@ export default function WorkbenchPage() {
         if (status.phaseContexts) {
           dispatch({ type: 'SET_PHASE_CONTEXTS', payload: status.phaseContexts });
         }
+        if ((status as any).supervisorFlow) {
+          setSupervisorFlow((status as any).supervisorFlow);
+        }
 
         {
           const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
@@ -389,6 +392,9 @@ export default function WorkbenchPage() {
       }
       if (detail.transitionCount !== undefined) {
         setSmTransitionCount(detail.transitionCount);
+      }
+      if (detail.supervisorFlow) {
+        setSupervisorFlow(detail.supervisorFlow);
       }
 
       // Restore contexts
@@ -633,14 +639,14 @@ export default function WorkbenchPage() {
       case 'route-decision':
         setSupervisorFlow(prev => [...prev, {
           type: 'decision',
-          from: event.data.fromAgent || 'system',
+          from: event.data.fromAgent || currentPhase || 'system',
           to: event.data.route_to,
           method: event.data.method,
           question: event.data.question,
           round: event.data.round,
           timestamp: new Date().toISOString(),
         }]);
-        addLog('system', 'info', `🔀 Supervisor 路由: ${event.data.fromAgent || 'system'} → ${event.data.route_to} (${event.data.method})`);
+        addLog('system', 'info', `🔀 Supervisor 路由: ${event.data.fromAgent || currentPhase || 'system'} → ${event.data.route_to} (${event.data.method})`);
         break;
     }
   }, [selectedAgent, addLog]);

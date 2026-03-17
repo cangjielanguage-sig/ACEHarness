@@ -95,6 +95,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private currentStep: string | null = null;
   private completedSteps: string[] = [];
   private currentProcesses: PersistedProcessInfo[] = [];
+  private supervisorFlow: { type: string; from: string; to: string; question?: string; method?: string; round: number; timestamp: string }[] = [];
   /** Current engine instance (Kiro CLI, etc.) */
   private currentEngine: Engine | null = null;
   /** Current engine type */
@@ -183,6 +184,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       endTime: this.runEndTime,
       globalContext: this.globalContext,
       phaseContexts: Object.fromEntries(this.stateContexts),
+      supervisorFlow: this.supervisorFlow,
     };
   }
 
@@ -198,6 +200,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.issueTracker = [];
       this.transitionCount = 0;
       this.completedSteps = [];
+      this.supervisorFlow = [];
       this.runStartTime = new Date().toISOString();
       this.currentConfigFile = configFile;
       // Load config
@@ -408,6 +411,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         requirements: this.currentRequirements,
         globalContext: this.globalContext,
         phaseContexts: Object.fromEntries(this.stateContexts),
+        supervisorFlow: this.supervisorFlow,
         // 只在真正等待人工审批时才写入 pendingCheckpoint；已完成/失败/停止时清除
         ...(!finalStatus && this.currentState === '__human_approval__' && this.pendingApprovalInfo ? {
           pendingCheckpoint: {
@@ -1758,6 +1762,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
       for (const req of infoRequests) {
         if (req.isHuman) {
           this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
+          this.supervisorFlow.push({
+            type: 'question',
+            from: step.agent,
+            to: 'user',
+            question: req.question,
+            round,
+            timestamp: new Date().toISOString(),
+          });
           const answer = await this.waitForUserAnswer(req.question, step.agent, round);
           extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
           console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
@@ -1773,11 +1785,28 @@ export class StateMachineWorkflowManager extends EventEmitter {
           if (!decision) {
             console.log(`[StateMachineWorkflowManager] 无法路由，fallback 到用户回答`);
             this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
+            this.supervisorFlow.push({
+              type: 'question',
+              from: step.agent,
+              to: 'user',
+              question: req.question,
+              round,
+              timestamp: new Date().toISOString(),
+            });
             const answer = await this.waitForUserAnswer(req.question, step.agent, round);
             console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
             extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
           } else {
-            this.emit('route-decision', { ...decision, round });
+            this.emit('route-decision', { ...decision, round, fromAgent: step.agent });
+            this.supervisorFlow.push({
+              type: 'decision',
+              from: step.agent,
+              to: decision.route_to,
+              question: decision.question,
+              method: decision.method,
+              round,
+              timestamp: new Date().toISOString(),
+            });
             const answer = await this.queryAgent(decision.route_to, decision.question, config);
             console.log(`[StateMachineWorkflowManager] ${decision.route_to} 回答: ${answer}`);
             extraContext += `\n\n[${decision.route_to} 回答] ${decision.question}\n${answer}`;

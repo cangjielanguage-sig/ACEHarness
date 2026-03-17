@@ -47,6 +47,15 @@ interface WorkflowStatusResponse {
   transitionCount?: number;
   startTime?: string | null;
   endTime?: string | null;
+  supervisorFlow?: Array<{
+    type: string;
+    from: string;
+    to: string;
+    question?: string;
+    method?: string;
+    round: number;
+    timestamp: string;
+  }>;
 }
 
 interface RunRecord {
