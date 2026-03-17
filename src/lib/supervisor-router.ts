@@ -55,13 +55,14 @@ export async function routeInfoRequest(
   availableAgents: AgentSummary[],
   currentStep: string,
   llmCaller?: (prompt: string) => Promise<string>
-): Promise<RouteDecision> {
+): Promise<RouteDecision | null> {
   const lowerQuestion = req.question.toLowerCase();
 
   for (const agent of availableAgents) {
     if (agent.keywords && agent.keywords.length > 0) {
       for (const keyword of agent.keywords) {
         if (lowerQuestion.includes(keyword.toLowerCase())) {
+          console.log(`[SupervisorRouter] 关键词匹配 → ${agent.name} (keyword: "${keyword}")`);
           return {
             route_to: agent.name,
             question: req.question,
@@ -79,6 +80,7 @@ export async function routeInfoRequest(
       const llmResponse = await llmCaller(llmPrompt);
       const decision = parseLLMRoutingResponse(llmResponse, availableAgents);
       if (decision) {
+        console.log(`[SupervisorRouter] LLM 路由 → ${decision.route_to} (response: "${llmResponse}")`);
         return {
           route_to: decision.route_to,
           question: req.question,  
@@ -91,12 +93,8 @@ export async function routeInfoRequest(
     }
   }
 
-  return {
-    route_to: 'user',
-    question: req.question,
-    reason: '无匹配，fallback 到用户',
-    method: 'llm',
-  };
+  console.log(`[SupervisorRouter] 无匹配，返回 null 让调用方处理`);
+  return null;
 }
 
 function buildRoutingPrompt(question: string, agents: AgentSummary[], currentStep: string): string {

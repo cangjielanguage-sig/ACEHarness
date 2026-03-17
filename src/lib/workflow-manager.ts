@@ -2358,6 +2358,7 @@ class WorkflowManager extends EventEmitter {
           this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
           const answer = await this.waitForUserAnswer(req.question, step.agent, round);
           extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
+          console.log(`[WorkflowManager] 用户回答: ${answer}`);
         } else {
           const agentSummaries = this.buildAgentSummaries();
           const decision = await routeInfoRequest(
@@ -2366,10 +2367,19 @@ class WorkflowManager extends EventEmitter {
             step.name,
             this.callLightweightLLM.bind(this)
           );
-          this.emit('route-decision', { ...decision, round });
 
-          const answer = await this.queryAgent(decision.route_to, decision.question, workflowConfig);
-          extraContext += `\n\n[${decision.route_to} 回答] ${decision.question}\n${answer}`;
+          if (!decision) {
+            console.log(`[WorkflowManager] 无法路由，fallback 到用户回答`);
+            this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
+            const answer = await this.waitForUserAnswer(req.question, step.agent, round);
+            extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
+            console.log(`[WorkflowManager] 用户回答: ${answer}`);
+          } else {
+            this.emit('route-decision', { ...decision, round });
+            const answer = await this.queryAgent(decision.route_to, decision.question, workflowConfig);
+            console.log(`[WorkflowManager] ${decision.route_to} 回答: ${answer}`);
+            extraContext += `\n\n[${decision.route_to} 回答] ${decision.question}\n${answer}`;
+          }
         }
       }
 
@@ -2440,16 +2450,16 @@ class WorkflowManager extends EventEmitter {
         'route',
         prompt,
         '你是一个路由器，根据问题选择最合适的 Agent。',
-        'claude-haiku-2024-05-20',
+        'claude-sonnet-4-6',
         {
           workingDirectory: process.cwd(),
-          timeoutMs: 30000,
+          timeoutMs: 120000, // 2 分钟超时
         }
       );
       return result.result || '';
-    } catch (error) {
-      console.error('[SupervisorRouter] LLM 调用失败:', error);
-      return '';
+    } catch (error: any) {
+      console.error('[SupervisorRouter] LLM 调用失败:', error?.message || error);
+      return ''; // 返回空字符串，让上层处理
     }
   }
 

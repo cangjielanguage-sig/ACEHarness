@@ -99,6 +99,9 @@ export default function WorkbenchPage() {
   const [showDesignRequirements, setShowDesignRequirements] = useState(true);
   const [showRunRequirements, setShowRunRequirements] = useState(true);
   const [iterationFeedback, setIterationFeedback] = useState('');
+  const [pendingPlanQuestion, setPendingPlanQuestion] = useState<{ question: string; fromAgent: string; round: number } | null>(null);
+  const [planAnswer, setPlanAnswer] = useState('');
+  const [sendingPlanAnswer, setSendingPlanAnswer] = useState(false);
   const [liveStreamFeedback, setLiveStreamFeedback] = useState('');
   const [sendingFeedback, setSendingFeedback] = useState(false);
   const [inlineFeedbacks, setInlineFeedbacks] = useState<{ message: string; timestamp: string; streamIndex: number }[]>([]);
@@ -571,6 +574,14 @@ export default function WorkbenchPage() {
           dispatch({ type: 'SET_PHASE_CONTEXT', payload: { phase: event.data.phase, context: event.data.context } });
         }
         addLog('system', 'info', `上下文已更新: ${event.data.scope === 'global' ? '全局' : event.data.phase}`);
+        break;
+      case 'plan-question':
+        setPendingPlanQuestion({
+          question: event.data.question,
+          fromAgent: event.data.fromAgent,
+          round: event.data.round
+        });
+        addLog('system', 'warning', `❓ 需要用户回答: ${event.data.question}`);
         break;
     }
   }, [selectedAgent, addLog]);
@@ -2315,6 +2326,56 @@ export default function WorkbenchPage() {
           </div>
         </div>
       </div>)}
+      {pendingPlanQuestion && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-card rounded-lg w-[600px] max-w-[90%] border" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b"><h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">help</span>需要用户回答</h3></div>
+            <div className="p-5">
+              <div className="bg-muted p-4 rounded-md border-l-[3px] border-l-blue-500 mb-4">
+                <p className="text-sm text-muted-foreground mb-2">来自 Agent: <strong className="text-foreground">{pendingPlanQuestion.fromAgent}</strong> (第 {pendingPlanQuestion.round + 1} 轮)</p>
+              </div>
+              <p className="text-base mb-4">{pendingPlanQuestion.question}</p>
+              <Textarea
+                value={planAnswer}
+                onChange={(e) => setPlanAnswer(e.target.value)}
+                placeholder="请输入您的回答..."
+                rows={4}
+                className="w-full"
+              />
+            </div>
+            <div className="p-5 border-t flex gap-3 justify-end">
+              <Button 
+                onClick={async () => {
+                  if (!planAnswer.trim()) return;
+                  setSendingPlanAnswer(true);
+                  try {
+                    const res = await fetch('/api/workflow/plan-answer', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ answer: planAnswer })
+                    });
+                    if (res.ok) {
+                      setPendingPlanQuestion(null);
+                      setPlanAnswer('');
+                      addLog('system', 'success', '✓ 回答已提交');
+                    } else {
+                      const data = await res.json();
+                      addLog('system', 'error', `提交失败: ${data.error}`);
+                    }
+                  } catch (err: any) {
+                    addLog('system', 'error', `提交失败: ${err.message}`);
+                  } finally {
+                    setSendingPlanAnswer(false);
+                  }
+                }}
+                disabled={!planAnswer.trim() || sendingPlanAnswer}
+              >
+                {sendingPlanAnswer ? '提交中...' : '提交回答'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {showLiveStream && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={stopLiveStream}>
           <div className={`bg-card rounded-lg border flex flex-col ${liveStreamFullscreen ? 'w-full h-full rounded-none' : 'w-[80%] max-w-[800px] max-h-[80vh]'}`} onClick={(e) => e.stopPropagation()}>

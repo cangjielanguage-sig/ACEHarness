@@ -1589,6 +1589,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
           this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
           const answer = await this.waitForUserAnswer(req.question, step.agent, round);
           extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
+          console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
         } else {
           const agentSummaries = this.buildAgentSummaries();
           const decision = await routeInfoRequest(
@@ -1597,10 +1598,19 @@ export class StateMachineWorkflowManager extends EventEmitter {
             step.name,
             this.callLightweightLLM.bind(this)
           );
-          this.emit('route-decision', { ...decision, round });
 
-          const answer = await this.queryAgent(decision.route_to, decision.question, config);
-          extraContext += `\n\n[${decision.route_to} 回答] ${decision.question}\n${answer}`;
+          if (!decision) {
+            console.log(`[StateMachineWorkflowManager] 无法路由，fallback 到用户回答`);
+            this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
+            const answer = await this.waitForUserAnswer(req.question, step.agent, round);
+            console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
+            extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
+          } else {
+            this.emit('route-decision', { ...decision, round });
+            const answer = await this.queryAgent(decision.route_to, decision.question, config);
+            console.log(`[StateMachineWorkflowManager] ${decision.route_to} 回答: ${answer}`);
+            extraContext += `\n\n[${decision.route_to} 回答] ${decision.question}\n${answer}`;
+          }
         }
       }
 
@@ -1671,10 +1681,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
         'route',
         prompt,
         '你是一个路由器，根据问题选择最合适的 Agent。',
-        'claude-haiku-2024-05-20',
+        'claude-sonnet-4-6',
         {
           workingDirectory: process.cwd(),
-          timeoutMs: 30000,
+          timeoutMs: 120000, // 增加超时时间到 2 分钟
         }
       );
       return result.result || '';

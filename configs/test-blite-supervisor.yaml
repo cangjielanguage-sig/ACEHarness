@@ -11,8 +11,8 @@ workflow:
            你需要编写一个 Hello World 程序。但是我需要你向测试agent询问其name，然后将其姓名加到Hello World的输出中。 提问测试agent的姓名。
            收到回答后输出 [PLAN_DONE]。
             例如，如果测试agent的姓名是Alice，那么最终输出应该是：
-            Hello World from Alice!
-            请使用 [NEED_INFO]，后面接上你需要问的问题进行询问。
+            Hello World Alice!
+            请使用 [NEED_INFO]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要在问题前添加该agent的关键词，例如你需要向测试agent询问问题，你需要说“我需要向测试agent提问：xxx”。
           enablePlanLoop: true
           maxPlanRounds: 2
 
@@ -25,9 +25,9 @@ workflow:
            你需要修改当前 Hello World 程序的输出，添加上评审agent的姓名。请先询问评审agent的姓名，然后将其姓名加到Hello World的输出中。提问评审agent的姓名。
            收到回答后输出 [PLAN_DONE]。
             例如，如果评审agent的姓名是Bob，那么最终输出应该是：
-            Hello World from Bob!
+            Hello World xxx , Bob!
             注意：你不能直接使用“代码问题”、“审查”、"改进"等关键词来询问评审agent的姓名，否则会被路由到测试agent。
-            你需要使用其他近义词，请使用 [NEED_INFO]，后面接上你需要问的问题进行询问。
+            你需要使用其他近义词，请使用 [NEED_INFO]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要在问题前添加该agent的关键词，例如你需要向评审agent询问问题，你需要说“我需要向评审agent提问：xxx”。
           enablePlanLoop: true
           maxPlanRounds: 2
 
@@ -39,7 +39,7 @@ workflow:
           task: |
            你需要修改当前 Hello World 程序的输出，向人工进行提问是否需要添加人工的姓名，添加到Hello World的输出中。提问用户是否需要添加姓名。
            收到回答后输出 [PLAN_DONE]。
-           请使用 [NEED_INFO]，后面接上你需要问的问题进行询问
+           请使用 [NEED_INFO：human]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要在问题前添加该agent的关键词，例如你需要向用户询问问题，你需要说“我需要向用户提问：xxx”。
           enablePlanLoop: true
           maxPlanRounds: 2
 
