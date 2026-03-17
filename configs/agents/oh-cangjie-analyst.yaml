@@ -13,6 +13,10 @@ allowedTools:
   - Write
   - Glob
   - Grep
+keywords:
+  - 分析
+  - Gap
+  - Gap分析  
 capabilities:
   - API 需求解析
   - 代码定位

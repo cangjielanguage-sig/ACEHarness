@@ -14,6 +14,9 @@ allowedTools:
   - Bash
   - Glob
   - Grep
+keywords:
+  - 架构
+  - 设计
 capabilities:
   - 跨语言接口设计
   - 目录与模块规划

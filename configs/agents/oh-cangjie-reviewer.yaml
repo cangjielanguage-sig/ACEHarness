@@ -14,6 +14,10 @@ allowedTools:
   - Read
   - Glob
   - Grep
+keywords:
+  - 审查
+  - 验证
+  - 红军
 capabilities:
   - 代码审查
   - NAPI 对齐验证

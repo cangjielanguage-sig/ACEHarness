@@ -14,6 +14,8 @@ workflow:
             `.ace-outputs/{runId}/Gap_分析.md` 的 Markdown 文件中。
           skills:
             - ohos-cangjie-analyst-skill
+          enablePlanLoop: true
+          maxPlanRounds: 2
       checkpoint:
         name: 分析结果确认
         message: >
@@ -32,6 +34,8 @@ workflow:
             并将架构文档写入 `.ace-outputs/{runId}/架构设计.md`。
           skills:
             - ohos-cangjie-architect-skill
+          enablePlanLoop: true
+          maxPlanRounds: 2
       checkpoint:
         name: 架构方案确认
         message: >
@@ -65,6 +69,8 @@ workflow:
             将审查报告写入 `.ace-outputs/{runId}/代码审查_红军.md`。
           skills:
             - ohos-cangjie-reviewer-skill
+          enablePlanLoop: true
+          maxPlanRounds: 2
 
     - name: 验证阶段
       steps:
@@ -77,6 +83,8 @@ workflow:
             及关键问题列表），并写入 `.ace-outputs/{runId}/最终审查与编译验证.md`。
           skills:
             - ohos-cangjie-reviewer-skill
+          enablePlanLoop: true
+          maxPlanRounds: 2
       checkpoint:
         name: 验证结果确认
         message: >
