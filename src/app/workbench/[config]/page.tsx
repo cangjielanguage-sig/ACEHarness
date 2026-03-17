@@ -1726,13 +1726,17 @@ export default function WorkbenchPage() {
                           ? workflowConfig.workflow.states
                           : workflowConfig.workflow.phases
                         )?.map((phase: any, idx: number) => {
-                          const phaseAgents = phase.steps.map((s: any) => {
-                            const role = agentConfigs.find((r: any) => r.name === s.agent);
-                            return { name: s.agent, team: role?.team || 'blue', role: s.role };
-                          });
+                          const phaseAgents = phase.steps 
+                            ? phase.steps.map((s: any) => {
+                                const role = agentConfigs.find((r: any) => r.name === s.agent);
+                                return { name: s.agent, team: role?.team || 'blue', role: s.role };
+                              })
+                            : [{ name: phase.agent, team: 'blue', role: undefined }];
                           const iterState = iterationStates[phase.name];
                           const isActive = currentPhase === phase.name;
-                          const isDone = phase.steps.every((s: any) => completedSteps?.includes(s.name));
+                          const isDone = phase.steps 
+                            ? phase.steps.every((s: any) => completedSteps?.includes(s.name))
+                            : completedSteps?.includes(phase.name);
                           return (<div key={idx}
                             className={`bg-muted rounded-md p-2.5 cursor-pointer transition-colors hover:bg-accent border-l-[3px] ${
                               isActive ? 'border-l-primary bg-accent' : isDone ? 'border-l-green-500' : 'border-transparent'
