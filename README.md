@@ -102,6 +102,49 @@ npm run dev
 
 访问 http://localhost:3000
 
+## 配置 API Key
+
+对话与工作流执行依赖 Anthropic（Claude）API，请按以下方式配置：
+
+1. **复制环境变量示例并填写 Key**
+   ```bash
+   cp .env.example .env.local
+   ```
+   编辑 `.env.local`，填入你的 API Key：
+   ```
+   ANTHROPIC_API_KEY=sk-ant-api03-你的密钥
+   ```
+   - 获取 Key： [Anthropic Console](https://console.anthropic.com/)
+   - `.env.local` 已被 git 忽略，不会提交到仓库
+
+2. **重启开发服务器**  
+   修改 `.env.local` 后需重启 `npm run dev` 才能生效。
+
+3. **若使用 Claude CLI 或 Kiro CLI**  
+   子进程会继承当前环境变量，因此上述配置对「对话页」和「工作流执行」均生效。若在系统里已配置 `ANTHROPIC_API_KEY`（如 `~/.bashrc`），也可不建 `.env.local`，只要启动 `npm run dev` 时该变量已存在即可。
+
+（若使用 OpenAI 模型，可在 `.env.local` 中增加 `OPENAI_API_KEY=...`。）
+
+### 配置项一览
+
+所有可配置项如下（详见 `.env.example`）：
+
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| **环境变量（.env.local）** | | |
+| `ANTHROPIC_API_KEY` | Anthropic API 密钥（必填） | `sk-ant-api03-...` |
+| `ANTHROPIC_BASE_URL` | Claude API 自定义地址（代理/自建） | `https://your-gateway.com/v1` |
+| `ANTHROPIC_TIMEOUT` | 请求超时（毫秒，可选） | `120000` |
+| `OPENAI_API_KEY` | OpenAI API 密钥（使用 OpenAI 模型时） | `sk-...` |
+| `OPENAI_BASE_URL` | OpenAI 兼容 API 自定义地址 | `https://your-proxy.com/v1` |
+| `NEXT_PUBLIC_API_BASE` | 前端请求的后端 API 根路径（前后端分离时） | `https://api.example.com` |
+| **项目内文件** | | |
+| `.engine.json` | 执行引擎选择 | `{"engine": "kiro-cli"}` 或 `"claude-code"` |
+| 工作流 YAML `context.timeoutMinutes` | 单步超时（分钟） | `30` |
+
+- **API URL**：通过 `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` 可走代理或自建网关；子进程会继承 `process.env`，写在 `.env.local` 即可。
+- **前端 API 地址**：默认同源 `/api`；前后端分离时设置 `NEXT_PUBLIC_API_BASE` 为后端根地址，并重启 `npm run dev`。
+
 ## 构建
 
 ```bash

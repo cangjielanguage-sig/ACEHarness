@@ -1626,6 +1626,11 @@ class WorkflowManager extends EventEmitter {
       prompt += `最终方案文档是你最重要的交付物，请确保它的质量和完整性。\n\n`;
     }
 
+    // Replace template variables
+    if (this.currentRunId) {
+      prompt = prompt.replace(/\{runId\}/g, this.currentRunId);
+    }
+
     return prompt;
   }
 

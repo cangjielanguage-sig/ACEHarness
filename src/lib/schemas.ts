@@ -14,6 +14,10 @@ export const workflowStepSchema = z.object({
   name: z.string().min(1, '步骤名称不能为空'),
   agent: z.string().min(1, 'Agent 名称不能为空'),
   task: z.string().min(1, '任务描述不能为空'),
+  // 可选：在执行 Agent 之前，由系统自动执行的一组预命令（通常是编译 / 测试命令）
+  // 注意：这些命令在后端 Node 环境中串行执行，stdout/stderr 会被收集并注入上下文，
+  // 不会中断整个步骤（即使命令本身返回非 0 退出码）。
+  preCommands: z.array(z.string()).optional(),
   type: z.string().optional(),
   role: z.enum(['attacker', 'defender', 'judge']).optional(),
   constraints: z.array(z.string()).optional(),

@@ -29,6 +29,10 @@ function fmtMs(ms: number): string {
  */
 function formatToolUseSummary(toolName: string, inputJson: string): string {
   try {
+    // Debug: log Write tool input
+    if (toolName === 'Write' || toolName === 'write') {
+      console.log(`[formatToolUseSummary] Write raw inputJson length: ${inputJson.length}, first 200: ${inputJson.slice(0, 200)}, last 200: ${inputJson.slice(-200)}`);
+    }
     const input = JSON.parse(inputJson);
     switch (toolName) {
       case 'Write':
@@ -480,6 +484,11 @@ class ProcessManager extends EventEmitter {
             // Tool result from CLI — display the output
             const toolResult = obj.tool_use_result;
             const msgContent = obj.message?.content;
+            // Debug: log Write tool results
+            if (lastToolName.toLowerCase() === 'write') {
+              console.log(`[ProcessManager] Write tool_result:`, JSON.stringify(toolResult)?.slice(0, 500));
+              console.log(`[ProcessManager] Write msgContent:`, JSON.stringify(msgContent)?.slice(0, 500));
+            }
             if (toolResult || msgContent) {
               let resultBlock = '';
               // Format based on tool type
