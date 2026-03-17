@@ -7,7 +7,18 @@ import StateTransitionTimeline from './StateTransitionTimeline';
 import StateFlowVisualizer from './StateFlowVisualizer';
 import StateMachineRuntimePanel from './StateMachineRuntimePanel';
 import StateMachineDiagram from './StateMachineDiagram';
+import SupervisorFlowVisualizer from './SupervisorFlowVisualizer';
 import type { StateTransitionRecord, Issue, StateMachineState } from '@/lib/schemas';
+
+interface SupervisorFlowRecord {
+  type: 'question' | 'decision';
+  from: string;
+  to: string;
+  question?: string;
+  method?: string;
+  round: number;
+  timestamp: string;
+}
 
 interface StateMachineExecutionViewProps {
   // 配置数据
@@ -23,9 +34,11 @@ interface StateMachineExecutionViewProps {
   maxTransitions: number;
   status: 'idle' | 'running' | 'completed' | 'failed';
   isRunning?: boolean;
-  focusedState?: string | null; // 新增：用于视图跳转
+  focusedState?: string | null;
   startTime?: string | null;
   endTime?: string | null;
+  supervisorFlow?: SupervisorFlowRecord[];
+  currentPlanRound?: number;
 
   // 回调
   onStateClick?: (stateName: string) => void;
@@ -47,6 +60,8 @@ export default function StateMachineExecutionView({
   focusedState,
   startTime,
   endTime,
+  supervisorFlow = [],
+  currentPlanRound,
   onStateClick,
   onStepClick,
   onForceTransition,
@@ -56,7 +71,7 @@ export default function StateMachineExecutionView({
   return (
     <div className="h-full flex flex-col">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-        <TabsList className="grid w-full grid-cols-4 mb-4">
+        <TabsList className="grid w-full grid-cols-5 mb-4">
           <TabsTrigger value="overview" className="flex items-center gap-2">
             <Activity className="w-4 h-4" />
             <span>总览</span>
@@ -68,6 +83,10 @@ export default function StateMachineExecutionView({
           <TabsTrigger value="flow" className="flex items-center gap-2">
             <GitBranch className="w-4 h-4" />
             <span>流转图</span>
+          </TabsTrigger>
+          <TabsTrigger value="supervisor" className="flex items-center gap-2">
+            <GitBranch className="w-4 h-4" />
+            <span>Supervisor</span>
           </TabsTrigger>
           <TabsTrigger value="diagram" className="flex items-center gap-2">
             <BarChart3 className="w-4 h-4" />
@@ -120,6 +139,14 @@ export default function StateMachineExecutionView({
           />
         </TabsContent>
 
+        {/* Supervisor 流转视图 */}
+        <TabsContent value="supervisor" className="flex-1 overflow-auto">
+          <SupervisorFlowVisualizer
+            flow={supervisorFlow}
+            currentRound={currentPlanRound}
+          />
+        </TabsContent>
+
         {/* 状态图视图 */}
         <TabsContent value="diagram" className="flex-1 overflow-hidden">
           <div className="h-full">
@@ -131,6 +158,8 @@ export default function StateMachineExecutionView({
               stateHistory={stateHistory}
               isRunning={isRunning}
               focusedState={focusedState}
+              supervisorFlow={supervisorFlow}
+              currentPlanRound={currentPlanRound}
               onStateClick={onStateClick}
               onStepClick={onStepClick}
               onForceTransition={onForceTransition}

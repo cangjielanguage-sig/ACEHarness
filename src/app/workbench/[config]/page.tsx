@@ -100,6 +100,16 @@ export default function WorkbenchPage() {
   const [showRunRequirements, setShowRunRequirements] = useState(true);
   const [iterationFeedback, setIterationFeedback] = useState('');
   const [pendingPlanQuestion, setPendingPlanQuestion] = useState<{ question: string; fromAgent: string; round: number } | null>(null);
+  const [supervisorFlow, setSupervisorFlow] = useState<{
+    type: 'question' | 'decision';
+    from: string;
+    to: string;
+    question?: string;
+    method?: string;
+    round: number;
+    timestamp: string;
+  }[]>([]);
+  const [currentPlanRound, setCurrentPlanRound] = useState<number>(0);
   const [planAnswer, setPlanAnswer] = useState('');
   const [sendingPlanAnswer, setSendingPlanAnswer] = useState(false);
   const [liveStreamFeedback, setLiveStreamFeedback] = useState('');
@@ -606,7 +616,31 @@ export default function WorkbenchPage() {
           fromAgent: event.data.fromAgent,
           round: event.data.round
         });
+        setSupervisorFlow(prev => [...prev, {
+          type: 'question',
+          from: event.data.fromAgent,
+          to: 'user',
+          question: event.data.question,
+          round: event.data.round,
+          timestamp: new Date().toISOString(),
+        }]);
         addLog('system', 'warning', `❓ 需要用户回答: ${event.data.question}`);
+        break;
+      case 'plan-round':
+        setCurrentPlanRound(event.data.round);
+        addLog('system', 'info', `🔄 Plan 循环第 ${event.data.round + 1} 轮 - 收集 ${event.data.infoRequests?.length || 0} 个请求`);
+        break;
+      case 'route-decision':
+        setSupervisorFlow(prev => [...prev, {
+          type: 'decision',
+          from: event.data.fromAgent || 'system',
+          to: event.data.route_to,
+          method: event.data.method,
+          question: event.data.question,
+          round: event.data.round,
+          timestamp: new Date().toISOString(),
+        }]);
+        addLog('system', 'info', `🔀 Supervisor 路由: ${event.data.fromAgent || 'system'} → ${event.data.route_to} (${event.data.method})`);
         break;
     }
   }, [selectedAgent, addLog]);
@@ -648,6 +682,8 @@ export default function WorkbenchPage() {
       setSmStateHistory([]);
       setSmIssueTracker([]);
       setSmTransitionCount(0);
+      setSupervisorFlow([]);
+      setCurrentPlanRound(0);
       addLog('system', 'info', '正在启动工作流...');
       await workflowApi.start(configFile);
       addLog('system', 'success', '工作流启动成功，等待执行...');
@@ -1786,6 +1822,8 @@ export default function WorkbenchPage() {
                             focusedState={focusedState}
                             startTime={runStartTime}
                             endTime={runEndTime}
+                            supervisorFlow={supervisorFlow}
+                            currentPlanRound={currentPlanRound}
                             onStateClick={(s) => setFocusedState(s)}
                             onStepClick={(step) => selectStep(step)}
                             onForceTransition={handleForceTransition}
