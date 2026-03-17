@@ -1754,6 +1754,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     while (round < maxRounds) {
       const output = await this.executeStep(step, state, config, requirements, extraContext);
 
+      console.log(`[StateMachineWorkflowManager] Step ${step.name} 原始输出:`, output.slice(0, 500));
       const infoRequests = parseNeedInfo(output);
       console.log(`[StateMachineWorkflowManager] Step ${step.name} 解析到 ${infoRequests.length} 个信息请求:`, infoRequests);
       if (infoRequests.length === 0 || isPlanDone(output)) {
