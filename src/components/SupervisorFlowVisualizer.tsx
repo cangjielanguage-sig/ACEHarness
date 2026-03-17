@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { Badge } from './ui/badge';
-import { ArrowRight, GitBranch, User, Bot, HelpCircle } from 'lucide-react';
+import { ArrowRight, GitBranch, User, Bot, HelpCircle, Clock } from 'lucide-react';
 
 interface SupervisorFlowRecord {
   type: 'question' | 'decision';
@@ -12,6 +12,7 @@ interface SupervisorFlowRecord {
   method?: string;
   round: number;
   timestamp: string;
+  stateName?: string;
 }
 
 interface SupervisorFlowVisualizerProps {
@@ -23,18 +24,11 @@ export default function SupervisorFlowVisualizer({
   flow,
   currentRound,
 }: SupervisorFlowVisualizerProps) {
-  const flowByRound = useMemo(() => {
-    const rounds: Record<number, SupervisorFlowRecord[]> = {};
-    flow.forEach(record => {
-      if (!rounds[record.round]) {
-        rounds[record.round] = [];
-      }
-      rounds[record.round].push(record);
-    });
-    return rounds;
+  const sortedFlow = useMemo(() => {
+    return [...flow].sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
   }, [flow]);
-
-  const rounds = Object.keys(flowByRound).map(Number).sort((a, b) => a - b);
 
   if (flow.length === 0) {
     return (
@@ -48,21 +42,23 @@ export default function SupervisorFlowVisualizer({
           <p className="text-sm">暂无 Supervisor 流转记录</p>
           <p className="text-xs mt-1">当 Agent 请求信息时，将显示路由路径</p>
         </div>
+        {currentRound !== undefined && (
+          <Badge className="bg-purple-100 text-purple-700 border-purple-200">
+            当前第 {currentRound + 1} 轮
+          </Badge>
+        )}
       </div>
     );
   }
 
   const getMethodBadge = (method?: string) => {
-    switch (method) {
-      case 'keyword':
-        return <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">关键词</Badge>;
-      case 'llm':
-        return <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">LLM</Badge>;
-      case 'human-tag':
-        return <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">人工</Badge>;
-      default:
-        return null;
+    if (method === 'keyword') {
+      return <Badge variant="outline" className="text-[10px] py-0 h-5 border-green-500 text-green-600">关键词</Badge>;
     }
+    if (method === 'llm') {
+      return <Badge variant="outline" className="text-[10px] py-0 h-5 border-blue-500 text-blue-600">LLM</Badge>;
+    }
+    return null;
   };
 
   return (
@@ -71,7 +67,7 @@ export default function SupervisorFlowVisualizer({
         <div className="flex items-center gap-2">
           <GitBranch className="w-5 h-5 text-purple-500" />
           <h3 className="font-semibold">Supervisor 流转</h3>
-          <Badge variant="secondary" className="text-xs">{flow.length} 条记录</Badge>
+          <Badge variant="secondary">{flow.length} 条记录</Badge>
         </div>
         {currentRound !== undefined && (
           <Badge className="bg-purple-100 text-purple-700 border-purple-200">
@@ -80,85 +76,75 @@ export default function SupervisorFlowVisualizer({
         )}
       </div>
 
-      <div className="space-y-4 max-h-[300px] overflow-y-auto">
-        {rounds.map(round => (
-          <div key={round} className="relative">
-            {round > 0 && (
-              <div className="absolute -top-3 left-6 w-0.5 h-3 bg-purple-300" />
-            )}
-            <div className="bg-purple-50 dark:bg-purple-950/30 rounded-lg p-3 border border-purple-100 dark:border-purple-900">
+      <div className="space-y-3 max-h-[400px] overflow-y-auto">
+        {sortedFlow.map((record, idx) => (
+          <div key={idx} className="relative pl-8">
+            {/* 时间轴线 */}
+            <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-purple-200" />
+            <div className="absolute left-2 top-3 w-2 h-2 rounded-full bg-purple-500 border-2 border-white dark:border-gray-800" />
+            
+            <div className="bg-purple-50 dark:bg-purple-950/20 rounded-lg p-3 border border-purple-100 dark:border-purple-900">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-medium text-purple-600 dark:text-purple-400">
-                  第 {round + 1} 轮
+                <Clock className="w-3 h-3 text-purple-400" />
+                <span className="text-xs text-purple-500">
+                  {new Date(record.timestamp).toLocaleTimeString()}
                 </span>
-                <span className="text-xs text-gray-400">
-                  {new Date(flowByRound[round][0]?.timestamp).toLocaleTimeString()}
-                </span>
+                {record.stateName && (
+                  <Badge variant="outline" className="text-[10px] py-0 h-5">
+                    {record.stateName}
+                  </Badge>
+                )}
+                <Badge variant="outline" className="text-[10px] py-0 h-5">
+                  第 {record.round + 1} 轮
+                </Badge>
               </div>
 
-              <div className="space-y-2">
-                {flowByRound[round].map((record, idx) => (
-                  <div key={idx} className="flex items-center gap-2 text-sm">
-                    {/* 来源节点 */}
-                    <div className={`
-                      flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium
-                      ${record.from === 'user' 
-                        ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' 
-                        : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                      }
-                    `}>
-                      {record.from === 'user' ? (
-                        <User className="w-3 h-3" />
-                      ) : (
-                        <Bot className="w-3 h-3" />
-                      )}
-                      {record.from}
-                    </div>
+              <div className="flex items-center gap-2 text-sm flex-wrap">
+                <div className={`
+                  flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium
+                  ${record.from === 'user' 
+                    ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' 
+                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                  }
+                `}>
+                  {record.from === 'user' ? (
+                    <User className="w-3 h-3" />
+                  ) : (
+                    <Bot className="w-3 h-3" />
+                  )}
+                  {record.from}
+                </div>
 
-                    {/* 箭头 */}
-                    <ArrowRight className="w-4 h-4 text-gray-400" />
+                <ArrowRight className="w-4 h-4 text-gray-400" />
 
-                    {/* 目标节点 */}
-                    <div className={`
-                      flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium
-                      ${record.to === 'user' 
-                        ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' 
-                        : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                      }
-                    `}>
-                      {record.to === 'user' ? (
-                        <User className="w-3 h-3" />
-                      ) : (
-                        <Bot className="w-3 h-3" />
-                      )}
-                      {record.to}
-                    </div>
+                <div className={`
+                  flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium
+                  ${record.to === 'user' 
+                    ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' 
+                    : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                  }
+                `}>
+                  {record.to === 'user' ? (
+                    <User className="w-3 h-3" />
+                  ) : (
+                    <Bot className="w-3 h-3" />
+                  )}
+                  {record.to}
+                </div>
 
-                    {/* 方法标签 */}
-                    {record.method && getMethodBadge(record.method)}
-
-                    {/* 问题摘要 */}
-                    {record.question && (
-                      <div className="text-xs text-gray-500 truncate max-w-[200px]" title={record.question}>
-                        {record.question.length > 30 ? record.question.slice(0, 30) + '...' : record.question}
-                      </div>
-                    )}
-
-                    {/* 类型标签 */}
-                    {record.type === 'question' && (
-                      <Badge variant="outline" className="text-[10px] py-0 h-5 border-orange-300 text-orange-600">
-                        需要回答
-                      </Badge>
-                    )}
-                  </div>
-                ))}
+                {getMethodBadge(record.method)}
               </div>
+
+              {record.question && (
+                <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-900/50 rounded p-2">
+                  {record.question}
+                </div>
+              )}
             </div>
           </div>
         ))}
       </div>
 
-      {/* 图例 */}
       <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700">
         <div className="flex flex-wrap gap-3 text-xs text-gray-500">
           <div className="flex items-center gap-1">

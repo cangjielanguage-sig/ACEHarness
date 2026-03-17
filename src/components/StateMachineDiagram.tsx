@@ -437,22 +437,6 @@ function StateMachineDiagramInner({
 
     console.log('[StateMachineDiagram] Total nodes created:', nodes.length);
 
-    // 添加 Supervisor 节点（如果有 supervisorFlow 数据）
-    if (supervisorFlow && supervisorFlow.length > 0) {
-      const avgX = nodes.length > 0 ? nodes.reduce((sum, n) => sum + n.position.x, 0) / nodes.length : 500;
-      const maxY = nodes.length > 0 ? Math.max(...nodes.map(n => n.position.y)) : 200;
-
-      nodes.push({
-        id: '__supervisor__',
-        type: 'supervisorNode',
-        position: { x: avgX, y: maxY + 200 },
-        data: {
-          currentRound: currentPlanRound,
-          flowCount: supervisorFlow.length,
-        } as any,
-      });
-    }
-
     return nodes;
   }, [states, currentState, currentStep, completedSteps, onStepClick, onForceTransition, isRunning, stateHistory, supervisorFlow, currentPlanRound]);
 
@@ -703,115 +687,6 @@ function StateMachineDiagramInner({
               fillOpacity: 0.9,
             },
           });
-        }
-      }
-    }
-
-    // 添加 Supervisor 相关的边
-    if (supervisorFlow && supervisorFlow.length > 0) {
-      const supervisorNodeId = '__supervisor__';
-      const nodePositions = calculateNodeLayout(states, true);
-
-      // 获取节点位置
-      const avgX = states.length > 0
-        ? Array.from(nodePositions.values()).reduce((sum, pos) => sum + pos.x, 0) / nodePositions.size
-        : 500;
-      const maxY = states.length > 0
-        ? Math.max(...Array.from(nodePositions.values()).map(pos => pos.y))
-        : 200;
-
-      for (const flow of supervisorFlow) {
-        // 确定源节点和目标节点
-        const fromNode = flow.from === 'user' ? '__human_approval__' : flow.from;
-        const toNode = flow.to === 'user' ? '__human_approval__' : flow.to;
-
-        // 获取节点位置
-        let fromPos = nodePositions.get(fromNode);
-        let toPos = nodePositions.get(toNode);
-
-        // 如果节点不存在于状态中，尝试查找其他方式
-        if (!fromPos && fromNode !== '__human_approval__') {
-          // 源节点可能是状态机中的某个状态，使用默认位置
-          fromPos = { x: avgX - 200, y: maxY };
-        }
-        if (!toPos && toNode !== '__human_approval__') {
-          toPos = { x: avgX + 200, y: maxY };
-        }
-
-        // 如果是用户，使用人工审查节点的位置
-        if (flow.from === 'user') {
-          fromPos = { x: avgX, y: maxY + 300 };
-        }
-        if (flow.to === 'user') {
-          toPos = { x: avgX, y: maxY + 300 };
-        }
-
-        if (fromPos && toPos) {
-          // 添加从源到 Supervisor 的边
-          const edgeKey1 = `${fromNode}→${supervisorNodeId}`;
-          if (!edgeSet.has(edgeKey1)) {
-            edgeSet.add(edgeKey1);
-            edges.push({
-              id: edgeKey1,
-              source: fromNode,
-              target: supervisorNodeId,
-              type: 'smoothstep',
-              animated: flow.round === (currentPlanRound || 0),
-              style: {
-                stroke: '#a855f7',
-                strokeWidth: 2,
-                opacity: flow.round === (currentPlanRound || 0) ? 1 : 0.5,
-              },
-              markerEnd: {
-                type: MarkerType.ArrowClosed,
-                width: 14,
-                height: 14,
-                color: '#a855f7',
-              },
-              label: flow.question?.slice(0, 20) + ((flow.question?.length ?? 0) > 20 ? '...' : ''),
-              labelStyle: {
-                fontSize: 9,
-                fill: '#a855f7',
-              },
-              labelBgStyle: {
-                fill: '#ffffff',
-                fillOpacity: 0.9,
-              },
-            });
-          }
-
-          // 添加从 Supervisor 到目标的边
-          const edgeKey2 = `${supervisorNodeId}→${toNode}`;
-          if (!edgeSet.has(edgeKey2)) {
-            edgeSet.add(edgeKey2);
-            edges.push({
-              id: edgeKey2,
-              source: supervisorNodeId,
-              target: toNode,
-              type: 'smoothstep',
-              animated: flow.round === (currentPlanRound || 0),
-              style: {
-                stroke: flow.to === 'user' ? '#f97316' : '#10b981',
-                strokeWidth: 2,
-                opacity: flow.round === (currentPlanRound || 0) ? 1 : 0.5,
-              },
-              markerEnd: {
-                type: MarkerType.ArrowClosed,
-                width: 14,
-                height: 14,
-                color: flow.to === 'user' ? '#f97316' : '#10b981',
-              },
-              label: flow.method || 'route',
-              labelStyle: {
-                fontSize: 9,
-                fill: flow.to === 'user' ? '#f97316' : '#10b981',
-              },
-              labelBgStyle: {
-                fill: '#ffffff',
-                fillOpacity: 0.9,
-              },
-            });
-          }
         }
       }
     }

@@ -17,7 +17,7 @@ workflow:
             收到回答后输出 [PLAN_DONE]。
             例如，如果测试agent的姓名是Alice，那么最终输出应该是：
             Hello World Alice!
-            请使用 [NEED_INFO]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要说"我需要向测试agent提问：xxx"。
+            请使用 [NEED_INFO]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要在问题前添加该agent的关键词，例如你需要向测试agent询问问题，你需要说"我需要向测试agent提问：xxx"。 
           enablePlanLoop: true
           maxPlanRounds: 2
       transitions:

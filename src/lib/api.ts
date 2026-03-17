@@ -55,6 +55,7 @@ interface WorkflowStatusResponse {
     method?: string;
     round: number;
     timestamp: string;
+    stateName?: string;
   }>;
 }
 

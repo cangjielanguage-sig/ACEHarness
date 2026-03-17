@@ -106,6 +106,7 @@ export interface PersistedRunState {
     method?: string;
     round: number;
     timestamp: string;
+    stateName?: string;
   }>;
 }
 

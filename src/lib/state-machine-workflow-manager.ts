@@ -95,7 +95,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private currentStep: string | null = null;
   private completedSteps: string[] = [];
   private currentProcesses: PersistedProcessInfo[] = [];
-  private supervisorFlow: { type: string; from: string; to: string; question?: string; method?: string; round: number; timestamp: string }[] = [];
+  private supervisorFlow: { type: string; from: string; to: string; question?: string; method?: string; round: number; timestamp: string; stateName?: string }[] = [];
   /** Current engine instance (Kiro CLI, etc.) */
   private currentEngine: Engine | null = null;
   /** Current engine type */
@@ -1755,7 +1755,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const output = await this.executeStep(step, state, config, requirements, extraContext);
 
       const infoRequests = parseNeedInfo(output);
+      console.log(`[StateMachineWorkflowManager] Step ${step.name} 解析到 ${infoRequests.length} 个信息请求:`, infoRequests);
       if (infoRequests.length === 0 || isPlanDone(output)) {
+        console.log(`[StateMachineWorkflowManager] Step ${step.name} 没有信息请求或已 PLAN_DONE，结束`);
         return output;
       }
 
@@ -1769,6 +1771,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
             question: req.question,
             round,
             timestamp: new Date().toISOString(),
+            stateName: state.name,
           });
           const answer = await this.waitForUserAnswer(req.question, step.agent, round);
           extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
@@ -1792,6 +1795,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
               question: req.question,
               round,
               timestamp: new Date().toISOString(),
+              stateName: state.name,
             });
             const answer = await this.waitForUserAnswer(req.question, step.agent, round);
             console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
@@ -1806,6 +1810,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
               method: decision.method,
               round,
               timestamp: new Date().toISOString(),
+              stateName: state.name,
             });
             const answer = await this.queryAgent(decision.route_to, decision.question, config);
             console.log(`[StateMachineWorkflowManager] ${decision.route_to} 回答: ${answer}`);

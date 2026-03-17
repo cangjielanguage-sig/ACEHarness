@@ -629,6 +629,7 @@ export default function WorkbenchPage() {
           question: event.data.question,
           round: event.data.round,
           timestamp: new Date().toISOString(),
+          stateName: currentPhase,
         }]);
         addLog('system', 'warning', `❓ 需要用户回答: ${event.data.question}`);
         break;
@@ -645,6 +646,7 @@ export default function WorkbenchPage() {
           question: event.data.question,
           round: event.data.round,
           timestamp: new Date().toISOString(),
+          stateName: currentPhase,
         }]);
         addLog('system', 'info', `🔀 Supervisor 路由: ${event.data.fromAgent || currentPhase || 'system'} → ${event.data.route_to} (${event.data.method})`);
         break;
