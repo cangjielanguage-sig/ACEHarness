@@ -442,7 +442,7 @@ export default function StateMachineDesignPanel({
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">{state.name}</div>
                 <div className={`text-xs ${selectedStateName === state.name ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                  {state.steps.length}步 · {state.transitions.length}转移
+                  {(state.steps?.length || 0)}步 · {(state.transitions?.length || 0)}转移
                 </div>
               </div>
               <div className="flex gap-0.5 ml-1">
