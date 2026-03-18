@@ -32,7 +32,7 @@ workflow:
       isFinal: false
       steps:
         - name: 近义词问题路由到reviewer
-          agent: simple-coder
+          agent: simple-tester
           task: |
             你需要修改当前 Hello World 程序的输出，添加上评审agent的姓名。请先询问评审agent的姓名，然后将其姓名加到Hello World的输出中。提问评审agent的姓名。
             收到回答后输出 [PLAN_DONE]。

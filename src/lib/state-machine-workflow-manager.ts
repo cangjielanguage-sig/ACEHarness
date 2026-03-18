@@ -1807,10 +1807,22 @@ export class StateMachineWorkflowManager extends EventEmitter {
             timestamp: new Date().toISOString(),
             stateName: state.name,
           });
+          // 添加两条橙色线：Agent -> Supervisor -> 用户
           this.agentFlow.push({
             id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             type: 'supervisor',
             fromAgent: step.agent,
+            toAgent: 'supervisor',
+            message: req.question,
+            stateName: state.name,
+            stepName: step.name,
+            round,
+            timestamp: new Date().toISOString(),
+          });
+          this.agentFlow.push({
+            id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'supervisor',
+            fromAgent: 'supervisor',
             toAgent: 'user',
             message: req.question,
             stateName: state.name,
@@ -1855,10 +1867,22 @@ export class StateMachineWorkflowManager extends EventEmitter {
               timestamp: new Date().toISOString(),
               stateName: state.name,
             });
+            // 添加两条橙色线：Agent -> Supervisor -> 用户
             this.agentFlow.push({
               id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               type: 'supervisor',
               fromAgent: step.agent,
+              toAgent: 'supervisor',
+              message: req.question,
+              stateName: state.name,
+              stepName: step.name,
+              round,
+              timestamp: new Date().toISOString(),
+            });
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'supervisor',
+              fromAgent: 'supervisor',
               toAgent: 'user',
               message: req.question,
               stateName: state.name,
@@ -1895,10 +1919,22 @@ export class StateMachineWorkflowManager extends EventEmitter {
               stateName: state.name,
             });
             
+            // 添加两条橙色线：Agent -> Supervisor -> 目标Agent
             this.agentFlow.push({
               id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               type: 'supervisor',
               fromAgent: step.agent,
+              toAgent: 'supervisor',
+              message: `Supervisor路由: ${decision.question}`,
+              stateName: state.name,
+              stepName: step.name,
+              round,
+              timestamp: new Date().toISOString(),
+            });
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'supervisor',
+              fromAgent: 'supervisor',
               toAgent: decision.route_to,
               message: `Supervisor路由: ${decision.question}`,
               stateName: state.name,

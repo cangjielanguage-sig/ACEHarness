@@ -230,23 +230,31 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
   const edgeList: Edge[] = [];
   const nodeIds = new Set(nodes.map(n => n.id));
 
-  flow.forEach(record => {
+  // 只显示 stream（执行）和 supervisor（中转）类型的连线
+  // 不显示 request（请求）和 response（响应），避免线条太乱
+  const filteredFlow = flow.filter(record => 
+    record.type === 'stream' || record.type === 'supervisor'
+  );
+
+  // 对于每个 Agent，只保留最新的连线
+  const latestEdges = new Map<string, AgentFlowRecord>();
+
+  filteredFlow.forEach(record => {
+    const key = `${record.fromAgent}->${record.toAgent}`;
+    // 保留最新的记录
+    latestEdges.set(key, record);
+  });
+
+  latestEdges.forEach((record, key) => {
     let sourceId = record.fromAgent;
     let targetId = record.toAgent;
-
-    if (sourceId === 'supervisor' && !nodeIds.has('supervisor')) {
-      sourceId = 'supervisor';
-    }
-    if (targetId === 'supervisor' && !nodeIds.has('supervisor')) {
-      targetId = 'supervisor';
-    }
 
     if (!nodeIds.has(sourceId) || !nodeIds.has(targetId)) {
       return;
     }
 
     const color = getTypeColor(record.type);
-    const isAnimated = record.type !== 'response';
+    const isAnimated = true;
 
     edgeList.push({
       id: `${record.id}-${sourceId}-${targetId}`,
@@ -257,7 +265,7 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
       animated: isAnimated,
       style: { 
         stroke: color, 
-        strokeWidth: record.type === 'stream' || record.type === 'supervisor' ? 3 : 2 
+        strokeWidth: 3
       },
       labelStyle: { fontSize: 10, fill: color },
       labelBgStyle: { fill: 'white', fillOpacity: 0.9 },
