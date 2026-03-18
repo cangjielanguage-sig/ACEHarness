@@ -878,6 +878,26 @@ export class StateMachineWorkflowManager extends EventEmitter {
         output,
       });
 
+      // 记录步骤完成的流转线
+      const currentStepIndex = state.steps.findIndex(s => s.name === step.name);
+      if (currentStepIndex >= 0 && currentStepIndex < state.steps.length - 1) {
+        const nextStep = state.steps[currentStepIndex + 1];
+        if (nextStep && nextStep.agent !== step.agent) {
+          this.agentFlow.push({
+            id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'stream',
+            fromAgent: step.agent,
+            toAgent: nextStep.agent,
+            message: `步骤流转: ${step.name} -> ${nextStep.name}`,
+            stateName: state.name,
+            stepName: step.name,
+            round: 0,
+            timestamp: new Date().toISOString(),
+          });
+          this.emit('agent-flow', { agentFlow: this.agentFlow });
+        }
+      }
+
       // Save output to file system
       if (this.currentRunId) {
         const stepFileName = `${state.name}-${step.name}`;
@@ -1807,10 +1827,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
             timestamp: new Date().toISOString(),
             stateName: state.name,
           });
-          // 添加两条橙色线：Agent -> Supervisor -> 用户
+          // 添加两条线：请求线（蓝色）+ 路由线（橙色）
+          // Agent -> Supervisor（请求）
           this.agentFlow.push({
             id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            type: 'supervisor',
+            type: 'request',
             fromAgent: step.agent,
             toAgent: 'supervisor',
             message: req.question,
@@ -1819,6 +1840,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
             round,
             timestamp: new Date().toISOString(),
           });
+          // Supervisor -> 用户（路由）
           this.agentFlow.push({
             id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             type: 'supervisor',
@@ -1867,10 +1889,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
               timestamp: new Date().toISOString(),
               stateName: state.name,
             });
-            // 添加两条橙色线：Agent -> Supervisor -> 用户
+            // 添加两条线：请求线（蓝色）+ 路由线（橙色）
             this.agentFlow.push({
               id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              type: 'supervisor',
+              type: 'request',
               fromAgent: step.agent,
               toAgent: 'supervisor',
               message: req.question,
@@ -1879,6 +1901,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
               round,
               timestamp: new Date().toISOString(),
             });
+            // Supervisor -> 用户（路由）
             this.agentFlow.push({
               id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               type: 'supervisor',
@@ -1919,10 +1942,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
               stateName: state.name,
             });
             
-            // 添加两条橙色线：Agent -> Supervisor -> 目标Agent
+            // 添加两条线：请求线（蓝色）+ 路由线（橙色）
             this.agentFlow.push({
               id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              type: 'supervisor',
+              type: 'request',
               fromAgent: step.agent,
               toAgent: 'supervisor',
               message: `Supervisor路由: ${decision.question}`,

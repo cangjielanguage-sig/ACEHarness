@@ -71,7 +71,7 @@ function AgentNode({ data }: any) {
       className={`
         px-4 py-3 rounded-xl border-2 min-w-[180px] transition-all shadow-lg cursor-move
         ${isActive 
-          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950 shadow-blue-200 dark:shadow-blue-900' 
+          ? 'border-green-500 bg-green-50 dark:bg-green-950 shadow-green-200 dark:shadow-green-900' 
           : isUser
           ? 'border-gray-400 bg-gray-50 dark:bg-gray-800'
           : 'border-blue-300 bg-white dark:bg-gray-800 hover:shadow-xl'}
@@ -230,10 +230,9 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
   const edgeList: Edge[] = [];
   const nodeIds = new Set(nodes.map(n => n.id));
 
-  // 只显示 stream（执行）和 supervisor（中转）类型的连线
-  // 不显示 request（请求）和 response（响应），避免线条太乱
+  // 保留三种类型的连线：stream（流转）、request（请求）、supervisor（路由）
   const filteredFlow = flow.filter(record => 
-    record.type === 'stream' || record.type === 'supervisor'
+    record.type === 'stream' || record.type === 'request' || record.type === 'supervisor'
   );
 
   // 对于每个 Agent，只保留最新的连线
@@ -241,7 +240,6 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
 
   filteredFlow.forEach(record => {
     const key = `${record.fromAgent}->${record.toAgent}`;
-    // 保留最新的记录
     latestEdges.set(key, record);
   });
 
@@ -322,23 +320,15 @@ function AgentFlowDiagramInner({
           <div className="flex flex-wrap gap-3 text-xs">
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-full bg-green-500" />
-              <span className="font-medium">执行</span>
+              <span className="font-medium">步骤流转</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-full bg-blue-500" />
               <span className="font-medium">请求</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-purple-500" />
-              <span className="font-medium">响应</span>
-            </div>
-            <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-full bg-orange-500" />
-              <span className="font-medium">Supervisor</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-gray-500" />
-              <span className="font-medium">用户</span>
+              <span className="font-medium">路由</span>
             </div>
           </div>
           <div className="mt-2 text-xs text-gray-500">
