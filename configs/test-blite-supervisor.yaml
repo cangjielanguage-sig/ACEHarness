@@ -51,7 +51,7 @@ workflow:
     - name: 场景3-人工审查补充信息
       description: 人工审查补充信息确认
       isInitial: false
-      isFinal: true
+      isFinal: false
       steps:
         - name: 询问用户是否需要补充信息
           agent: simple-coder
@@ -59,6 +59,25 @@ workflow:
             你需要修改当前 Hello World 程序的输出，向人工进行提问是否需要添加人工的姓名，添加到Hello World的输出中。提问用户是否需要添加姓名。
             收到回答后输出 [PLAN_DONE]。
             请使用 [NEED_INFO:human]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要在问题前添加该agent的关键词，例如你需要向用户询问问题，你需要说"我需要向用户提问：xxx"。
+          enablePlanLoop: true
+          maxPlanRounds: 2
+      transitions:
+        - to: 场景4-over
+          condition:
+            type: always
+
+    - name: 场景4-over
+      description: over
+      isInitial: false
+      isFinal: true
+      steps:
+        - name: 结束
+          agent: simple-coder
+          task: |
+            你需要修改当前 Hello World 程序的输出，添加一个结束标志。
+            例如，最终输出应该是：
+            Hello World xxx!
+            结束
           enablePlanLoop: true
           maxPlanRounds: 2
       transitions: []

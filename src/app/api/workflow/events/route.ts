@@ -54,6 +54,8 @@ export async function GET(request: NextRequest) {
         'plan-question': (data: any) => sendEvent({ type: 'plan-question', data }),
         'plan-round': (data: any) => sendEvent({ type: 'plan-round', data }),
         'route-decision': (data: any) => sendEvent({ type: 'route-decision', data }),
+        // Agent 工作流事件
+        'agent-flow': (data: any) => sendEvent({ type: 'agent-flow', data }),
       };
 
       Object.entries(handlers).forEach(([event, handler]) => {

@@ -213,6 +213,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.transitionCount = 0;
       this.completedSteps = [];
       this.supervisorFlow = [];
+      this.agentFlow = [];
       this.runStartTime = new Date().toISOString();
       this.currentConfigFile = configFile;
       // Load config
