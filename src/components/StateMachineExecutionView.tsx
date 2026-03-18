@@ -2,12 +2,14 @@
 
 import { useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
-import { GitBranch, BarChart3, Activity, Clock } from 'lucide-react';
+import { GitBranch, BarChart3, Activity, Clock, Bot } from 'lucide-react';
 import StateTransitionTimeline from './StateTransitionTimeline';
 import StateFlowVisualizer from './StateFlowVisualizer';
 import StateMachineRuntimePanel from './StateMachineRuntimePanel';
 import StateMachineDiagram from './StateMachineDiagram';
 import SupervisorFlowVisualizer from './SupervisorFlowVisualizer';
+import AgentFlowVisualizer from './AgentFlowVisualizer';
+import AgentFlowDiagram from './AgentFlowDiagram';
 import type { StateTransitionRecord, Issue, StateMachineState } from '@/lib/schemas';
 
 interface SupervisorFlowRecord {
@@ -16,6 +18,18 @@ interface SupervisorFlowRecord {
   to: string;
   question?: string;
   method?: string;
+  round: number;
+  timestamp: string;
+}
+
+interface AgentFlowRecord {
+  id: string;
+  type: 'stream' | 'request' | 'response' | 'supervisor';
+  fromAgent: string;
+  toAgent: string;
+  message?: string;
+  stateName: string;
+  stepName: string;
   round: number;
   timestamp: string;
 }
@@ -38,6 +52,7 @@ interface StateMachineExecutionViewProps {
   startTime?: string | null;
   endTime?: string | null;
   supervisorFlow?: SupervisorFlowRecord[];
+  agentFlow?: AgentFlowRecord[];
   currentPlanRound?: number;
 
   // 回调
@@ -61,6 +76,7 @@ export default function StateMachineExecutionView({
   startTime,
   endTime,
   supervisorFlow = [],
+  agentFlow = [],
   currentPlanRound,
   onStateClick,
   onStepClick,
@@ -71,7 +87,7 @@ export default function StateMachineExecutionView({
   return (
     <div className="h-full flex flex-col">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-        <TabsList className="grid w-full grid-cols-5 mb-4">
+        <TabsList className="grid w-full grid-cols-6 mb-4">
           <TabsTrigger value="overview" className="flex items-center gap-2">
             <Activity className="w-4 h-4" />
             <span>总览</span>
@@ -87,6 +103,10 @@ export default function StateMachineExecutionView({
           <TabsTrigger value="supervisor" className="flex items-center gap-2">
             <GitBranch className="w-4 h-4" />
             <span>Supervisor</span>
+          </TabsTrigger>
+          <TabsTrigger value="agent-flow" className="flex items-center gap-2">
+            <Bot className="w-4 h-4" />
+            <span>Agent 流程</span>
           </TabsTrigger>
           <TabsTrigger value="diagram" className="flex items-center gap-2">
             <BarChart3 className="w-4 h-4" />
@@ -145,6 +165,16 @@ export default function StateMachineExecutionView({
             flow={supervisorFlow}
             currentRound={currentPlanRound}
           />
+        </TabsContent>
+
+        {/* Agent 工作流视图 */}
+        <TabsContent value="agent-flow" className="flex-1 overflow-hidden">
+          <div className="h-full">
+            <AgentFlowDiagram
+              flow={agentFlow}
+              currentRound={currentPlanRound}
+            />
+          </div>
         </TabsContent>
 
         {/* 状态图视图 */}

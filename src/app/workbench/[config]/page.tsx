@@ -109,6 +109,17 @@ export default function WorkbenchPage() {
     round: number;
     timestamp: string;
   }[]>([]);
+  const [agentFlow, setAgentFlow] = useState<{
+    id: string;
+    type: 'stream' | 'request' | 'response' | 'supervisor';
+    fromAgent: string;
+    toAgent: string;
+    message?: string;
+    stateName: string;
+    stepName: string;
+    round: number;
+    timestamp: string;
+  }[]>([]);
   const [currentPlanRound, setCurrentPlanRound] = useState<number>(0);
   const [planAnswer, setPlanAnswer] = useState('');
   const [sendingPlanAnswer, setSendingPlanAnswer] = useState(false);
@@ -189,6 +200,9 @@ export default function WorkbenchPage() {
         }
         if ((status as any).supervisorFlow) {
           setSupervisorFlow((status as any).supervisorFlow);
+        }
+        if ((status as any).agentFlow) {
+          setAgentFlow((status as any).agentFlow);
         }
 
         {
@@ -395,6 +409,9 @@ export default function WorkbenchPage() {
       }
       if (detail.supervisorFlow) {
         setSupervisorFlow(detail.supervisorFlow);
+      }
+      if (detail.agentFlow) {
+        setAgentFlow(detail.agentFlow);
       }
 
       // Restore contexts
@@ -650,6 +667,9 @@ export default function WorkbenchPage() {
         }]);
         addLog('system', 'info', `🔀 Supervisor 路由: ${event.data.fromAgent || currentPhase || 'system'} → ${event.data.route_to} (${event.data.method})`);
         break;
+      case 'agent-flow':
+        setAgentFlow(event.data.agentFlow || []);
+        break;
     }
   }, [selectedAgent, addLog]);
 
@@ -691,6 +711,7 @@ export default function WorkbenchPage() {
       setSmIssueTracker([]);
       setSmTransitionCount(0);
       setSupervisorFlow([]);
+      setAgentFlow([]);
       setCurrentPlanRound(0);
       addLog('system', 'info', '正在启动工作流...');
       await workflowApi.start(configFile);
@@ -1835,6 +1856,7 @@ export default function WorkbenchPage() {
                             startTime={runStartTime}
                             endTime={runEndTime}
                             supervisorFlow={supervisorFlow}
+                            agentFlow={agentFlow}
                             currentPlanRound={currentPlanRound}
                             onStateClick={(s) => setFocusedState(s)}
                             onStepClick={(step) => selectStep(step)}

@@ -108,6 +108,17 @@ export interface PersistedRunState {
     timestamp: string;
     stateName?: string;
   }>;
+  agentFlow?: Array<{
+    id: string;
+    type: string;
+    fromAgent: string;
+    toAgent: string;
+    message?: string;
+    stateName: string;
+    stepName: string;
+    round: number;
+    timestamp: string;
+  }>;
 }
 
 function runDir(runId: string): string {

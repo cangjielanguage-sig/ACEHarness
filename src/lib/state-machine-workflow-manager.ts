@@ -96,6 +96,18 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private completedSteps: string[] = [];
   private currentProcesses: PersistedProcessInfo[] = [];
   private supervisorFlow: { type: string; from: string; to: string; question?: string; method?: string; round: number; timestamp: string; stateName?: string }[] = [];
+  /** Agent 工作流：追踪 Agent 之间的信息传递 */
+  private agentFlow: {
+    id: string;
+    type: 'stream' | 'request' | 'response' | 'supervisor';
+    fromAgent: string;
+    toAgent: string;
+    message?: string;
+    stateName: string;
+    stepName: string;
+    round: number;
+    timestamp: string;
+  }[] = [];
   /** Current engine instance (Kiro CLI, etc.) */
   private currentEngine: Engine | null = null;
   /** Current engine type */
@@ -412,6 +424,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         globalContext: this.globalContext,
         phaseContexts: Object.fromEntries(this.stateContexts),
         supervisorFlow: this.supervisorFlow,
+        agentFlow: this.agentFlow as any,
         // 只在真正等待人工审批时才写入 pendingCheckpoint；已完成/失败/停止时清除
         ...(!finalStatus && this.currentState === '__human_approval__' && this.pendingApprovalInfo ? {
           pendingCheckpoint: {
@@ -804,6 +817,19 @@ export class StateMachineWorkflowManager extends EventEmitter {
     agent.currentTask = step.name;
     this.currentStep = `${state.name}-${step.name}`;
     this.emit('agents', { agents: this.agents });
+    
+    this.agentFlow.push({
+      id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'stream',
+      fromAgent: step.agent,
+      toAgent: step.agent,
+      message: `开始执行步骤: ${step.name}`,
+      stateName: state.name,
+      stepName: step.name,
+      round: 0,
+      timestamp: new Date().toISOString(),
+    });
+    this.emit('agent-flow', { agentFlow: this.agentFlow });
     await this.persistState();
 
     this.emit('step-start', {
@@ -1813,9 +1839,25 @@ export class StateMachineWorkflowManager extends EventEmitter {
               timestamp: new Date().toISOString(),
               stateName: state.name,
             });
+            
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'supervisor',
+              fromAgent: step.agent,
+              toAgent: decision.route_to,
+              message: `Supervisor路由: ${decision.question}`,
+              stateName: state.name,
+              stepName: step.name,
+              round,
+              timestamp: new Date().toISOString(),
+            });
+            this.emit('agent-flow', { agentFlow: this.agentFlow });
+            
             const answer = await this.queryAgent(decision.route_to, decision.question, config);
             console.log(`[StateMachineWorkflowManager] ${decision.route_to} 回答: ${answer}`);
             extraContext += `\n\n[${decision.route_to} 回答] ${decision.question}\n${answer}`;
+            
+            this.addAgentResponseFlow(decision.route_to, step.agent, answer, state.name, step.name, round);
           }
         }
       }
@@ -1856,6 +1898,19 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     const processId = `query-${agentName}-${Date.now()}`;
 
+    this.agentFlow.push({
+      id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'request',
+      fromAgent: 'supervisor',
+      toAgent: agentName,
+      message: question,
+      stateName: this.currentState || '',
+      stepName: '',
+      round: 0,
+      timestamp: new Date().toISOString(),
+    });
+    this.emit('agent-flow', { agentFlow: this.agentFlow });
+
     try {
       const result = await this.executeWithEngine(
         processId,
@@ -1871,10 +1926,40 @@ export class StateMachineWorkflowManager extends EventEmitter {
           timeoutMs: 60000,
         }
       );
-      return result.result || '[无输出]';
+      const answer = result.result || '[无输出]';
+      
+      this.agentFlow.push({
+        id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        type: 'response',
+        fromAgent: agentName,
+        toAgent: 'supervisor',
+        message: answer,
+        stateName: this.currentState || '',
+        stepName: '',
+        round: 0,
+        timestamp: new Date().toISOString(),
+      });
+      this.emit('agent-flow', { agentFlow: this.agentFlow });
+      
+      return answer;
     } catch (error) {
       return `[错误] 查询 Agent 失败: ${error}`;
     }
+  }
+
+  private addAgentResponseFlow(fromAgent: string, toAgent: string, message: string, stateName: string, stepName: string, round: number): void {
+    this.agentFlow.push({
+      id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'response',
+      fromAgent,
+      toAgent,
+      message,
+      stateName,
+      stepName,
+      round,
+      timestamp: new Date().toISOString(),
+    });
+    this.emit('agent-flow', { agentFlow: this.agentFlow });
   }
 
   private async callLightweightLLM(prompt: string): Promise<string> {
