@@ -1784,9 +1784,15 @@ export class StateMachineWorkflowManager extends EventEmitter {
       console.log(`[StateMachineWorkflowManager] Step ${step.name} 原始输出:`, output.slice(0, 500));
       const infoRequests = parseNeedInfo(output);
       console.log(`[StateMachineWorkflowManager] Step ${step.name} 解析到 ${infoRequests.length} 个信息请求:`, infoRequests);
-      if (infoRequests.length === 0 || isPlanDone(output)) {
-        console.log(`[StateMachineWorkflowManager] Step ${step.name} 没有信息请求或已 PLAN_DONE，结束`);
+      
+      if (infoRequests.length === 0) {
+        console.log(`[StateMachineWorkflowManager] Step ${step.name} 没有信息请求，结束`);
         return output;
+      }
+
+      if (isPlanDone(output)) {
+        console.log(`[StateMachineWorkflowManager] Step ${step.name} 已 PLAN_DONE，继续执行任务`);
+        break
       }
 
       for (const req of infoRequests) {
@@ -1801,9 +1807,33 @@ export class StateMachineWorkflowManager extends EventEmitter {
             timestamp: new Date().toISOString(),
             stateName: state.name,
           });
+          this.agentFlow.push({
+            id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'supervisor',
+            fromAgent: step.agent,
+            toAgent: 'user',
+            message: req.question,
+            stateName: state.name,
+            stepName: step.name,
+            round,
+            timestamp: new Date().toISOString(),
+          });
+          this.emit('agent-flow', { agentFlow: this.agentFlow });
           const answer = await this.waitForUserAnswer(req.question, step.agent, round);
           extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
           console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
+          this.agentFlow.push({
+            id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'response',
+            fromAgent: 'user',
+            toAgent: step.agent,
+            message: answer,
+            stateName: state.name,
+            stepName: step.name,
+            round,
+            timestamp: new Date().toISOString(),
+          });
+          this.emit('agent-flow', { agentFlow: this.agentFlow });
         } else {
           const agentSummaries = this.buildAgentSummaries();
           const decision = await routeInfoRequest(
@@ -1825,9 +1855,33 @@ export class StateMachineWorkflowManager extends EventEmitter {
               timestamp: new Date().toISOString(),
               stateName: state.name,
             });
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'supervisor',
+              fromAgent: step.agent,
+              toAgent: 'user',
+              message: req.question,
+              stateName: state.name,
+              stepName: step.name,
+              round,
+              timestamp: new Date().toISOString(),
+            });
+            this.emit('agent-flow', { agentFlow: this.agentFlow });
             const answer = await this.waitForUserAnswer(req.question, step.agent, round);
             console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
             extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'response',
+              fromAgent: 'user',
+              toAgent: step.agent,
+              message: answer,
+              stateName: state.name,
+              stepName: step.name,
+              round,
+              timestamp: new Date().toISOString(),
+            });
+            this.emit('agent-flow', { agentFlow: this.agentFlow });
           } else {
             this.emit('route-decision', { ...decision, round, fromAgent: step.agent });
             this.supervisorFlow.push({
@@ -1867,7 +1921,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       round++;
     }
 
-    extraContext += '\n\n[系统] 信息收集已达轮次上限，请基于现有信息执行任务。';
+    extraContext += '\n\n[系统] 信息收集完成，请基于现有信息执行任务。';
     return this.executeStep(step, state, config, requirements, extraContext);
   }
 

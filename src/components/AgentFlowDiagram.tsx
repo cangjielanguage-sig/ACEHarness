@@ -177,6 +177,8 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
   let hasUser = false;
   let hasSupervisor = false;
 
+  console.log('[AgentFlowDiagram] flow 数据:', JSON.stringify(flow, null, 2));
+
   flow.forEach(record => {
     if (record.fromAgent && record.fromAgent !== 'supervisor') {
       agentSet.add(record.fromAgent);
@@ -186,8 +188,12 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
       agentSet.add(record.toAgent);
       if (record.toAgent === 'user') hasUser = true;
     }
-    if (record.type === 'supervisor') hasSupervisor = true;
+    if (record.fromAgent === 'supervisor' || record.toAgent === 'supervisor') {
+      hasSupervisor = true;
+    }
   });
+
+  console.log('[AgentFlowDiagram] agentSet:', Array.from(agentSet), 'hasUser:', hasUser, 'hasSupervisor:', hasSupervisor);
 
   const agentArray = Array.from(agentSet).filter(a => a !== 'user');
   
@@ -270,11 +276,18 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
     agentPositions.set(node.id, node.position);
   });
 
+  console.log('[AgentFlowDiagram] calculateEdges - nodes:', nodes.map(n => n.id), 'agentPositions:', Array.from(agentPositions.keys()));
+
   const addEdge = (record: AgentFlowRecord) => {
     const sourceId = record.fromAgent === 'supervisor' ? 'supervisor' : record.fromAgent;
     const targetId = record.toAgent === 'supervisor' ? 'supervisor' : record.toAgent;
     
-    if (!agentPositions.has(sourceId) || !agentPositions.has(targetId)) return;
+    console.log('[AgentFlowDiagram] addEdge - from:', sourceId, 'to:', targetId, 'available:', Array.from(agentPositions.keys()));
+    
+    if (!agentPositions.has(sourceId) || !agentPositions.has(targetId)) {
+      console.log('[AgentFlowDiagram] 跳过边 - 节点不存在');
+      return;
+    }
     
     const colors = getTypeColor(record.type);
     let edgeStyle: any = { stroke: colors.stroke, strokeWidth: 2 };
