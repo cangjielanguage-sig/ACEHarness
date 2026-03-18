@@ -1824,12 +1824,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const output = await this.executeStep(step, state, config, requirements, extraContext);
 
       console.log(`[StateMachineWorkflowManager] Step ${step.name} 原始输出:`, output.slice(0, 500));
-      const infoRequests = parseNeedInfo(output);
+      const infoRequests = parseNeedInfo(step,output);
       console.log(`[StateMachineWorkflowManager] Step ${step.name} 解析到 ${infoRequests.length} 个信息请求:`, infoRequests);
       
       if (infoRequests.length === 0) {
         console.log(`[StateMachineWorkflowManager] Step ${step.name} 没有信息请求，结束`);
-        return output;
+        break
       }
 
       if (isPlanDone(output)) {
@@ -1878,18 +1878,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
           const answer = await this.waitForUserAnswer(req.question, step.agent, round);
           extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
           console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
-          this.agentFlow.push({
-            id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            type: 'response',
-            fromAgent: 'user',
-            toAgent: step.agent,
-            message: answer,
-            stateName: state.name,
-            stepName: step.name,
-            round,
-            timestamp: new Date().toISOString(),
-          });
-          this.emit('agent-flow', { agentFlow: this.agentFlow });
         } else {
           const agentSummaries = this.buildAgentSummaries();
           const decision = await routeInfoRequest(
@@ -1939,18 +1927,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
             const answer = await this.waitForUserAnswer(req.question, step.agent, round);
             console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
             extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
-            this.agentFlow.push({
-              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              type: 'response',
-              fromAgent: 'user',
-              toAgent: step.agent,
-              message: answer,
-              stateName: state.name,
-              stepName: step.name,
-              round,
-              timestamp: new Date().toISOString(),
-            });
-            this.emit('agent-flow', { agentFlow: this.agentFlow });
           } else {
             this.emit('route-decision', { ...decision, round, fromAgent: step.agent });
             this.supervisorFlow.push({
@@ -2034,19 +2010,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     const processId = `query-${agentName}-${Date.now()}`;
 
-    this.agentFlow.push({
-      id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      type: 'request',
-      fromAgent: 'supervisor',
-      toAgent: agentName,
-      message: question,
-      stateName: this.currentState || '',
-      stepName: '',
-      round: 0,
-      timestamp: new Date().toISOString(),
-    });
-    this.emit('agent-flow', { agentFlow: this.agentFlow });
-
     try {
       const result = await this.executeWithEngine(
         processId,
@@ -2096,20 +2059,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       round,
       timestamp: new Date().toISOString(),
     });
-    // 让原始发起请求的 Agent 再次变为执行中，添加一条路由边
-    if (fromAgent !== toAgent) {
-      this.agentFlow.push({
-        id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: 'supervisor',
-        fromAgent: 'supervisor',
-        toAgent: toAgent,
-        message: `继续执行: ${stepName}`,
-        stateName,
-        stepName,
-        round,
-        timestamp: new Date().toISOString(),
-      });
-    }
+
     this.emit('agent-flow', { agentFlow: this.agentFlow });
   }
 

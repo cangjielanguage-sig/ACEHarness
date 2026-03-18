@@ -25,7 +25,13 @@ export interface AgentSummary {
 const NEED_INFO_REGEX = /\[NEED_INFO(?::human)?\]\s*(.+?)(?=\[NEED_INFO|$)/gi;
 const PLAN_DONE_REGEX = /\[PLAN_DONE\]/i;
 
-export function parseNeedInfo(output: string): InfoRequest[] {
+interface WorkflowStep {
+  name: string;
+  agent: string;
+  task: string;
+}
+
+export function parseNeedInfo(step: WorkflowStep, output: string): InfoRequest[] {
   const requests: InfoRequest[] = [];
   const matches = output.matchAll(NEED_INFO_REGEX);
 
@@ -36,7 +42,7 @@ export function parseNeedInfo(output: string): InfoRequest[] {
 
     if (question) {
       requests.push({
-        fromAgent: '',
+        fromAgent: step.agent,
         question,
         isHuman,
       });

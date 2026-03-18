@@ -2371,9 +2371,10 @@ class WorkflowManager extends EventEmitter {
       const jsonResult = await this.executeStep(step, workflowConfig, extraContext);
       const output = jsonResult.result;
 
-      const infoRequests = parseNeedInfo(output);
+      const infoRequests = parseNeedInfo(step, output);
       if (infoRequests.length === 0 || isPlanDone(output)) {
-        return jsonResult;
+          console.log(`[WorkflowManager] Step ${step.name} 已 PLAN_DONE，继续执行任务`);
+          break
       }
 
       for (const req of infoRequests) {
@@ -2410,7 +2411,7 @@ class WorkflowManager extends EventEmitter {
       round++;
     }
 
-    extraContext += '\n\n[系统] 信息收集已达轮次上限，请基于现有信息执行任务。';
+    extraContext += '\n\n[系统] 信息收集已完成，请基于现有信息执行任务。';
     return this.executeStep(step, workflowConfig, extraContext);
   }
 

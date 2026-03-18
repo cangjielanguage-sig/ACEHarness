@@ -177,6 +177,21 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
     new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 
+  const latestRecord = sortedFlow.length > 0 ? sortedFlow[sortedFlow.length - 1] : null;
+  // 用“最新一条流转记录”决定当前执行中的 Agent：
+  // request: A -> Supervisor  => A 执行中
+  // supervisor: Supervisor -> B => B 执行中
+  // response: B -> A => A 收到回复后继续执行
+  // stream: 状态流转，优先目标 Agent
+  const activeAgent = (() => {
+    if (!latestRecord) return null;
+    if (latestRecord.type === 'request') return latestRecord.fromAgent;
+    if (latestRecord.type === 'supervisor') return latestRecord.toAgent;
+    if (latestRecord.type === 'response') return latestRecord.toAgent;
+    if (latestRecord.type === 'stream') return latestRecord.toAgent || latestRecord.fromAgent;
+    return null;
+  })();
+
   if (hasSupervisor) {
     nodeList.push({
       id: 'supervisor',
@@ -192,25 +207,15 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
 
   if (agentArray.length === 1) {
     const agent = agentArray[0];
-    // 找到该 Agent 相关的所有记录
     const agentRecords = sortedFlow.filter(r => r.fromAgent === agent || r.toAgent === agent);
-    // 按时间倒序排列，找最新的记录
-    const latestRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
-    
-    // 判断执行中状态：
-    // 1. 如果最新记录是发给这个 Agent 的 request，说明它在执行
-    // 2. 如果最新记录是发给其他 Agent 的 request，说明它在等待回复，不是执行中
-    // 3. 如果 Agent 发出过 request，需要看最新记录是不是 response
-    const isActive = latestRecord && (
-      (latestRecord.toAgent === agent && latestRecord.type === 'request') ||
-      (latestRecord.toAgent === agent && latestRecord.type === 'supervisor')
-    );
+    const latestAgentRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
+    const isActive = activeAgent === agent;
     
     nodeList.push({
       id: agent,
       type: 'agentNode',
       position: { x: centerX - 280, y: centerY + 200 },
-      data: { agentName: agent, isActive: !!isActive, stepName: latestRecord?.stepName || '', isUser: false },
+      data: { agentName: agent, isActive: !!isActive, stepName: latestAgentRecord?.stepName || '', isUser: false },
     });
   } else if (agentArray.length > 1) {
     const radius = 300;
@@ -219,22 +224,15 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
       const x = centerX + radius * Math.cos(angle) - 120;
       const y = centerY + radius * Math.sin(angle) + 80;
       
-      // 找到该 Agent 相关的所有记录
       const agentRecords = sortedFlow.filter(r => r.fromAgent === agent || r.toAgent === agent);
-      // 按时间倒序排列，找最新的记录
-      const latestRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
-      
-      // 判断执行中状态
-      const isActive = latestRecord && (
-        (latestRecord.toAgent === agent && latestRecord.type === 'request') ||
-        (latestRecord.toAgent === agent && latestRecord.type === 'supervisor')
-      );
+      const latestAgentRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
+      const isActive = activeAgent === agent;
 
       nodeList.push({
         id: agent,
         type: 'agentNode',
         position: { x, y },
-        data: { agentName: agent, isActive: !!isActive, stepName: latestRecord?.stepName || '', isUser: false },
+        data: { agentName: agent, isActive: !!isActive, stepName: latestAgentRecord?.stepName || '', isUser: false },
       });
     });
   }
@@ -255,7 +253,9 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
   const edgeList: Edge[] = [];
   const nodeIds = new Set(nodes.map(n => n.id));
 
-  // 保留三种类型的连线：stream（流转）、request（请求）、supervisor（路由）
+  // 保留三类可视化边：
+  // stream（绿色状态流转）+ request（蓝色请求）+ supervisor（橙色路由）
+  // response 仅用于驱动执行态，不画线。
   const filteredFlow = flow.filter(record => 
     record.type === 'stream' || record.type === 'request' || record.type === 'supervisor'
   );
@@ -276,6 +276,11 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
   edgeMap.forEach((record) => {
     let sourceId = record.fromAgent;
     let targetId = record.toAgent;
+
+    // 过滤无效边和自环，避免画面拥挤
+    if (!sourceId || !targetId || sourceId === targetId) {
+      return;
+    }
 
     if (!nodeIds.has(sourceId) || !nodeIds.has(targetId)) {
       return;
