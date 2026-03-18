@@ -671,7 +671,7 @@ export default function WorkbenchPage() {
         setAgentFlow(event.data.agentFlow || []);
         break;
     }
-  }, [selectedAgent, addLog]);
+  }, [selectedAgent, addLog, currentPhase]);
 
   // Keep a ref to the latest handleEvent so SSE callback never goes stale
   const handleEventRef = useRef(handleEvent);

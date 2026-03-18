@@ -337,8 +337,6 @@ function AgentFlowDiagramInner({
   flow,
   currentRound,
 }: AgentFlowDiagramProps) {
-  const [isInitialized, setIsInitialized] = useState(false);
-  
   const initialNodes = useMemo(() => {
     return calculateInitialNodes(flow, currentRound);
   }, [flow, currentRound]);
@@ -351,12 +349,9 @@ function AgentFlowDiagramInner({
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
   useEffect(() => {
-    if (!isInitialized && flow.length > 0) {
-      setNodes(initialNodes);
-      setEdges(initialEdges);
-      setIsInitialized(true);
-    }
-  }, [flow, initialNodes, initialEdges, isInitialized, setNodes, setEdges]);
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [flow, currentRound, initialNodes, initialEdges, setNodes, setEdges]);
 
   if (flow.length === 0) {
     return (
