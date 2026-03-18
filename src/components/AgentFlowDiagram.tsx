@@ -14,10 +14,6 @@ import ReactFlow, {
   ReactFlowProvider,
   useNodesState,
   useEdgesState,
-  OnNodesChange,
-  OnEdgesChange,
-  applyNodeChanges,
-  applyEdgeChanges,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Badge } from './ui/badge';
@@ -42,17 +38,17 @@ interface AgentFlowDiagramProps {
 const getTypeColor = (type: string) => {
   switch (type) {
     case 'stream':
-      return { stroke: '#22c55e', bg: 'bg-green-500' };
+      return '#22c55e';
     case 'request':
-      return { stroke: '#3b82f6', bg: 'bg-blue-500' };
+      return '#3b82f6';
     case 'response':
-      return { stroke: '#a855f7', bg: 'bg-purple-500' };
+      return '#a855f7';
     case 'supervisor':
-      return { stroke: '#f97316', bg: 'bg-orange-500' };
+      return '#f97316';
     case 'user':
-      return { stroke: '#6b7280', bg: 'bg-gray-500' };
+      return '#6b7280';
     default:
-      return { stroke: '#9ca3af', bg: 'bg-gray-500' };
+      return '#9ca3af';
   }
 };
 
@@ -152,32 +148,11 @@ const nodeTypes: NodeTypes = {
   supervisorNode: SupervisorNode,
 };
 
-function calculateHandlePositions(
-  sourcePos: { x: number; y: number },
-  targetPos: { x: number; y: number }
-): { sourceHandle: string; targetHandle: string } {
-  const dx = targetPos.x - sourcePos.x;
-  const dy = targetPos.y - sourcePos.y;
-  const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-
-  if (angle >= -45 && angle < 45) {
-    return { sourceHandle: 'right', targetHandle: 'left' };
-  } else if (angle >= 45 && angle < 135) {
-    return { sourceHandle: 'bottom', targetHandle: 'top' };
-  } else if (angle >= 135 || angle < -135) {
-    return { sourceHandle: 'left', targetHandle: 'right' };
-  } else {
-    return { sourceHandle: 'top', targetHandle: 'bottom' };
-  }
-}
-
 function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): Node[] {
   const nodeList: Node[] = [];
   const agentSet = new Set<string>();
   let hasUser = false;
   let hasSupervisor = false;
-
-  console.log('[AgentFlowDiagram] flow 数据:', JSON.stringify(flow, null, 2));
 
   flow.forEach(record => {
     if (record.fromAgent && record.fromAgent !== 'supervisor') {
@@ -193,23 +168,21 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
     }
   });
 
-  console.log('[AgentFlowDiagram] agentSet:', Array.from(agentSet), 'hasUser:', hasUser, 'hasSupervisor:', hasSupervisor);
-
   const agentArray = Array.from(agentSet).filter(a => a !== 'user');
-  
   const centerX = 400;
   const centerY = 300;
-  
+
   if (hasSupervisor) {
     nodeList.push({
       id: 'supervisor',
       type: 'supervisorNode',
       position: { x: centerX, y: centerY },
-      data: {
-        flowCount: flow.length,
-        currentRound: currentRound ?? 0,
-      },
+      data: { flowCount: flow.length, currentRound: currentRound ?? 0 },
     });
+  }
+
+  if (agentArray.length === 0 && !hasUser) {
+    return [];
   }
 
   if (agentArray.length === 1) {
@@ -217,12 +190,7 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
       id: agentArray[0],
       type: 'agentNode',
       position: { x: centerX - 200, y: centerY + 150 },
-      data: {
-        agentName: agentArray[0],
-        isActive: false,
-        stepName: '',
-        isUser: false,
-      },
+      data: { agentName: agentArray[0], isActive: false, stepName: '', isUser: false },
     });
   } else if (agentArray.length > 1) {
     const radius = 220;
@@ -241,12 +209,7 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
         id: agent,
         type: 'agentNode',
         position: { x, y },
-        data: {
-          agentName: agent,
-          isActive: !!isActive,
-          stepName: latestRecord?.stepName || '',
-          isUser: false,
-        },
+        data: { agentName: agent, isActive: !!isActive, stepName: latestRecord?.stepName || '', isUser: false },
       });
     });
   }
@@ -256,12 +219,7 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
       id: 'user',
       type: 'agentNode',
       position: { x: centerX + 250, y: centerY - 50 },
-      data: {
-        agentName: '用户',
-        isActive: false,
-        stepName: '',
-        isUser: true,
-      },
+      data: { agentName: '用户', isActive: false, stepName: '', isUser: true },
     });
   }
 
@@ -270,77 +228,41 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
 
 function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
   const edgeList: Edge[] = [];
-  const agentPositions = new Map<string, { x: number; y: number }>();
-  
-  nodes.forEach(node => {
-    agentPositions.set(node.id, node.position);
-  });
+  const nodeIds = new Set(nodes.map(n => n.id));
 
-  console.log('[AgentFlowDiagram] calculateEdges - nodes:', nodes.map(n => n.id), 'agentPositions:', Array.from(agentPositions.keys()));
+  flow.forEach(record => {
+    let sourceId = record.fromAgent;
+    let targetId = record.toAgent;
 
-  const addEdge = (record: AgentFlowRecord) => {
-    const sourceId = record.fromAgent === 'supervisor' ? 'supervisor' : record.fromAgent;
-    const targetId = record.toAgent === 'supervisor' ? 'supervisor' : record.toAgent;
-    
-    console.log('[AgentFlowDiagram] addEdge - from:', sourceId, 'to:', targetId, 'available:', Array.from(agentPositions.keys()));
-    
-    if (!agentPositions.has(sourceId) || !agentPositions.has(targetId)) {
-      console.log('[AgentFlowDiagram] 跳过边 - 节点不存在');
+    if (sourceId === 'supervisor' && !nodeIds.has('supervisor')) {
+      sourceId = 'supervisor';
+    }
+    if (targetId === 'supervisor' && !nodeIds.has('supervisor')) {
+      targetId = 'supervisor';
+    }
+
+    if (!nodeIds.has(sourceId) || !nodeIds.has(targetId)) {
       return;
     }
-    
-    const colors = getTypeColor(record.type);
-    let edgeStyle: any = { stroke: colors.stroke, strokeWidth: 2 };
-    let edgeAnimated = false;
 
-    if (record.type === 'stream') {
-      edgeStyle = { stroke: '#22c55e', strokeWidth: 3 };
-      edgeAnimated = true;
-    } else if (record.type === 'supervisor') {
-      edgeStyle = { stroke: '#f97316', strokeWidth: 3 };
-      edgeAnimated = true;
-    } else if (record.type === 'request') {
-      edgeStyle = { stroke: '#3b82f6', strokeWidth: 2 };
-      edgeAnimated = true;
-    } else if (record.type === 'response') {
-      edgeStyle = { stroke: '#a855f7', strokeWidth: 2 };
-      edgeAnimated = true;
-    }
-
-    const sourcePos = agentPositions.get(sourceId)!;
-    const targetPos = agentPositions.get(targetId)!;
-    const handles = calculateHandlePositions(sourcePos, targetPos);
+    const color = getTypeColor(record.type);
+    const isAnimated = record.type !== 'response';
 
     edgeList.push({
-      id: `${record.id}-${record.fromAgent}-${record.toAgent}`,
+      id: `${record.id}-${sourceId}-${targetId}`,
       source: sourceId,
       target: targetId,
-      sourceHandle: handles.sourceHandle,
-      targetHandle: handles.targetHandle,
       label: getTypeLabel(record.type),
-      type: 'smoothstep',
-      animated: edgeAnimated,
-      style: edgeStyle,
-      labelStyle: { fontSize: 10, fill: colors.stroke },
-      labelBgStyle: { fill: 'white', fillOpacity: 0.9 },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: colors.stroke,
+      type: 'default',
+      animated: isAnimated,
+      style: { 
+        stroke: color, 
+        strokeWidth: record.type === 'stream' || record.type === 'supervisor' ? 3 : 2 
       },
-      data: { type: record.type, round: record.round },
+      labelStyle: { fontSize: 10, fill: color },
+      labelBgStyle: { fill: 'white', fillOpacity: 0.9 },
+      markerEnd: { type: MarkerType.ArrowClosed, color },
     });
-  };
-
-  flow.forEach(record => {
-    if (record.type === 'supervisor') {
-      addEdge(record);
-    }
-  });
-
-  flow.forEach(record => {
-    if (record.type !== 'supervisor') {
-      addEdge(record);
-    }
   });
 
   return edgeList;
@@ -350,21 +272,16 @@ function AgentFlowDiagramInner({
   flow,
   currentRound,
 }: AgentFlowDiagramProps) {
-  const initialNodes = useMemo(() => {
-    return calculateInitialNodes(flow, currentRound);
-  }, [flow, currentRound]);
-
-  const initialEdges = useMemo(() => {
-    return calculateEdges(flow, initialNodes);
-  }, [flow, initialNodes]);
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const nodesData = useMemo(() => calculateInitialNodes(flow, currentRound), [flow, currentRound]);
+  const edgesData = useMemo(() => calculateEdges(flow, nodesData), [flow, nodesData]);
+  
+  const [nodes, setNodes, onNodesChange] = useNodesState(nodesData);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(edgesData);
 
   useEffect(() => {
-    setNodes(initialNodes);
-    setEdges(initialEdges);
-  }, [flow, currentRound, initialNodes, initialEdges, setNodes, setEdges]);
+    setNodes(nodesData);
+    setEdges(edgesData);
+  }, [nodesData, edgesData, setNodes, setEdges]);
 
   if (flow.length === 0) {
     return (
@@ -390,9 +307,6 @@ function AgentFlowDiagramInner({
         fitViewOptions={{ padding: 0.3 }}
         minZoom={0.1}
         maxZoom={2}
-        defaultEdgeOptions={{
-          type: 'smoothstep',
-        }}
       >
         <Controls />
         <Background color="#e5e7eb" gap={20} />
