@@ -169,8 +169,8 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
   });
 
   const agentArray = Array.from(agentSet).filter(a => a !== 'user');
-  const centerX = 400;
-  const centerY = 300;
+  const centerX = 500;
+  const centerY = 400;
 
   // 按时间戳排序
   const sortedFlow = [...flow].sort((a, b) => 
@@ -192,30 +192,44 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
 
   if (agentArray.length === 1) {
     const agent = agentArray[0];
-    // 找到该 Agent 最新的记录
+    // 找到该 Agent 相关的所有记录
     const agentRecords = sortedFlow.filter(r => r.fromAgent === agent || r.toAgent === agent);
+    // 按时间倒序排列，找最新的记录
     const latestRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
-    // 只有当最新记录是请求给这个 Agent 时，才算执行中
-    const isActive = latestRecord && latestRecord.toAgent === agent && latestRecord.type === 'request';
+    
+    // 判断执行中状态：
+    // 1. 如果最新记录是发给这个 Agent 的 request，说明它在执行
+    // 2. 如果这个 Agent 曾经发出过 request（不管最新是什么），说明它正在等待或刚完成，也算执行中
+    const hasRequest = agentRecords.some(r => r.fromAgent === agent && r.type === 'request');
+    const isActive = latestRecord && (
+      (latestRecord.toAgent === agent && latestRecord.type === 'request') ||
+      (latestRecord.fromAgent === agent && latestRecord.type === 'request')
+    ) || hasRequest;
     
     nodeList.push({
       id: agent,
       type: 'agentNode',
-      position: { x: centerX - 200, y: centerY + 150 },
+      position: { x: centerX - 280, y: centerY + 200 },
       data: { agentName: agent, isActive: !!isActive, stepName: latestRecord?.stepName || '', isUser: false },
     });
   } else if (agentArray.length > 1) {
-    const radius = 220;
+    const radius = 300;
     agentArray.forEach((agent, index) => {
       const angle = (2 * Math.PI * index) / agentArray.length - Math.PI / 2;
-      const x = centerX + radius * Math.cos(angle) - 90;
-      const y = centerY + radius * Math.sin(angle) + 50;
+      const x = centerX + radius * Math.cos(angle) - 120;
+      const y = centerY + radius * Math.sin(angle) + 80;
       
-      // 找到该 Agent 最新的记录
+      // 找到该 Agent 相关的所有记录
       const agentRecords = sortedFlow.filter(r => r.fromAgent === agent || r.toAgent === agent);
+      // 按时间倒序排列，找最新的记录
       const latestRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
-      // 只有当最新记录是请求给这个 Agent 时，才算执行中
-      const isActive = latestRecord && latestRecord.toAgent === agent && latestRecord.type === 'request';
+      
+      // 判断执行中状态
+      const hasRequest = agentRecords.some(r => r.fromAgent === agent && r.type === 'request');
+      const isActive = latestRecord && (
+        (latestRecord.toAgent === agent && latestRecord.type === 'request') ||
+        (latestRecord.fromAgent === agent && latestRecord.type === 'request')
+      ) || hasRequest;
 
       nodeList.push({
         id: agent,
@@ -230,7 +244,7 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
     nodeList.push({
       id: 'user',
       type: 'agentNode',
-      position: { x: centerX + 250, y: centerY - 50 },
+      position: { x: centerX + 350, y: centerY - 80 },
       data: { agentName: '用户', isActive: false, stepName: '', isUser: true },
     });
   }
@@ -248,11 +262,18 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
   );
 
   // 保留所有边，按时间排序后每条都显示
+  // 但对于同一方向的边，只保留最新的那一条
   const sortedFlow = [...filteredFlow].sort((a, b) => 
     new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 
-  sortedFlow.forEach((record) => {
+  const edgeMap = new Map<string, AgentFlowRecord>();
+  sortedFlow.forEach(record => {
+    const key = `${record.fromAgent}->${record.toAgent}`;
+    edgeMap.set(key, record);
+  });
+
+  edgeMap.forEach((record) => {
     let sourceId = record.fromAgent;
     let targetId = record.toAgent;
 

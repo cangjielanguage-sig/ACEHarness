@@ -19,7 +19,7 @@ workflow:
             Hello World Alice!
             请使用 [NEED_INFO]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要在问题前添加该agent的关键词，例如你需要向测试agent询问问题，你需要说"我需要向测试agent提问：xxx"。 
           enablePlanLoop: true
-          maxPlanRounds: 2
+          maxPlanRounds: 1
       transitions:
         - to: 场景2-LLM语义路由reviewer
           condition:
@@ -41,7 +41,7 @@ workflow:
             注意：你不能直接使用"代码问题"、"审查"、"改进"等关键词来询问评审agent的姓名，否则会被路由到测试agent。
             你需要使用其他近义词，请使用 [NEED_INFO]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要在问题前添加该agent的关键词，例如你需要向评审agent询问问题，你需要说"我需要向评审agent提问：xxx"。
           enablePlanLoop: true
-          maxPlanRounds: 2
+          maxPlanRounds: 1
       transitions:
         - to: 场景3-人工审查补充信息
           condition:
@@ -60,7 +60,7 @@ workflow:
             收到回答后输出 [PLAN_DONE]。
             请使用 [NEED_INFO:human]，后面接上你需要问的问题进行询问，如果你要向某个agent询问问题，你需要在问题前添加该agent的关键词，例如你需要向用户询问问题，你需要说"我需要向用户提问：xxx"。
           enablePlanLoop: true
-          maxPlanRounds: 2
+          maxPlanRounds: 1
       transitions:
         - to: 场景4-over
           condition:
@@ -79,7 +79,7 @@ workflow:
             Hello World xxx!
             结束
           enablePlanLoop: true
-          maxPlanRounds: 2
+          maxPlanRounds: 1
       transitions: []
 
 context:
