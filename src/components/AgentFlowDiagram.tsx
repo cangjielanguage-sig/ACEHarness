@@ -1,20 +1,23 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useEffect, useState, useCallback } from 'react';
 import ReactFlow, {
   Node,
   Edge,
   Controls,
   Background,
   Panel,
-  useNodesState,
-  useEdgesState,
   MarkerType,
   NodeTypes,
   Handle,
   Position,
-  useReactFlow,
   ReactFlowProvider,
+  useNodesState,
+  useEdgesState,
+  OnNodesChange,
+  OnEdgesChange,
+  applyNodeChanges,
+  applyEdgeChanges,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Badge } from './ui/badge';
@@ -39,54 +42,57 @@ interface AgentFlowDiagramProps {
 const getTypeColor = (type: string) => {
   switch (type) {
     case 'stream':
-      return { bg: 'bg-green-50 dark:bg-green-950', border: 'border-green-400', text: 'text-green-700 dark:text-green-300', icon: '▶' };
+      return { stroke: '#22c55e', bg: 'bg-green-500' };
     case 'request':
-      return { bg: 'bg-blue-50 dark:bg-blue-950', border: 'border-blue-400', text: 'text-blue-700 dark:text-blue-300', icon: '→' };
+      return { stroke: '#3b82f6', bg: 'bg-blue-500' };
     case 'response':
-      return { bg: 'bg-purple-50 dark:bg-purple-950', border: 'border-purple-400', text: 'text-purple-700 dark:text-purple-300', icon: '↩' };
+      return { stroke: '#a855f7', bg: 'bg-purple-500' };
     case 'supervisor':
-      return { bg: 'bg-orange-50 dark:bg-orange-950', border: 'border-orange-400', text: 'text-orange-700 dark:text-orange-300', icon: '◎' };
+      return { stroke: '#f97316', bg: 'bg-orange-500' };
+    case 'user':
+      return { stroke: '#6b7280', bg: 'bg-gray-500' };
     default:
-      return { bg: 'bg-gray-50 dark:bg-gray-950', border: 'border-gray-400', text: 'text-gray-700 dark:text-gray-300', icon: '•' };
+      return { stroke: '#9ca3af', bg: 'bg-gray-500' };
   }
 };
 
 const getTypeLabel = (type: string) => {
   switch (type) {
-    case 'stream': return '执行中';
+    case 'stream': return '执行';
     case 'request': return '请求';
     case 'response': return '响应';
     case 'supervisor': return 'Supervisor';
+    case 'user': return '用户';
     default: return type;
   }
 };
 
 function AgentNode({ data }: any) {
-  const { agentName, isActive, stepName, status } = data;
-  const isSupervisor = agentName === 'supervisor';
+  const { agentName, isActive, stepName, isUser } = data;
 
   return (
     <div
       className={`
-        px-3 py-2 rounded-lg border-2 min-w-[160px] transition-all
+        px-4 py-3 rounded-xl border-2 min-w-[180px] transition-all shadow-lg cursor-move
         ${isActive 
-          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950 shadow-lg animate-pulse' 
-          : isSupervisor 
-          ? 'border-purple-400 bg-purple-50 dark:bg-purple-950' 
-          : 'border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800'}
+          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950 shadow-blue-200 dark:shadow-blue-900' 
+          : isUser
+          ? 'border-gray-400 bg-gray-50 dark:bg-gray-800'
+          : 'border-blue-300 bg-white dark:bg-gray-800 hover:shadow-xl'}
       `}
     >
-      <Handle type="target" position={Position.Top} id="top" />
-      <Handle type="target" position={Position.Left} id="left" />
-      <Handle type="source" position={Position.Bottom} id="bottom" />
-      <Handle type="source" position={Position.Right} id="right" />
-
-      <div className="flex items-center gap-2">
-        <span className={`text-lg ${isSupervisor ? 'text-purple-500' : 'text-blue-500'}`}>
-          {isSupervisor ? '◎' : '🤖'}
-        </span>
+      <Handle type="target" position={Position.Top} className="!bg-gray-400" />
+      <Handle type="target" position={Position.Left} className="!bg-gray-400" />
+      
+      <div className="flex items-center gap-3">
+        <div className={`
+          w-10 h-10 rounded-full flex items-center justify-center text-xl
+          ${isUser ? 'bg-gray-200 dark:bg-gray-700' : 'bg-blue-100 dark:bg-blue-900'}
+        `}>
+          {isUser ? '👤' : '🤖'}
+        </div>
         <div className="flex flex-col">
-          <div className="font-semibold text-sm">{agentName}</div>
+          <div className="font-bold text-sm">{agentName}</div>
           {stepName && (
             <div className="text-xs text-gray-500 dark:text-gray-400">{stepName}</div>
           )}
@@ -94,31 +100,56 @@ function AgentNode({ data }: any) {
       </div>
       
       {isActive && (
-        <Badge className="mt-1 text-[10px] bg-blue-500 text-white">执行中</Badge>
+        <div className="mt-2 flex items-center gap-1">
+          <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+          <span className="text-xs text-blue-600 dark:text-blue-400">执行中</span>
+        </div>
       )}
+      
+      <Handle type="source" position={Position.Bottom} className="!bg-gray-400" />
+      <Handle type="source" position={Position.Right} className="!bg-gray-400" />
     </div>
   );
 }
 
-function FlowEdge({ data }: any) {
-  const { type, message, round } = data;
-  const colors = getTypeColor(type);
-  
+function SupervisorNode({ data }: any) {
+  const { flowCount, currentRound } = data;
+
   return (
-    <div className="text-[10px] px-1 py-0.5 rounded bg-white dark:bg-gray-800 border">
-      <div className="flex items-center gap-1">
-        <span className={colors.text}>{colors.icon}</span>
-        <span className={colors.text}>{getTypeLabel(type)}</span>
+    <div className="px-6 py-5 rounded-2xl border-2 border-orange-400 bg-orange-50 dark:bg-orange-950 min-w-[220px] shadow-xl shadow-orange-200 dark:shadow-orange-900 cursor-move">
+      <Handle type="target" position={Position.Top} className="!bg-orange-400" />
+      <Handle type="target" position={Position.Left} className="!bg-orange-400" />
+      
+      <div className="flex items-center gap-3">
+        <div className="w-14 h-14 rounded-full bg-orange-100 dark:bg-orange-900 flex items-center justify-center">
+          <span className="text-2xl">⚡</span>
+        </div>
+        <div className="flex flex-col">
+          <div className="font-bold text-lg text-orange-700 dark:text-orange-300">Supervisor</div>
+          <div className="text-xs text-orange-600 dark:text-orange-400">信息路由中转</div>
+        </div>
       </div>
-      {round > 0 && (
-        <div className="text-gray-400">第{round + 1}轮</div>
+      
+      {currentRound !== undefined && (
+        <div className="mt-3 flex items-center gap-2">
+          <Badge className="bg-orange-500 text-white text-xs">
+            第 {currentRound + 1} 轮
+          </Badge>
+          <span className="text-xs text-orange-600 dark:text-orange-400">
+            {flowCount} 条流转
+          </span>
+        </div>
       )}
+      
+      <Handle type="source" position={Position.Bottom} className="!bg-orange-400" />
+      <Handle type="source" position={Position.Right} className="!bg-orange-400" />
     </div>
   );
 }
 
 const nodeTypes: NodeTypes = {
   agentNode: AgentNode,
+  supervisorNode: SupervisorNode,
 };
 
 function calculateHandlePositions(
@@ -140,148 +171,200 @@ function calculateHandlePositions(
   }
 }
 
-function AgentFlowDiagramInner({
-  flow,
-  currentRound,
-}: AgentFlowDiagramProps) {
-  const [showAllEdges, setShowAllEdges] = useState(true);
+function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): Node[] {
+  const nodeList: Node[] = [];
+  const agentSet = new Set<string>();
+  let hasUser = false;
+  let hasSupervisor = false;
 
-  const { getNodes, getEdges, getNode, getEdge } = {
-    getNodes: () => [],
-    getEdges: () => [],
-    getNode: (id: string) => null,
-    getEdge: (id: string) => null,
-  };
+  flow.forEach(record => {
+    if (record.fromAgent && record.fromAgent !== 'supervisor') {
+      agentSet.add(record.fromAgent);
+      if (record.fromAgent === 'user') hasUser = true;
+    }
+    if (record.toAgent && record.toAgent !== 'supervisor') {
+      agentSet.add(record.toAgent);
+      if (record.toAgent === 'user') hasUser = true;
+    }
+    if (record.type === 'supervisor') hasSupervisor = true;
+  });
 
-  const nodes: Node[] = useMemo(() => {
-    const agentPositions = new Map<string, { x: number; y: number }>();
-    const allAgents = new Set<string>();
-
-    flow.forEach(record => {
-      if (record.fromAgent && record.fromAgent !== 'supervisor' && record.fromAgent !== 'user') {
-        allAgents.add(record.fromAgent);
-      }
-      if (record.toAgent && record.toAgent !== 'supervisor' && record.toAgent !== 'user') {
-        allAgents.add(record.toAgent);
-      }
+  const agentArray = Array.from(agentSet).filter(a => a !== 'user');
+  
+  const centerX = 400;
+  const centerY = 300;
+  
+  if (hasSupervisor) {
+    nodeList.push({
+      id: 'supervisor',
+      type: 'supervisorNode',
+      position: { x: centerX, y: centerY },
+      data: {
+        flowCount: flow.length,
+        currentRound: currentRound ?? 0,
+      },
     });
+  }
 
-    const agentArray = Array.from(allAgents);
-    
+  if (agentArray.length === 1) {
+    nodeList.push({
+      id: agentArray[0],
+      type: 'agentNode',
+      position: { x: centerX - 200, y: centerY + 150 },
+      data: {
+        agentName: agentArray[0],
+        isActive: false,
+        stepName: '',
+        isUser: false,
+      },
+    });
+  } else if (agentArray.length > 1) {
+    const radius = 220;
     agentArray.forEach((agent, index) => {
-      const cols = Math.min(4, agentArray.length);
-      const col = index % cols;
-      const row = Math.floor(index / cols);
-      agentPositions.set(agent, {
-        x: col * 250 + 150,
-        y: row * 200 + 100,
-      });
-    });
-
-    const lastRecord = flow.length > 0 ? flow[flow.length - 1] : null;
-
-    return agentArray.map(agent => {
-      const position = agentPositions.get(agent)!;
+      const angle = (2 * Math.PI * index) / agentArray.length - Math.PI / 2;
+      const x = centerX + radius * Math.cos(angle) - 90;
+      const y = centerY + radius * Math.sin(angle) + 50;
+      
       const agentRecords = flow.filter(r => r.fromAgent === agent || r.toAgent === agent);
       const latestRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
       const isActive = latestRecord && 
         ((latestRecord.toAgent === agent && latestRecord.type === 'request') || 
          (latestRecord.fromAgent === agent && latestRecord.type === 'stream'));
 
-      return {
+      nodeList.push({
         id: agent,
         type: 'agentNode',
-        position,
+        position: { x, y },
         data: {
           agentName: agent,
           isActive: !!isActive,
           stepName: latestRecord?.stepName || '',
-          status: latestRecord?.type || '',
-        },
-      };
-    });
-  }, [flow]);
-
-  const edges: Edge[] = useMemo(() => {
-    const edgeList: Edge[] = [];
-    const edgeMap = new Map<string, AgentFlowRecord>();
-
-    flow.forEach(record => {
-      const edgeId = `${record.fromAgent}-${record.toAgent}`;
-      if (!edgeMap.has(edgeId) || record.type === 'supervisor') {
-        edgeMap.set(edgeId, record);
-      }
-    });
-
-    const agentPositions = new Map<string, { x: number; y: number }>();
-    nodes.forEach(node => {
-      agentPositions.set(node.id, node.position);
-    });
-
-    edgeMap.forEach((record, edgeId) => {
-      const colors = getTypeColor(record.type);
-      let edgeStyle: any = {};
-      let edgeAnimated = false;
-
-      if (record.type === 'stream') {
-        edgeStyle = { stroke: '#22c55e', strokeWidth: 3 };
-        edgeAnimated = true;
-      } else if (record.type === 'supervisor') {
-        edgeStyle = { stroke: '#f97316', strokeWidth: 3 };
-        edgeAnimated = true;
-      } else if (record.type === 'request') {
-        edgeStyle = { stroke: '#3b82f6', strokeWidth: 2 };
-        edgeAnimated = true;
-      } else if (record.type === 'response') {
-        edgeStyle = { stroke: '#a855f7', strokeWidth: 2 };
-        edgeAnimated = true;
-      }
-
-      const sourcePos = agentPositions.get(record.fromAgent);
-      const targetPos = agentPositions.get(record.toAgent);
-      let sourceHandle = 'right';
-      let targetHandle = 'left';
-
-      if (sourcePos && targetPos) {
-        const handles = calculateHandlePositions(sourcePos, targetPos);
-        sourceHandle = handles.sourceHandle;
-        targetHandle = handles.targetHandle;
-      }
-
-      edgeList.push({
-        id: edgeId,
-        source: record.fromAgent,
-        target: record.toAgent,
-        sourceHandle,
-        targetHandle,
-        label: getTypeLabel(record.type),
-        type: 'smoothstep',
-        animated: edgeAnimated,
-        style: edgeStyle,
-        labelStyle: { fill: colors.text.replace('text-', '').split(' ')[0], fontSize: 10 },
-        labelBgStyle: { fill: 'white', fillOpacity: 0.9 },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: edgeStyle.stroke,
-        },
-        data: {
-          type: record.type,
-          message: record.message,
-          round: record.round,
+          isUser: false,
         },
       });
     });
+  }
 
-    return edgeList;
-  }, [flow, nodes]);
+  if (hasUser) {
+    nodeList.push({
+      id: 'user',
+      type: 'agentNode',
+      position: { x: centerX + 250, y: centerY - 50 },
+      data: {
+        agentName: '用户',
+        isActive: false,
+        stepName: '',
+        isUser: true,
+      },
+    });
+  }
+
+  return nodeList;
+}
+
+function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
+  const edgeList: Edge[] = [];
+  const agentPositions = new Map<string, { x: number; y: number }>();
+  
+  nodes.forEach(node => {
+    agentPositions.set(node.id, node.position);
+  });
+
+  const addEdge = (record: AgentFlowRecord) => {
+    const sourceId = record.fromAgent === 'supervisor' ? 'supervisor' : record.fromAgent;
+    const targetId = record.toAgent === 'supervisor' ? 'supervisor' : record.toAgent;
+    
+    if (!agentPositions.has(sourceId) || !agentPositions.has(targetId)) return;
+    
+    const colors = getTypeColor(record.type);
+    let edgeStyle: any = { stroke: colors.stroke, strokeWidth: 2 };
+    let edgeAnimated = false;
+
+    if (record.type === 'stream') {
+      edgeStyle = { stroke: '#22c55e', strokeWidth: 3 };
+      edgeAnimated = true;
+    } else if (record.type === 'supervisor') {
+      edgeStyle = { stroke: '#f97316', strokeWidth: 3 };
+      edgeAnimated = true;
+    } else if (record.type === 'request') {
+      edgeStyle = { stroke: '#3b82f6', strokeWidth: 2 };
+      edgeAnimated = true;
+    } else if (record.type === 'response') {
+      edgeStyle = { stroke: '#a855f7', strokeWidth: 2 };
+      edgeAnimated = true;
+    }
+
+    const sourcePos = agentPositions.get(sourceId)!;
+    const targetPos = agentPositions.get(targetId)!;
+    const handles = calculateHandlePositions(sourcePos, targetPos);
+
+    edgeList.push({
+      id: `${record.id}-${record.fromAgent}-${record.toAgent}`,
+      source: sourceId,
+      target: targetId,
+      sourceHandle: handles.sourceHandle,
+      targetHandle: handles.targetHandle,
+      label: getTypeLabel(record.type),
+      type: 'smoothstep',
+      animated: edgeAnimated,
+      style: edgeStyle,
+      labelStyle: { fontSize: 10, fill: colors.stroke },
+      labelBgStyle: { fill: 'white', fillOpacity: 0.9 },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: colors.stroke,
+      },
+      data: { type: record.type, round: record.round },
+    });
+  };
+
+  flow.forEach(record => {
+    if (record.type === 'supervisor') {
+      addEdge(record);
+    }
+  });
+
+  flow.forEach(record => {
+    if (record.type !== 'supervisor') {
+      addEdge(record);
+    }
+  });
+
+  return edgeList;
+}
+
+function AgentFlowDiagramInner({
+  flow,
+  currentRound,
+}: AgentFlowDiagramProps) {
+  const [isInitialized, setIsInitialized] = useState(false);
+  
+  const initialNodes = useMemo(() => {
+    return calculateInitialNodes(flow, currentRound);
+  }, [flow, currentRound]);
+
+  const initialEdges = useMemo(() => {
+    return calculateEdges(flow, initialNodes);
+  }, [flow, initialNodes]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  useEffect(() => {
+    if (!isInitialized && flow.length > 0) {
+      setNodes(initialNodes);
+      setEdges(initialEdges);
+      setIsInitialized(true);
+    }
+  }, [flow, initialNodes, initialEdges, isInitialized, setNodes, setEdges]);
 
   if (flow.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center text-gray-500 p-8">
-          <div className="text-4xl mb-4">🔄</div>
+          <div className="text-5xl mb-4">🔄</div>
           <p className="text-lg font-medium">暂无 Agent 流转记录</p>
-          <p className="text-sm mt-2">Agent 执行时将显示信息流转图</p>
+          <p className="text-sm mt-2 text-gray-400">Agent 执行时将显示信息流转图</p>
         </div>
       </div>
     );
@@ -292,9 +375,11 @@ function AgentFlowDiagramInner({
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={{ padding: 0.3 }}
         minZoom={0.1}
         maxZoom={2}
         defaultEdgeOptions={{
@@ -303,24 +388,31 @@ function AgentFlowDiagramInner({
       >
         <Controls />
         <Background color="#e5e7eb" gap={20} />
-        <Panel position="top-right" className="bg-white dark:bg-gray-800 p-2 rounded-lg shadow-lg border">
-          <div className="flex flex-wrap gap-2 text-xs">
-            <div className="flex items-center gap-1">
+        <Panel position="top-right" className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-lg border">
+          <div className="flex flex-wrap gap-3 text-xs">
+            <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-full bg-green-500" />
-              <span>执行中</span>
+              <span className="font-medium">执行</span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-full bg-blue-500" />
-              <span>请求</span>
+              <span className="font-medium">请求</span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-full bg-purple-500" />
-              <span>响应</span>
+              <span className="font-medium">响应</span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-full bg-orange-500" />
-              <span>Supervisor</span>
+              <span className="font-medium">Supervisor</span>
             </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-gray-500" />
+              <span className="font-medium">用户</span>
+            </div>
+          </div>
+          <div className="mt-2 text-xs text-gray-500">
+            提示：可拖动节点调整位置
           </div>
         </Panel>
       </ReactFlow>
