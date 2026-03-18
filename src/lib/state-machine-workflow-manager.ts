@@ -2096,11 +2096,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
       round,
       timestamp: new Date().toISOString(),
     });
-    // 让原始发起请求的 Agent 再次变为执行中
+    // 让原始发起请求的 Agent 再次变为执行中，添加一条路由边
     if (fromAgent !== toAgent) {
       this.agentFlow.push({
         id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: 'request',
+        type: 'supervisor',
         fromAgent: 'supervisor',
         toAgent: toAgent,
         message: `继续执行: ${stepName}`,

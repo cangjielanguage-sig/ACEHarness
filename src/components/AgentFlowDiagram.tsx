@@ -199,12 +199,12 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
     
     // 判断执行中状态：
     // 1. 如果最新记录是发给这个 Agent 的 request，说明它在执行
-    // 2. 如果这个 Agent 曾经发出过 request（不管最新是什么），说明它正在等待或刚完成，也算执行中
-    const hasRequest = agentRecords.some(r => r.fromAgent === agent && r.type === 'request');
+    // 2. 如果最新记录是发给其他 Agent 的 request，说明它在等待回复，不是执行中
+    // 3. 如果 Agent 发出过 request，需要看最新记录是不是 response
     const isActive = latestRecord && (
       (latestRecord.toAgent === agent && latestRecord.type === 'request') ||
-      (latestRecord.fromAgent === agent && latestRecord.type === 'request')
-    ) || hasRequest;
+      (latestRecord.toAgent === agent && latestRecord.type === 'supervisor')
+    );
     
     nodeList.push({
       id: agent,
@@ -225,11 +225,10 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
       const latestRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
       
       // 判断执行中状态
-      const hasRequest = agentRecords.some(r => r.fromAgent === agent && r.type === 'request');
       const isActive = latestRecord && (
         (latestRecord.toAgent === agent && latestRecord.type === 'request') ||
-        (latestRecord.fromAgent === agent && latestRecord.type === 'request')
-      ) || hasRequest;
+        (latestRecord.toAgent === agent && latestRecord.type === 'supervisor')
+      );
 
       nodeList.push({
         id: agent,
@@ -262,14 +261,15 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
   );
 
   // 保留所有边，按时间排序后每条都显示
-  // 但对于同一方向的边，只保留最新的那一条
+  // 使用类型+方向作为 key，避免不同类型的边被覆盖
   const sortedFlow = [...filteredFlow].sort((a, b) => 
     new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 
+  // 对于每种类型的边，分别保留最新的
   const edgeMap = new Map<string, AgentFlowRecord>();
   sortedFlow.forEach(record => {
-    const key = `${record.fromAgent}->${record.toAgent}`;
+    const key = `${record.type}-${record.fromAgent}->${record.toAgent}`;
     edgeMap.set(key, record);
   });
 
