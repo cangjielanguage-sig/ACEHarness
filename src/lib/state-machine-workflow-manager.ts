@@ -2084,6 +2084,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   private addAgentResponseFlow(fromAgent: string, toAgent: string, message: string, stateName: string, stepName: string, round: number): void {
+    // 记录响应
     this.agentFlow.push({
       id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       type: 'response',
@@ -2095,6 +2096,20 @@ export class StateMachineWorkflowManager extends EventEmitter {
       round,
       timestamp: new Date().toISOString(),
     });
+    // 让原始发起请求的 Agent 再次变为执行中（添加一条 request 线指向原始 Agent）
+    if (fromAgent !== toAgent) {
+      this.agentFlow.push({
+        id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        type: 'request',
+        fromAgent: 'supervisor',
+        toAgent: toAgent,
+        message: `继续执行: ${stepName}`,
+        stateName,
+        stepName,
+        round,
+        timestamp: new Date().toISOString(),
+      });
+    }
     this.emit('agent-flow', { agentFlow: this.agentFlow });
   }
 

@@ -247,15 +247,12 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
     record.type === 'stream' || record.type === 'request' || record.type === 'supervisor'
   );
 
-  // 对于每种类型的边分别保留最新的
-  const latestEdges = new Map<string, AgentFlowRecord>();
+  // 保留所有边，按时间排序后每条都显示
+  const sortedFlow = [...filteredFlow].sort((a, b) => 
+    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
 
-  filteredFlow.forEach(record => {
-    const key = `${record.type}-${record.fromAgent}->${record.toAgent}`;
-    latestEdges.set(key, record);
-  });
-
-  latestEdges.forEach((record, key) => {
+  sortedFlow.forEach((record) => {
     let sourceId = record.fromAgent;
     let targetId = record.toAgent;
 
