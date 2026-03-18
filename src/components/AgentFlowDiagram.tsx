@@ -230,24 +230,35 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
   const edgeList: Edge[] = [];
   const nodeIds = new Set(nodes.map(n => n.id));
 
+  console.log('[AgentFlowDiagram] calculateEdges - flow:', flow);
+  console.log('[AgentFlowDiagram] nodes:', nodes.map(n => ({ id: n.id, type: n.type })));
+
   // 保留三种类型的连线：stream（流转）、request（请求）、supervisor（路由）
   const filteredFlow = flow.filter(record => 
     record.type === 'stream' || record.type === 'request' || record.type === 'supervisor'
   );
+
+  console.log('[AgentFlowDiagram] filteredFlow:', filteredFlow);
 
   // 对于每个 Agent，只保留最新的连线
   const latestEdges = new Map<string, AgentFlowRecord>();
 
   filteredFlow.forEach(record => {
     const key = `${record.fromAgent}->${record.toAgent}`;
+    console.log('[AgentFlowDiagram] processing edge:', key, record.type);
     latestEdges.set(key, record);
   });
+
+  console.log('[AgentFlowDiagram] latestEdges keys:', Array.from(latestEdges.keys()));
 
   latestEdges.forEach((record, key) => {
     let sourceId = record.fromAgent;
     let targetId = record.toAgent;
 
+    console.log('[AgentFlowDiagram] creating edge:', sourceId, '->', targetId, 'type:', record.type, 'color:', getTypeColor(record.type));
+
     if (!nodeIds.has(sourceId) || !nodeIds.has(targetId)) {
+      console.log('[AgentFlowDiagram] skipping - node not found, sourceId:', sourceId, 'targetId:', targetId, 'nodeIds:', Array.from(nodeIds));
       return;
     }
 
@@ -270,6 +281,8 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
       markerEnd: { type: MarkerType.ArrowClosed, color },
     });
   });
+
+  console.log('[AgentFlowDiagram] final edges:', edgeList);
 
   return edgeList;
 }

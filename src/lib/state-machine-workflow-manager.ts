@@ -736,6 +736,28 @@ export class StateMachineWorkflowManager extends EventEmitter {
           issues: result.issues,
         });
 
+        // 添加状态切换的流转线
+        const fromState = config.workflow.states.find(s => s.name === this.currentState);
+        const toState = config.workflow.states.find(s => s.name === nextState);
+        if (fromState && toState && fromState.steps.length > 0 && toState.steps.length > 0) {
+          const fromAgent = fromState.steps[fromState.steps.length - 1].agent;
+          const toAgent = toState.steps[0].agent;
+          if (fromAgent !== toAgent) {
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'stream',
+              fromAgent: fromAgent,
+              toAgent: toAgent,
+              message: `状态流转: ${fromState.name} -> ${toState.name}`,
+              stateName: fromState.name,
+              stepName: fromState.steps[fromState.steps.length - 1].name,
+              round: 0,
+              timestamp: new Date().toISOString(),
+            });
+            this.emit('agent-flow', { agentFlow: this.agentFlow });
+          }
+        }
+
         this.currentState = nextState;
       }
     }
