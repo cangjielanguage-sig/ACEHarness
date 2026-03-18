@@ -170,7 +170,11 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
 
   const agentArray = Array.from(agentSet).filter(a => a !== 'user');
   const centerX = 500;
-  const centerY = 400;
+
+  // 默认三层布局：用户(上) -> Supervisor(中) -> Agents(下)
+  const userY = 40;
+  const supervisorY = 250;
+  const agentsY = 500;
 
   // 按时间戳排序
   const sortedFlow = [...flow].sort((a, b) => 
@@ -196,7 +200,7 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
     nodeList.push({
       id: 'supervisor',
       type: 'supervisorNode',
-      position: { x: centerX, y: centerY },
+      position: { x: centerX, y: supervisorY },
       data: { flowCount: flow.length, currentRound: currentRound ?? 0 },
     });
   }
@@ -214,15 +218,19 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
     nodeList.push({
       id: agent,
       type: 'agentNode',
-      position: { x: centerX - 280, y: centerY + 200 },
+      position: { x: centerX, y: agentsY },
       data: { agentName: agent, isActive: !!isActive, stepName: latestAgentRecord?.stepName || '', isUser: false },
     });
   } else if (agentArray.length > 1) {
-    const radius = 300;
+    const maxSpacing = 260;
+    const minSpacing = 160;
+    const spacing = Math.max(minSpacing, Math.min(maxSpacing, Math.floor(1100 / agentArray.length)));
+    const totalWidth = spacing * (agentArray.length - 1);
+    const startX = centerX - totalWidth / 2;
+
     agentArray.forEach((agent, index) => {
-      const angle = (2 * Math.PI * index) / agentArray.length - Math.PI / 2;
-      const x = centerX + radius * Math.cos(angle) - 120;
-      const y = centerY + radius * Math.sin(angle) + 80;
+      const x = startX + index * spacing;
+      const y = agentsY;
       
       const agentRecords = sortedFlow.filter(r => r.fromAgent === agent || r.toAgent === agent);
       const latestAgentRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
@@ -241,7 +249,7 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
     nodeList.push({
       id: 'user',
       type: 'agentNode',
-      position: { x: centerX + 350, y: centerY - 80 },
+      position: { x: centerX, y: userY },
       data: { agentName: '用户', isActive: false, stepName: '', isUser: true },
     });
   }
