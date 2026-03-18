@@ -172,6 +172,11 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
   const centerX = 400;
   const centerY = 300;
 
+  // 按时间戳排序
+  const sortedFlow = [...flow].sort((a, b) => 
+    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+
   if (hasSupervisor) {
     nodeList.push({
       id: 'supervisor',
@@ -186,11 +191,18 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
   }
 
   if (agentArray.length === 1) {
+    const agent = agentArray[0];
+    // 找到该 Agent 最新的记录
+    const agentRecords = sortedFlow.filter(r => r.fromAgent === agent || r.toAgent === agent);
+    const latestRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
+    // 只有当最新记录是请求给这个 Agent 时，才算执行中
+    const isActive = latestRecord && latestRecord.toAgent === agent && latestRecord.type === 'request';
+    
     nodeList.push({
-      id: agentArray[0],
+      id: agent,
       type: 'agentNode',
       position: { x: centerX - 200, y: centerY + 150 },
-      data: { agentName: agentArray[0], isActive: false, stepName: '', isUser: false },
+      data: { agentName: agent, isActive: !!isActive, stepName: latestRecord?.stepName || '', isUser: false },
     });
   } else if (agentArray.length > 1) {
     const radius = 220;
@@ -199,11 +211,11 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
       const x = centerX + radius * Math.cos(angle) - 90;
       const y = centerY + radius * Math.sin(angle) + 50;
       
-      const agentRecords = flow.filter(r => r.fromAgent === agent || r.toAgent === agent);
+      // 找到该 Agent 最新的记录
+      const agentRecords = sortedFlow.filter(r => r.fromAgent === agent || r.toAgent === agent);
       const latestRecord = agentRecords.length > 0 ? agentRecords[agentRecords.length - 1] : null;
-      const isActive = latestRecord && 
-        ((latestRecord.toAgent === agent && latestRecord.type === 'request') || 
-         (latestRecord.fromAgent === agent && latestRecord.type === 'stream'));
+      // 只有当最新记录是请求给这个 Agent 时，才算执行中
+      const isActive = latestRecord && latestRecord.toAgent === agent && latestRecord.type === 'request';
 
       nodeList.push({
         id: agent,
@@ -230,40 +242,28 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
   const edgeList: Edge[] = [];
   const nodeIds = new Set(nodes.map(n => n.id));
 
-  console.log('[AgentFlowDiagram] calculateEdges - flow:', flow);
-  console.log('[AgentFlowDiagram] nodes:', nodes.map(n => ({ id: n.id, type: n.type })));
-
   // 保留三种类型的连线：stream（流转）、request（请求）、supervisor（路由）
   const filteredFlow = flow.filter(record => 
     record.type === 'stream' || record.type === 'request' || record.type === 'supervisor'
   );
 
-  console.log('[AgentFlowDiagram] filteredFlow:', filteredFlow);
-
-  // 对于每个 Agent，只保留最新的连线
+  // 对于每种类型的边分别保留最新的
   const latestEdges = new Map<string, AgentFlowRecord>();
 
   filteredFlow.forEach(record => {
-    const key = `${record.fromAgent}->${record.toAgent}`;
-    console.log('[AgentFlowDiagram] processing edge:', key, record.type);
+    const key = `${record.type}-${record.fromAgent}->${record.toAgent}`;
     latestEdges.set(key, record);
   });
-
-  console.log('[AgentFlowDiagram] latestEdges keys:', Array.from(latestEdges.keys()));
 
   latestEdges.forEach((record, key) => {
     let sourceId = record.fromAgent;
     let targetId = record.toAgent;
 
-    console.log('[AgentFlowDiagram] creating edge:', sourceId, '->', targetId, 'type:', record.type, 'color:', getTypeColor(record.type));
-
     if (!nodeIds.has(sourceId) || !nodeIds.has(targetId)) {
-      console.log('[AgentFlowDiagram] skipping - node not found, sourceId:', sourceId, 'targetId:', targetId, 'nodeIds:', Array.from(nodeIds));
       return;
     }
 
     const color = getTypeColor(record.type);
-    const isAnimated = true;
 
     edgeList.push({
       id: `${record.id}-${sourceId}-${targetId}`,
@@ -271,18 +271,16 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
       target: targetId,
       label: getTypeLabel(record.type),
       type: 'default',
-      animated: isAnimated,
+      animated: true,
       style: { 
         stroke: color, 
         strokeWidth: 3
       },
       labelStyle: { fontSize: 10, fill: color },
       labelBgStyle: { fill: 'white', fillOpacity: 0.9 },
-      markerEnd: { type: MarkerType.ArrowClosed, color },
+      markerEnd: { type: MarkerType.ArrowClosed, color: color },
     });
   });
-
-  console.log('[AgentFlowDiagram] final edges:', edgeList);
 
   return edgeList;
 }
