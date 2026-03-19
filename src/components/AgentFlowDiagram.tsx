@@ -33,6 +33,7 @@ interface AgentFlowRecord {
 interface AgentFlowDiagramProps {
   flow: AgentFlowRecord[];
   currentRound?: number;
+  allAgents?: string[];
 }
 
 const getTypeColor = (type: string) => {
@@ -148,11 +149,18 @@ const nodeTypes: NodeTypes = {
   supervisorNode: SupervisorNode,
 };
 
-function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): Node[] {
+function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number, allAgents: string[] = []): Node[] {
   const nodeList: Node[] = [];
   const agentSet = new Set<string>();
   let hasUser = false;
   let hasSupervisor = false;
+
+  // 先注入 workflow 里声明的全部 agent，确保未流转前也可见
+  allAgents.forEach((agent) => {
+    if (agent && agent !== 'supervisor' && agent !== 'user') {
+      agentSet.add(agent);
+    }
+  });
 
   flow.forEach(record => {
     if (record.fromAgent && record.fromAgent !== 'supervisor') {
@@ -170,6 +178,11 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number): 
 
   const agentArray = Array.from(agentSet).filter(a => a !== 'user');
   const centerX = 500;
+
+  // 当有完整 agent 列表时，默认展示 Supervisor 节点，信息流向再动态出现
+  if (allAgents.length > 0) {
+    hasSupervisor = true;
+  }
 
   // 默认三层布局：用户(上) -> Supervisor(中) -> Agents(下)
   const userY = 40;
@@ -319,8 +332,9 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
 function AgentFlowDiagramInner({
   flow,
   currentRound,
+  allAgents = [],
 }: AgentFlowDiagramProps) {
-  const nodesData = useMemo(() => calculateInitialNodes(flow, currentRound), [flow, currentRound]);
+  const nodesData = useMemo(() => calculateInitialNodes(flow, currentRound, allAgents), [flow, currentRound, allAgents]);
   const edgesData = useMemo(() => calculateEdges(flow, nodesData), [flow, nodesData]);
   
   const [nodes, setNodes, onNodesChange] = useNodesState(nodesData);
@@ -331,7 +345,7 @@ function AgentFlowDiagramInner({
     setEdges(edgesData);
   }, [nodesData, edgesData, setNodes, setEdges]);
 
-  if (flow.length === 0) {
+  if (nodesData.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center text-gray-500 p-8">
@@ -382,10 +396,10 @@ function AgentFlowDiagramInner({
   );
 }
 
-export default function AgentFlowDiagram({ flow, currentRound }: AgentFlowDiagramProps) {
+export default function AgentFlowDiagram({ flow, currentRound, allAgents = [] }: AgentFlowDiagramProps) {
   return (
     <ReactFlowProvider>
-      <AgentFlowDiagramInner flow={flow} currentRound={currentRound} />
+      <AgentFlowDiagramInner flow={flow} currentRound={currentRound} allAgents={allAgents} />
     </ReactFlowProvider>
   );
 }
