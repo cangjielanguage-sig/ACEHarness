@@ -948,6 +948,47 @@ export default function WorkbenchPage() {
   const CHUNK_SEP = '\n\n<!-- chunk-boundary -->\n\n';
   const CHUNK_WITH_TIME_REGEX = /^<!-- timestamp: (.+?) -->\n/;
 
+  /** Merge consecutive 🤖 sub-task <details> blocks into a single grouped block */
+  const mergeSubtaskDetails = (text: string): string => {
+    // Match <details><summary>🤖 子任务结果...  </summary>...\n</details>
+    const pattern = /\n<details><summary>(🤖 子任务结果[^<]*)<\/summary>\n([\s\S]*?)\n<\/details>\n/g;
+    const blocks: { start: number; end: number; label: string; inner: string }[] = [];
+    let m;
+    while ((m = pattern.exec(text)) !== null) {
+      blocks.push({ start: m.index, end: m.index + m[0].length, label: m[1], inner: m[2].trim() });
+    }
+    if (blocks.length < 2) return text;
+
+    // Group consecutive blocks (adjacent or separated only by whitespace)
+    const groups: (typeof blocks)[] = [];
+    let cur = [blocks[0]];
+    for (let i = 1; i < blocks.length; i++) {
+      const gap = text.substring(cur[cur.length - 1].end, blocks[i].start).trim();
+      if (gap === '') {
+        cur.push(blocks[i]);
+      } else {
+        groups.push(cur);
+        cur = [blocks[i]];
+      }
+    }
+    groups.push(cur);
+
+    // Replace groups of 2+ with merged block (process in reverse to preserve indices)
+    let result = text;
+    for (let g = groups.length - 1; g >= 0; g--) {
+      const group = groups[g];
+      if (group.length < 2) continue;
+      const innerParts = group.map((b, i) => {
+        const shortLabel = b.label.replace(/🤖 子任务结果[：:]\s*/, '').replace(/\s*\(\d+ 行\)/, '');
+        const summary = shortLabel || `结果 ${i + 1}`;
+        return `<details><summary>${summary}</summary>\n${b.inner}\n</details>`;
+      });
+      const merged = `\n<details><summary>🤖 子任务结果（${group.length} 条记录）</summary>\n\n${innerParts.join('\n\n')}\n\n</details>\n`;
+      result = result.substring(0, group[0].start) + merged + result.substring(group[group.length - 1].end);
+    }
+    return result;
+  };
+
   // Parse chunk with optional timestamp
   const HUMAN_FEEDBACK_REGEX = /^<!-- human-feedback: (.+?) -->\n/;
 
@@ -1885,7 +1926,7 @@ export default function WorkbenchPage() {
                         <div className={`${styles.markdownContent} bg-background border rounded p-2 text-sm leading-relaxed max-h-[200px] overflow-y-auto mt-1.5`}>
                           {dedupedChunks.map((chunk, i) => (
                             <div key={i} className={i < dedupedChunks.length - 1 ? 'border-b border-border/50 pb-3 mb-3' : ''}>
-                              <Markdown>{chunk}</Markdown>
+                              <Markdown>{mergeSubtaskDetails(chunk)}</Markdown>
                             </div>
                           ))}
                         </div>
@@ -2571,14 +2612,14 @@ export default function WorkbenchPage() {
                     });
                     return filtered.map((chunk, i) => (
                       <div key={i} className={`${styles.markdownContent} text-sm border-b border-border/50 pb-3 last:border-0`}>
-                        <Markdown>{chunk}</Markdown>
+                        <Markdown>{mergeSubtaskDetails(chunk)}</Markdown>
                       </div>
                     ));
                   })()}
                 </div>
               ) : (
                 <div className={styles.markdownContent}>
-                  <Markdown>{markdownModal.chunks[0]}</Markdown>
+                  <Markdown>{mergeSubtaskDetails(markdownModal.chunks[0])}</Markdown>
                 </div>
               )}
             </div>

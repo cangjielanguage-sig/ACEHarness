@@ -665,9 +665,17 @@ function StateMachineDiagramInner({
     initialEdgesCount: initialEdges.length
   });
 
-  // Sync nodes when initialNodes changes
+  // Sync node data when runtime state changes, without replacing node positions
   useEffect(() => {
-    setNodes(initialNodes);
+    setNodes(prev => {
+      if (prev.length !== initialNodes.length) return initialNodes;
+      return prev.map((node, i) => {
+        const newNode = initialNodes[i];
+        if (!newNode || node.id !== newNode.id) return newNode || node;
+        // Only update data, keep existing position (user may have dragged)
+        return { ...node, data: newNode.data };
+      });
+    });
     // Only fitView on first render, not on subsequent node updates
     if (!initialFitDone.current) {
       initialFitDone.current = true;
@@ -709,11 +717,12 @@ function StateMachineDiagramInner({
   }, [hoveredNode, setEdges, stateHistory, showAllEdges]);
 
   // 当 focusedState 改变时，自动聚焦到对应节点（用于视图跳转，不影响执行状态）
+  const prevFocusedState = useRef<string | null>(null);
   useEffect(() => {
-    if (focusedState) {
+    if (focusedState && focusedState !== prevFocusedState.current) {
+      prevFocusedState.current = focusedState;
       const targetNode = initialNodes.find(n => n.id === focusedState);
       if (targetNode) {
-        // 延迟执行以确保节点已渲染
         setTimeout(() => {
           setCenter(targetNode.position.x, targetNode.position.y, {
             zoom: 1.0,
@@ -722,7 +731,8 @@ function StateMachineDiagramInner({
         }, 100);
       }
     }
-  }, [focusedState, initialNodes, setCenter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedState, setCenter]);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge(params, eds)),
