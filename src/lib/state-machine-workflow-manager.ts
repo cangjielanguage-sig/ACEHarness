@@ -1853,24 +1853,16 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       console.log(`[StateMachineWorkflowManager] Step ${step.name} 原始输出:`, output.slice(0, 500));
       const infoRequests = parseNeedInfo(step,output);
-      const planDone = isPlanDone(output);
       console.log(`[StateMachineWorkflowManager] Step ${step.name} 解析到 ${infoRequests.length} 个信息请求:`, infoRequests);
       
       if (infoRequests.length === 0) {
-        if (planDone) {
-          console.log(`[StateMachineWorkflowManager] Step ${step.name} 已 PLAN_DONE，进入真实执行`);
-          break;
-        }
-
-        // 未按协议输出，继续信息收集轮次而不是直接结束，避免“首轮就算执行完成”
-        console.warn(`[StateMachineWorkflowManager] Step ${step.name} 未输出 NEED_INFO/PLAN_DONE，按协议重试信息收集`);
-        extraContext += '\n\n[系统提醒] 你处于信息收集阶段。若信息不足请输出 [NEED_INFO]/[NEED_INFO:human]；仅当信息已充分时输出 [PLAN_DONE]。不要省略协议标记。';
-        round++;
-        continue;
+        console.log(`[StateMachineWorkflowManager] Step ${step.name} 没有信息请求，结束`);
+        return output;
       }
 
-      if (planDone) {
-        console.log(`[StateMachineWorkflowManager] Step ${step.name} 含 NEED_INFO 且含 PLAN_DONE，优先继续收集 NEED_INFO`);
+      if (isPlanDone(output)) {
+        console.log(`[StateMachineWorkflowManager] Step ${step.name} 已 PLAN_DONE，继续执行任务`);
+        return output;
       }
 
       for (const req of infoRequests) {
