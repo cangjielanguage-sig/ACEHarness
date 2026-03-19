@@ -1653,10 +1653,10 @@ class WorkflowManager extends EventEmitter {
     if (step.enablePlanLoop) {
       prompt += `## 信息请求协议\n`;
       prompt += `在执行任务前，请先评估你是否有足够的信息。\n`;
-      prompt += `如果信息不足，请使用以下格式声明：\n`;
+      prompt += `如果信息不足，先进行信息收集而不直接执行任务，请使用以下格式声明你需要的信息：\n`;
       prompt += `- 需要技术/专业信息：[NEED_INFO] 问题描述\n`;
       prompt += `- 需要用户/人类确认：[NEED_INFO:human] 问题描述\n`;
-      prompt += `- 信息已充分可以执行：[PLAN_DONE]\n`;
+      prompt += `- 信息已充分可以执行：[PLAN_DONE]，并执行具体任务\n`;
       prompt += `\n注意：你不需要指定由谁来回答技术问题，系统会自动路由到合适的专家。\n\n`;
     }
 
@@ -2372,9 +2372,14 @@ class WorkflowManager extends EventEmitter {
       const output = jsonResult.result;
 
       const infoRequests = parseNeedInfo(step, output);
-      if (infoRequests.length === 0 || isPlanDone(output)) {
-          console.log(`[WorkflowManager] Step ${step.name} 已 PLAN_DONE，继续执行任务`);
-          break
+      if (infoRequests.length === 0) {
+        console.log(`[WorkflowManager] Step ${step.name} 没有信息请求，结束`);
+        return jsonResult;
+      }
+
+      if (isPlanDone(output)) {
+        console.log(`[WorkflowManager] Step ${step.name} 已 PLAN_DONE，继续执行任务`);
+        return jsonResult;
       }
 
       for (const req of infoRequests) {

@@ -1098,10 +1098,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
     if (step.enablePlanLoop) {
       parts.push(`\n# 信息请求协议`);
       parts.push(`在执行任务前，请先评估你是否有足够的信息。`);
-      parts.push(`如果信息不足，请使用以下格式声明：`);
+      parts.push(`如果信息不足，先进行信息收集而不直接执行任务，请使用以下格式声明你需要的信息：`);
       parts.push(`- 需要技术/专业信息：[NEED_INFO] 问题描述`);
       parts.push(`- 需要用户/人工确认：[NEED_INFO:human] 问题描述`);
-      parts.push(`- 信息已充分可以执行：[PLAN_DONE]`);
+      parts.push(`- 信息已充分可以执行：[PLAN_DONE]，并执行具体任务`);
       parts.push(`\n注意：你不需要指定由谁来回答技术问题，系统会自动路由到合适的专家。`);
     }
 
@@ -1829,12 +1829,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
       
       if (infoRequests.length === 0) {
         console.log(`[StateMachineWorkflowManager] Step ${step.name} 没有信息请求，结束`);
-        break
+        return output;
       }
 
       if (isPlanDone(output)) {
         console.log(`[StateMachineWorkflowManager] Step ${step.name} 已 PLAN_DONE，继续执行任务`);
-        break
+        return output;
       }
 
       for (const req of infoRequests) {
