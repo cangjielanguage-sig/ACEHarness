@@ -644,6 +644,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const requiresApproval = stateConfig.requireHumanApproval && nextState !== this.currentState;
 
       if (requiresApproval) {
+        const fromStateName = this.currentState;
+
         // First transition: current state -> __human_approval__
         this.stateHistory.push({
           from: this.currentState,
@@ -715,6 +717,30 @@ export class StateMachineWorkflowManager extends EventEmitter {
           transitionCount: this.transitionCount,
           issues: [],
         });
+
+        // 人工审批后仍然是状态流转，需要补充 Agent 级绿色流转线
+        const fromState = fromStateName
+          ? config.workflow.states.find(s => s.name === fromStateName)
+          : undefined;
+        const toState = config.workflow.states.find(s => s.name === humanSelectedState);
+        if (fromState && toState && fromState.steps.length > 0 && toState.steps.length > 0) {
+          const fromAgent = fromState.steps[fromState.steps.length - 1].agent;
+          const toAgent = toState.steps[0].agent;
+          if (fromAgent !== toAgent) {
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'stream',
+              fromAgent,
+              toAgent,
+              message: `状态流转: ${fromState.name} -> ${toState.name} (人工审查后)`,
+              stateName: fromState.name,
+              stepName: fromState.steps[fromState.steps.length - 1].name,
+              round: 0,
+              timestamp: new Date().toISOString(),
+            });
+            this.emit('agent-flow', { agentFlow: this.agentFlow });
+          }
+        }
 
         this.currentState = humanSelectedState;
       } else {
