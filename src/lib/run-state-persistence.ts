@@ -35,6 +35,7 @@ export interface PersistedProcessInfo {
   id: string;
   agent: string;
   step: string;
+  stepId?: string;
   startTime: string;
 }
 

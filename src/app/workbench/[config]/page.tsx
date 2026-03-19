@@ -1043,10 +1043,14 @@ export default function WorkbenchPage() {
     if (!liveStreamFeedback.trim() || sendingFeedback) return;
     setSendingFeedback(true);
     try {
-      await workflowApi.injectFeedback(liveStreamFeedback.trim(), interrupt);
+      const res = await workflowApi.injectFeedback(liveStreamFeedback.trim(), interrupt);
       setLiveStreamFeedback('');
       if (interrupt) {
-        toast('success', '已打断当前执行，反馈将立即处理');
+        if (res.interrupted) {
+          toast('success', '已打断当前执行，反馈将立即处理');
+        } else {
+          toast('warning', '打断信号已发送，反馈已排队等待处理');
+        }
       }
     } catch (error: any) {
       toast('error', `发送反馈失败: ${error.message}`);

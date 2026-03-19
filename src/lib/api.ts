@@ -25,6 +25,7 @@ interface ConfigResponse {
 interface ApiResponse {
   success: boolean;
   message: string;
+  interrupted?: boolean;
 }
 
 interface WorkflowStatusResponse {

@@ -464,7 +464,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     console.log(`[StateMachineWorkflowManager] 使用 ${this.engineType} 引擎执行: ${step}`);
 
     // Register process in processManager so it's visible to the frontend
-    const proc = processManager.registerExternalProcess(processId, agent, step, options.runId);
+    const proc = processManager.registerExternalProcess(processId, agent, step, options.runId, options.stepId);
 
     const streamHandler = (event: EngineStreamEvent) => {
       // Accumulate stream content on the registered process
@@ -798,7 +798,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const context = await this.buildStepContext(step, state, config, requirements);
 
       // Execute step (reuse existing process manager logic)
-      const stepResult = await this.runAgentStep(step, context, config);
+      const stepResult = await this.runAgentStep(step, context, config, stepId);
       const output = stepResult.output;
 
       agent.status = 'completed';
@@ -1005,7 +1005,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private async runAgentStep(
     step: WorkflowStep,
     context: string,
-    config: StateMachineWorkflowConfig
+    config: StateMachineWorkflowConfig,
+    stepId?: string
   ): Promise<{ output: string; costUsd: number; durationMs: number }> {
     // Find agent config for system prompt and model
     const roleConfig = this.agentConfigs.find(r => r.name === step.agent)
@@ -1031,6 +1032,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       id: currentProcessId,
       agent: step.agent,
       step: step.name,
+      stepId,
       startTime: new Date().toISOString(),
     }];
     await this.persistState();
@@ -1075,6 +1077,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
             workingDirectory,
             timeoutMs: (config.context?.timeoutMinutes || 60) * 60 * 1000,
             runId: this.currentRunId || undefined,
+            stepId,
             resumeSessionId: currentSessionId,
             appendSystemPrompt: !!currentSessionId,
           }
@@ -1088,7 +1091,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
             accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
           }
           const sessionId = proc?.sessionId;
-          if (!sessionId) throw err;
 
           const feedbackPrompt = this.liveFeedback.map((fb, i) => `${i + 1}. ${fb}`).join('\n');
           this.liveFeedback = [];
@@ -1098,14 +1100,20 @@ export class StateMachineWorkflowManager extends EventEmitter {
             const streamStepName2 = this.currentState ? `${this.currentState}-${step.name}` : step.name;
             saveStreamContent(this.currentRunId, streamStepName2, accumulatedStream).catch(() => {});
           }
-          currentSessionId = sessionId;
+          // If we have a session, resume it; otherwise start fresh with feedback prepended
+          currentSessionId = sessionId || undefined;
           currentPrompt = `## 人工实时反馈（紧急打断）\n用户紧急打断了当前执行，请立即处理以下反馈：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
+          if (!sessionId) {
+            // No session yet — prepend original context so the agent has full info
+            currentPrompt = context + '\n\n' + currentPrompt;
+          }
           currentProcessId = `sm-${step.agent}-interrupt-${Date.now()}`;
           this.currentProcesses = [{
             pid: Date.now(),
             id: currentProcessId,
             agent: step.agent,
             step: step.name,
+            stepId,
             startTime: new Date().toISOString(),
           }];
           this.emit('step-start', {
@@ -1157,6 +1165,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
           id: currentProcessId,
           agent: step.agent,
           step: step.name,
+          stepId,
           startTime: new Date().toISOString(),
         }];
         this.emit('feedback-injected', {
@@ -1518,14 +1527,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.liveFeedback.push(message);
     this.interruptFlag = true;
 
-    // Find and kill the running process — use tracked currentProcesses first,
-    // then fall back to scanning all processes by id prefix or step name
+    // Find and kill the running process by stepId (most reliable), then fall back to processId
     const currentProcId = this.currentProcesses?.[0]?.id;
+    const currentStepId = this.currentProcesses?.[0]?.stepId;
     const allProcs = processManager.getAllProcesses();
     const running = allProcs.find(
-      (p: any) => p.status === 'running' && (
-        (currentProcId && p.id === currentProcId) ||
-        p.id?.startsWith('sm-') && (p.step === this.currentStep || p.agent === this.currentProcesses?.[0]?.agent)
+      (p: any) => (p.status === 'running' || p.status === 'queued') && (
+        (currentStepId && p.stepId === currentStepId) ||
+        (currentProcId && p.id === currentProcId)
       )
     );
 
@@ -1544,13 +1553,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
       return null;
     }
 
-    // Find the running process — use tracked currentProcesses first
+    // Find the running process by stepId (most reliable), then fall back to processId
     const currentProcId = this.currentProcesses?.[0]?.id;
+    const currentStepId = this.currentProcesses?.[0]?.stepId;
     const allProcs = processManager.getAllProcesses();
     const running = allProcs.find(
-      (p: any) => p.status === 'running' && (
-        (currentProcId && p.id === currentProcId) ||
-        p.id?.startsWith('sm-') && (p.step === this.currentStep || p.agent === this.currentProcesses?.[0]?.agent)
+      (p: any) => (p.status === 'running' || p.status === 'queued') && (
+        (currentStepId && p.stepId === currentStepId) ||
+        (currentProcId && p.id === currentProcId)
       )
     );
 
