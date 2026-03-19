@@ -83,7 +83,9 @@ type WorkflowAction =
   | { type: 'ADD_FAILED_STEP'; payload: string }
   | { type: 'SET_STEP_RESULT'; payload: { step: string; result: { output: string; error?: string; costUsd?: number; durationMs?: number } } }
   | { type: 'SET_STEP_RESULTS'; payload: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> }
+  | { type: 'MERGE_STEP_RESULTS'; payload: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> }
   | { type: 'SET_STEP_ID_MAP'; payload: Record<string, string> }
+  | { type: 'MERGE_STEP_ID_MAP'; payload: Record<string, string> }
   | { type: 'MAP_STEP_ID'; payload: { stepName: string; stepId: string } }
   | { type: 'SET_SHOW_CHECKPOINT'; payload: boolean }
   | { type: 'SET_CHECKPOINT_MESSAGE'; payload: string }
@@ -159,7 +161,9 @@ function workflowReducer(state: WorkflowState, action: WorkflowAction): Workflow
     case 'ADD_FAILED_STEP': return { ...state, failedSteps: [...state.failedSteps, action.payload] };
     case 'SET_STEP_RESULT': return { ...state, stepResults: { ...state.stepResults, [action.payload.step]: action.payload.result } };
     case 'SET_STEP_RESULTS': return { ...state, stepResults: action.payload };
+    case 'MERGE_STEP_RESULTS': return { ...state, stepResults: { ...state.stepResults, ...action.payload } };
     case 'SET_STEP_ID_MAP': return { ...state, stepIdMap: action.payload };
+    case 'MERGE_STEP_ID_MAP': return { ...state, stepIdMap: { ...state.stepIdMap, ...action.payload } };
     case 'MAP_STEP_ID': return { ...state, stepIdMap: { ...state.stepIdMap, [action.payload.stepName]: action.payload.stepId } };
     case 'SET_SHOW_CHECKPOINT': return { ...state, showCheckpoint: action.payload };
     case 'SET_CHECKPOINT_MESSAGE': return { ...state, checkpointMessage: action.payload };

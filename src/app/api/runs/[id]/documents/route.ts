@@ -77,6 +77,22 @@ export async function GET(
           }
         }
       }
+      // State machine mode: states instead of phases
+      if (config?.workflow?.states) {
+        for (const state of config.workflow.states) {
+          for (const step of state.steps || []) {
+            const safeStep = step.name.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+            const info = { agent: step.agent || '', phaseName: state.name, role: step.role || 'defender' };
+            stepMap[step.name] = info;
+            stepMap[safeStep] = info;
+            // Also map "stateName-stepName" format used in output filenames
+            const compositeKey = `${state.name}-${step.name}`;
+            const safeComposite = compositeKey.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+            stepMap[compositeKey] = info;
+            stepMap[safeComposite] = info;
+          }
+        }
+      }
     } catch { /* ignore */ }
 
     const files = [];

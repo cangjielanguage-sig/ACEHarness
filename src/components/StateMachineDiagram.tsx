@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useEffect, useState } from 'react';
+import { useCallback, useMemo, useEffect, useState, useRef } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -327,7 +327,8 @@ function StateMachineDiagramInner({
 }: StateMachineDiagramProps) {
   const [showAllEdges, setShowAllEdges] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
-  const { setCenter } = useReactFlow();
+  const { setCenter, fitView: rfFitView } = useReactFlow();
+  const initialFitDone = useRef(false);
 
   // 转换为 ReactFlow 节点
   const initialNodes: Node[] = useMemo(() => {
@@ -667,7 +668,12 @@ function StateMachineDiagramInner({
   // Sync nodes when initialNodes changes
   useEffect(() => {
     setNodes(initialNodes);
-  }, [initialNodes, setNodes]);
+    // Only fitView on first render, not on subsequent node updates
+    if (!initialFitDone.current) {
+      initialFitDone.current = true;
+      setTimeout(() => rfFitView({ padding: 0.3, maxZoom: 1.2 }), 50);
+    }
+  }, [initialNodes, setNodes, rfFitView]);
 
   // Sync edges when initialEdges changes
   useEffect(() => {
@@ -770,12 +776,6 @@ function StateMachineDiagramInner({
         onNodeMouseLeave={onNodeMouseLeave}
         onEdgeClick={onEdgeClick}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{
-          padding: 0.3,
-          minZoom: 0.4,
-          maxZoom: 1.2,
-        }}
         defaultViewport={{ x: 0, y: 0, zoom: 0.6 }}
         minZoom={0.2}
         maxZoom={1.5}

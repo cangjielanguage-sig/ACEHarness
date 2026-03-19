@@ -1078,9 +1078,12 @@ class WorkflowManager extends EventEmitter {
 
       if (this.currentRunId) {
         saveProcessOutput(this.currentRunId, step.name, resultText).catch(() => {});
-        // Also save to workspace so AI agents can read full documents
+        // Save conclusion to workspace with a separate filename so it doesn't
+        // overwrite the detailed report the agent may have written via Write tool
         if (workflowConfig.context.projectRoot) {
-          saveOutputToWorkspace(workflowConfig.context.projectRoot, this.currentRunId, step.name, resultText).catch(() => {});
+          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const conclusionName = `${ts}-${step.name}-结论`;
+          saveOutputToWorkspace(workflowConfig.context.projectRoot, this.currentRunId, conclusionName, resultText).catch(() => {});
         }
       }
       await this.persistState();
@@ -1136,7 +1139,9 @@ class WorkflowManager extends EventEmitter {
         if (this.currentRunId) {
           saveProcessOutput(this.currentRunId, step.name, resultText).catch(() => {});
           if (workflowConfig.context.projectRoot) {
-            saveOutputToWorkspace(workflowConfig.context.projectRoot, this.currentRunId, step.name, resultText).catch(() => {});
+            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const conclusionName = `${step.name}-结论-${ts}`;
+            saveOutputToWorkspace(workflowConfig.context.projectRoot, this.currentRunId, conclusionName, resultText).catch(() => {});
           }
         }
         await this.persistState();
@@ -1498,10 +1503,11 @@ class WorkflowManager extends EventEmitter {
       prompt += `## 项目路径\n${workflowConfig.context.projectRoot}\n\n`;
       if (this.currentRunId) {
         const outputDir = `${workflowConfig.context.projectRoot}/.ace-outputs/${this.currentRunId}`;
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         prompt += `## 文档输出要求\n`;
         prompt += `请将你产出的所有文档、报告、分析结果等写入以下目录：\n`;
         prompt += `\`${outputDir}/\`\n\n`;
-        prompt += `文件命名建议使用步骤名或有意义的名称，格式为 Markdown (.md)。这样其他 Agent 和人类审阅者都能方便地查看你的产出。\n\n`;
+        prompt += `**重要**: 文件名必须以时间戳开头（如 \`${ts}-报告名称.md\`），这样便于按时间排序且不会覆盖已有文件。\n\n`;
       }
     }
 

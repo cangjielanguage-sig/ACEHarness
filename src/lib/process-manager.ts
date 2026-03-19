@@ -525,7 +525,7 @@ class ProcessManager extends EventEmitter {
                     const label = resolvedTaskDesc
                       ? `🤖 子任务结果: ${resolvedTaskDesc} (${lines.length} 行)`
                       : `🤖 子任务结果 (${lines.length} 行)`;
-                    resultBlock = `\n<details><summary>${label}</summary>\n\n${output}\n\n</details>\n`;
+                    resultBlock = `\n<details><summary>${label}</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>\n`;
                   } else if (tn === 'bash' || tn === 'glob' || tn === 'grep') {
                     if (lines.length <= 5 && output.length <= 500) {
                       resultBlock = `\n\`\`\`\n${output}\n\`\`\`\n`;
@@ -565,7 +565,7 @@ class ProcessManager extends EventEmitter {
                       const label = blockTaskDesc
                         ? `🤖 子任务结果: ${blockTaskDesc} (${lines.length} 行)`
                         : `🤖 子任务结果 (${lines.length} 行)`;
-                      blockResult = `\n<details><summary>${label}</summary>\n\n${content}\n\n</details>\n`;
+                      blockResult = `\n<details><summary>${label}</summary>\n\n\`\`\`\n${content}\n\`\`\`\n\n</details>\n`;
                     } else if (lines.length <= 5 && content.length <= 500) {
                       blockResult = `\n\`\`\`\n${content}\n\`\`\`\n`;
                     } else {

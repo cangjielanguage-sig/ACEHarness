@@ -390,7 +390,7 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = selectedFile.baseName;
+                    a.download = selectedFile.filename;
                     a.click();
                     URL.revokeObjectURL(url);
                   }}

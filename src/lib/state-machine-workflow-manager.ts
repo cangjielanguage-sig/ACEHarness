@@ -170,6 +170,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       endTime: this.runEndTime,
       globalContext: this.globalContext,
       phaseContexts: Object.fromEntries(this.stateContexts),
+      stepLogs: this.stepLogs,
     };
   }
 
@@ -839,12 +840,15 @@ export class StateMachineWorkflowManager extends EventEmitter {
         const stepFileName = stepKey;
         await saveProcessOutput(this.currentRunId, stepFileName, output).catch(() => {});
 
-        // Also save to workspace if projectRoot is configured
+        // Save conclusion to workspace with timestamp to avoid overwriting
+        // the detailed report the agent wrote, and to handle re-execution on iteration/state-loop
         if (config.context?.projectRoot) {
+          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const conclusionFileName = `${ts}-${stepKey}-结论`;
           await saveOutputToWorkspace(
             config.context.projectRoot,
             this.currentRunId,
-            stepFileName,
+            conclusionFileName,
             output
           ).catch(() => {});
         }
@@ -921,9 +925,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
     // Add document output path
     if (this.currentRunId && config.context?.projectRoot) {
       const outputPath = `${config.context.projectRoot}/.ace-outputs/${this.currentRunId}/`;
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const safeName = `${state.name}-${step.name}`.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
-      const fullPath = `${outputPath}${safeName}.md`;
-      parts.push(`\n# 文档输出要求\n请将你产出的所有文档、报告、分析结果等写入以下目录：\n\`${outputPath}\`\n\n本步骤的文档路径: \`${fullPath}\`\n文件格式为 Markdown (.md)。这样其他 Agent 和人类审阅者都能方便地查看你的产出。`);
+      const fullPath = `${outputPath}${ts}-${safeName}.md`;
+      parts.push(`\n# 文档输出要求\n请将你产出的所有文档、报告、分析结果等写入以下目录：\n\`${outputPath}\`\n\n本步骤的文档路径: \`${fullPath}\`\n\n**重要**: 文件名必须以时间戳开头（格式 \`YYYY-MM-DDTHH-MM-SS-\`），这样便于按时间排序。如果你需要写多个文件，都放在上述目录下，每个文件名都以时间戳开头。`);
     }
 
     // Add structured JSON output requirement for attacker/judge roles

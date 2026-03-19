@@ -176,9 +176,9 @@ export default function WorkbenchPage() {
         }
 
         {
-          const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
-          const restoredIdMap: Record<string, string> = {};
           if (status.stepLogs?.length) {
+            const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
+            const restoredIdMap: Record<string, string> = {};
             for (const log of status.stepLogs as any[]) {
               const key = log.id || log.stepName;
               restoredResults[key] = {
@@ -191,9 +191,9 @@ export default function WorkbenchPage() {
                 restoredIdMap[log.stepName] = log.id;
               }
             }
+            dispatch({ type: 'MERGE_STEP_RESULTS', payload: restoredResults });
+            dispatch({ type: 'MERGE_STEP_ID_MAP', payload: restoredIdMap });
           }
-          dispatch({ type: 'SET_STEP_RESULTS', payload: restoredResults });
-          dispatch({ type: 'SET_STEP_ID_MAP', payload: restoredIdMap });
         }
         if (status.iterationStates) {
           Object.entries(status.iterationStates).forEach(([phase, iterState]) => {
@@ -1136,75 +1136,42 @@ export default function WorkbenchPage() {
   const getLatestStepKey = (baseName: string): string => {
     if (!baseName) return baseName;
 
-    // Check stepIdMap first — if we have a UUID mapping, use it directly
-    // Try exact match, then state-machine format "stateName-stepName"
+    // 1. Exact match in stepIdMap (e.g. "问题复现-构造最小复现用例")
     if (stepIdMap[baseName] && stepResults[stepIdMap[baseName]]) {
       return stepIdMap[baseName];
     }
-    // For state machine steps: the diagram passes just the step name, but stepIdMap uses "stateName-stepName"
+
+    // 2. State machine format: stepIdMap key is "stateName-stepName", baseName is just "stepName"
     for (const [mapKey, mapId] of Object.entries(stepIdMap)) {
       if (mapKey.endsWith('-' + baseName) && stepResults[mapId]) {
         return mapId;
       }
     }
 
-    // If baseName itself has an iteration suffix (e.g. "设计修复方案-迭代2"), try it directly first,
-    // then fall back to the base name (without suffix) in case stepLogs use the base name as key.
-    const iterSuffixMatch = baseName.match(/^(.+)-迭代(\d+)$/);
-    const effectiveBase = iterSuffixMatch ? iterSuffixMatch[1] : baseName;
+    // 3. Check iteration variants in stepIdMap (e.g. "根因定位-定位空指针路径-迭代2")
+    //    Find the highest iteration that has results
+    let bestKey = '';
+    let bestIter = -1;
+    for (const [mapKey, mapId] of Object.entries(stepIdMap)) {
+      if (!stepResults[mapId]) continue;
+      // Match "stateName-baseName-迭代N" or "baseName-迭代N"
+      const iterMatch = mapKey.match(new RegExp(`(?:^|-)${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
+      if (iterMatch) {
+        const n = parseInt(iterMatch[1], 10);
+        if (n > bestIter) { bestIter = n; bestKey = mapId; }
+      }
+    }
+    if (bestKey) return bestKey;
 
-    // If currentStep matches this base step, prefer it (it's the active iteration)
-    // Return currentStep even if stepResults doesn't have it yet (for running steps)
-    if (currentStep && (currentStep === effectiveBase || currentStep.startsWith(effectiveBase + '-迭代')
-      || currentStep.endsWith('-' + effectiveBase))) {
+    // 4. Fallback: direct key match in stepResults (legacy, no UUID)
+    if (stepResults[baseName]) return baseName;
+
+    // 5. If currently running this step, return baseName for stream display
+    if (currentStep && (currentStep === baseName || currentStep.endsWith('-' + baseName))) {
       return currentStep;
     }
 
-    // If user clicked on a specific iteration node (e.g. "功能测试-迭代4")
-    if (iterSuffixMatch) {
-      const clickedIterNum = parseInt(iterSuffixMatch[2], 10);
-      // Check if this specific iteration is currently running
-      const expectedCurrentStep = baseName;
-      if (currentStep === expectedCurrentStep || currentStep?.startsWith(effectiveBase + '-迭代' + clickedIterNum)) {
-        return baseName;
-      }
-      // If the exact key exists in results, use it
-      if (stepResults[baseName]) return baseName;
-
-      // Check if this iteration number is higher than any existing iteration
-      let maxExistingIter = 0;
-      for (const key of Object.keys(stepResults)) {
-        const m = key.match(new RegExp(`^${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
-        if (m) {
-          const n = parseInt(m[1], 10);
-          if (n > maxExistingIter) maxExistingIter = n;
-        }
-      }
-      // If clicked iteration is higher than existing, return baseName (will show as not executed)
-      if (clickedIterNum > maxExistingIter) return baseName;
-    }
-
-    // Find highest iteration number in stepResults for the effective base name
-    // Also check state-machine format keys like "stateName-stepName"
-    let latest = effectiveBase;
-    let maxIter = 0;
-    for (const key of Object.keys(stepResults)) {
-      if (key === effectiveBase) { if (maxIter === 0) latest = key; continue; }
-      // Match state-machine format: "stateName-stepName" (key ends with "-baseName")
-      if (key.endsWith('-' + effectiveBase)) { if (maxIter === 0) latest = key; continue; }
-      const m = key.match(new RegExp(`^${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
-      if (m) {
-        const n = parseInt(m[1], 10);
-        if (n > maxIter) { maxIter = n; latest = key; }
-      }
-      // Also match state-machine iteration format: "stateName-stepName-迭代N"
-      const sm = key.match(new RegExp(`-${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
-      if (sm) {
-        const n = parseInt(sm[1], 10);
-        if (n > maxIter) { maxIter = n; latest = key; }
-      }
-    }
-    return latest;
+    return baseName;
   };
 
   const handleSelectNode = (type: 'phase' | 'step', phaseIndex: number, stepIndex?: number) => {
@@ -1803,7 +1770,7 @@ export default function WorkbenchPage() {
                   </div>
                   <div className="mb-2.5">
                     <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">任务描述</div>
-                    <div className="text-sm leading-relaxed">{selectedStep.task}</div>
+                    <div className="text-sm leading-relaxed max-h-[300px] overflow-y-auto"><Markdown>{selectedStep.task}</Markdown></div>
                   </div>
                   {selectedStep.constraints?.length > 0 && (
                     <div className="mb-2.5">
