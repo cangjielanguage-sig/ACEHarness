@@ -22,7 +22,8 @@ export interface AgentSummary {
   keywords: string[];
 }
 
-const NEED_INFO_REGEX = /\[NEED_INFO(?::human)?\]\s*(.+?)(?=\[NEED_INFO|$)/gi;
+// Support multi-line question bodies and stop at next protocol tag or end of output.
+const NEED_INFO_REGEX = /\[NEED_INFO(?::human)?\]\s*([\s\S]+?)(?=\[NEED_INFO(?::human)?\]|\[PLAN_DONE\]|$)/gi;
 const PLAN_DONE_REGEX = /\[PLAN_DONE\]/i;
 
 interface WorkflowStep {
