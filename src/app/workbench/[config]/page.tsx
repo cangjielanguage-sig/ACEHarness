@@ -129,7 +129,7 @@ export default function WorkbenchPage() {
     workflowStatus, runId, currentPhase, currentStep, agents, logs, completedSteps, failedSteps,
     showCheckpoint, checkpointMessage, checkpointIsIterative, activeTab, selectedAgent, selectedStep,
     projectRoot, requirements, timeoutMinutes, skills, showProcessPanel,
-    showEditNodeModal, editingNode, iterationStates, stepResults,
+    showEditNodeModal, editingNode, iterationStates, stepResults, stepIdMap,
     globalContext, phaseContexts,
   } = state;
 
@@ -177,17 +177,23 @@ export default function WorkbenchPage() {
 
         {
           const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
+          const restoredIdMap: Record<string, string> = {};
           if (status.stepLogs?.length) {
-            for (const log of status.stepLogs) {
-              restoredResults[log.stepName] = {
+            for (const log of status.stepLogs as any[]) {
+              const key = log.id || log.stepName;
+              restoredResults[key] = {
                 output: log.output || '',
                 error: log.error || undefined,
                 costUsd: log.costUsd || undefined,
                 durationMs: log.durationMs || undefined,
               };
+              if (log.id) {
+                restoredIdMap[log.stepName] = log.id;
+              }
             }
           }
           dispatch({ type: 'SET_STEP_RESULTS', payload: restoredResults });
+          dispatch({ type: 'SET_STEP_ID_MAP', payload: restoredIdMap });
         }
         if (status.iterationStates) {
           Object.entries(status.iterationStates).forEach(([phase, iterState]) => {
@@ -336,17 +342,24 @@ export default function WorkbenchPage() {
 
       // Restore step results from stepLogs
       const restoredResults: Record<string, any> = {};
+      const restoredIdMap: Record<string, string> = {};
       if (detail.stepLogs) {
         for (const log of detail.stepLogs) {
-          restoredResults[log.stepName] = {
+          // Use step ID as key if available, fall back to stepName for legacy data
+          const key = log.id || log.stepName;
+          restoredResults[key] = {
             output: log.output || '',
             error: log.error || undefined,
             costUsd: log.costUsd || undefined,
             durationMs: log.durationMs || undefined,
           };
+          if (log.id) {
+            restoredIdMap[log.stepName] = log.id;
+          }
         }
       }
       dispatch({ type: 'SET_STEP_RESULTS', payload: restoredResults });
+      dispatch({ type: 'SET_STEP_ID_MAP', payload: restoredIdMap });
 
       // Restore iteration states
       if (detail.iterationStates) {
@@ -454,22 +467,26 @@ export default function WorkbenchPage() {
         break;
       case 'step':
         dispatch({ type: 'SET_CURRENT_STEP', payload: event.data.step });
+        if (event.data.id) {
+          dispatch({ type: 'MAP_STEP_ID', payload: { stepName: event.data.step, stepId: event.data.id } });
+        }
         addLog(event.data.agent, 'info', `开始执行: ${event.data.step}`);
         break;
-      case 'result':
+      case 'result': {
+        const resultKey = event.data.id || event.data.step;
         if (event.data.error) {
           addLog(event.data.agent, 'error', event.data.output);
           dispatch({ type: 'ADD_FAILED_STEP', payload: event.data.step });
           dispatch({ type: 'SET_CURRENT_STEP', payload: '' });
           dispatch({ type: 'SET_STEP_RESULT', payload: {
-            step: event.data.step,
+            step: resultKey,
             result: { output: '', error: event.data.errorDetail || event.data.output },
           }});
         } else {
           addLog(event.data.agent, 'success', `完成: ${event.data.step}`);
           dispatch({ type: 'ADD_COMPLETED_STEP', payload: event.data.step });
           dispatch({ type: 'SET_STEP_RESULT', payload: {
-            step: event.data.step,
+            step: resultKey,
             result: {
               output: event.data.fullOutput || event.data.output,
               costUsd: event.data.costUsd,
@@ -478,6 +495,7 @@ export default function WorkbenchPage() {
           }});
         }
         break;
+      }
       case 'agents':
         dispatch({ type: 'SET_AGENTS', payload: event.data.agents });
         if (!selectedAgent && event.data.agents.length > 0) {
@@ -900,28 +918,30 @@ export default function WorkbenchPage() {
     setLoadingOutput(false);
   };
 
-  const openMarkdownModal = async (stepName: string) => {
-    const result = stepResults[stepName];
+  const openMarkdownModal = async (resultKey: string) => {
+    const result = stepResults[resultKey];
     if (!result) return;
+    // For UUID keys, find the step name for file lookup
+    const fileName = Object.entries(stepIdMap).find(([, id]) => id === resultKey)?.[0] || resultKey;
     const rid = runId || selectedRun?.id;
     if (rid) {
       try {
         // Try stream file first (has chunk separators for visual separation)
-        const streamContent = await streamApi.getStreamContent(rid, stepName);
+        const streamContent = await streamApi.getStreamContent(rid, fileName);
         if (streamContent) {
           const chunks = streamContent.split(CHUNK_SEP).filter(Boolean);
           if (chunks.length > 1) {
-            setMarkdownModal({ title: stepName, chunks });
+            setMarkdownModal({ title: fileName, chunks });
             return;
           }
         }
         // Fall back to output file
-        const { content } = await runsApi.getStepOutput(rid, stepName);
-        setMarkdownModal({ title: stepName, chunks: [content] });
+        const { content } = await runsApi.getStepOutput(rid, fileName);
+        setMarkdownModal({ title: fileName, chunks: [content] });
         return;
       } catch { /* fall through to local */ }
     }
-    setMarkdownModal({ title: stepName, chunks: [result.output] });
+    setMarkdownModal({ title: fileName, chunks: [result.output] });
   };
 
   // Chunk separator used in persisted stream files
@@ -1108,9 +1128,22 @@ export default function WorkbenchPage() {
     ? agentConfigs.find((r: any) => r.name === selectedStep.agent)
     : null;
 
-  // Find the latest iteration result key for a step (e.g. "代码审计" → "代码审计-迭代3" if that's the latest)
+  // Find the latest iteration result key for a step (e.g. "代码审计" → UUID or "代码审计-迭代3" if that's the latest)
   const getLatestStepKey = (baseName: string): string => {
     if (!baseName) return baseName;
+
+    // Check stepIdMap first — if we have a UUID mapping, use it directly
+    // Try exact match, then state-machine format "stateName-stepName"
+    if (stepIdMap[baseName] && stepResults[stepIdMap[baseName]]) {
+      return stepIdMap[baseName];
+    }
+    // For state machine steps: the diagram passes just the step name, but stepIdMap uses "stateName-stepName"
+    for (const [mapKey, mapId] of Object.entries(stepIdMap)) {
+      if (mapKey.endsWith('-' + baseName) && stepResults[mapId]) {
+        return mapId;
+      }
+    }
+
     // If baseName itself has an iteration suffix (e.g. "设计修复方案-迭代2"), try it directly first,
     // then fall back to the base name (without suffix) in case stepLogs use the base name as key.
     const iterSuffixMatch = baseName.match(/^(.+)-迭代(\d+)$/);
@@ -1887,7 +1920,11 @@ export default function WorkbenchPage() {
                         </div>
                         {!fullStepOutput && stepResult.output.length > 2000 && (runId || selectedRun?.id) && (
                           <Button variant="secondary" size="sm" className="mt-1.5 text-[11px]"
-                            onClick={() => loadFullOutput(stepKey)}
+                            onClick={() => {
+                              // For UUID keys, find the step name for file lookup
+                              const fileName = Object.entries(stepIdMap).find(([, id]) => id === stepKey)?.[0] || stepKey;
+                              loadFullOutput(fileName);
+                            }}
                             disabled={loadingOutput}>
                             {loadingOutput ? '加载中...' : (<><span className="material-symbols-outlined text-xs">description</span> 查看完整输出</>)}
                           </Button>

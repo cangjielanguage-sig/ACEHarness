@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
 import { readFile, readdir, stat } from 'fs/promises';
 import { resolve } from 'path';
 import { parse } from 'yaml';
@@ -290,6 +291,18 @@ export class StateMachineWorkflowManager extends EventEmitter {
       endTime: this.runEndTime,
       currentConfigFile: this.currentConfigFile
     });
+
+    // Kill any running child processes immediately
+    const currentProcId = this.currentProcesses?.[0]?.id;
+    if (currentProcId) {
+      const proc = processManager.getProcessRaw(currentProcId);
+      if (proc?.childProcess) {
+        try { proc.childProcess.kill('SIGTERM'); } catch { /* already dead */ }
+        proc.status = 'killed';
+        proc.endTime = new Date();
+      }
+    }
+
     await this.finalizeRun('stopped');
   }
 
@@ -357,7 +370,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       await saveRunState({
         runId: this.currentRunId,
         configFile: this.currentConfigFile,
-        status: finalStatus || (this.status === 'idle' ? 'running' : this.status) as any,
+        status: finalStatus || (this.shouldStop ? 'stopped' : this.status === 'idle' ? 'running' : this.status) as any,
         statusReason: this.statusReason || undefined,
         startTime: this.runStartTime || new Date().toISOString(),
         endTime: finalStatus ? this.runEndTime : null,
@@ -764,13 +777,17 @@ export class StateMachineWorkflowManager extends EventEmitter {
       throw new Error(`找不到 agent: ${step.agent}`);
     }
 
+    const stepId = randomUUID();
+    const stepKey = `${state.name}-${step.name}`;
+
     agent.status = 'running';
     agent.currentTask = step.name;
-    this.currentStep = `${state.name}-${step.name}`;
+    this.currentStep = stepKey;
     this.emit('agents', { agents: this.agents });
     await this.persistState();
 
     this.emit('step-start', {
+      id: stepId,
       state: state.name,
       step: step.name,
       agent: step.agent,
@@ -788,12 +805,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
       agent.completedTasks++;
       agent.lastOutput = output;
       this.currentStep = null;
-      const stepKey = `${state.name}-${step.name}`;
       this.completedSteps.push(stepKey);
       this.currentProcesses = [];
 
       // Record step log for persistence
       this.stepLogs.push({
+        id: stepId,
         stepName: stepKey,
         agent: step.agent,
         status: 'completed',
@@ -808,6 +825,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       await this.persistState();
 
       this.emit('step-complete', {
+        id: stepId,
         state: state.name,
         step: step.name,
         agent: step.agent,
@@ -839,9 +857,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.currentProcesses = [];
 
       // Record failed step log
-      const stepKey = `${state.name}-${step.name}`;
       const errorMsg = error.message || String(error);
       this.stepLogs.push({
+        id: stepId,
         stepName: stepKey,
         agent: step.agent,
         status: 'failed',
@@ -1040,6 +1058,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
     // Feedback loop: run agent, handle interrupts and pending feedback
     try {
     while (true) {
+      // Check if workflow was stopped
+      if (this.shouldStop) {
+        throw new Error('工作流已停止');
+      }
       let result: ClaudeJsonResult;
       try {
         result = await this.executeWithEngine(

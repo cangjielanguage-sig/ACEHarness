@@ -34,8 +34,8 @@ export async function GET(request: NextRequest) {
       // 状态机专属事件
       const smHandlers = {
         'state-change': (data: any) => sendEvent({ type: 'phase', data: { phase: data.state, message: data.message } }),
-        'step-start': (data: any) => sendEvent({ type: 'step', data: { step: `${data.state}-${data.step}`, agent: data.agent } }),
-        'step-complete': (data: any) => sendEvent({ type: 'result', data: { step: `${data.state}-${data.step}`, agent: data.agent, output: data.output, costUsd: data.costUsd, durationMs: data.durationMs } }),
+        'step-start': (data: any) => sendEvent({ type: 'step', data: { id: data.id, step: `${data.state}-${data.step}`, agent: data.agent } }),
+        'step-complete': (data: any) => sendEvent({ type: 'result', data: { id: data.id, step: `${data.state}-${data.step}`, agent: data.agent, output: data.output, costUsd: data.costUsd, durationMs: data.durationMs } }),
         'transition': (data: any) => sendEvent({ type: 'sm-transition', data }),
         'force-transition': (data: any) => sendEvent({ type: 'force-transition', data }),
         'transition-forced': (data: any) => sendEvent({ type: 'transition-forced', data }),

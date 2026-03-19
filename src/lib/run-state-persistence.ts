@@ -39,6 +39,7 @@ export interface PersistedProcessInfo {
 }
 
 export interface PersistedStepLog {
+  id: string; // UUID for this step execution
   stepName: string;
   agent: string;
   status: 'completed' | 'failed';

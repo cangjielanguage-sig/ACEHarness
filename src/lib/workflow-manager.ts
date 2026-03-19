@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
 import { readFile, readdir, stat } from 'fs/promises';
 import { resolve } from 'path';
 import { parse } from 'yaml';
@@ -1005,6 +1006,7 @@ class WorkflowManager extends EventEmitter {
     workflowConfig: WorkflowConfig,
     stepIndex: number
   ): Promise<string> {
+    const stepId = randomUUID();
     this.currentStep = step.name;
     this.updateAgentStatus(step.agent, 'running', step.task);
 
@@ -1012,6 +1014,7 @@ class WorkflowManager extends EventEmitter {
     if (agent) agent.iterationCount++;
 
     this.emit('step', {
+      id: stepId,
       step: step.name,
       agent: step.agent,
       message: `执行步骤: ${step.name}`,
@@ -1049,6 +1052,7 @@ class WorkflowManager extends EventEmitter {
 
       // Record step log
       this.stepLogs.push({
+        id: stepId,
         stepName: step.name,
         agent: step.agent,
         status: 'completed',
@@ -1060,6 +1064,7 @@ class WorkflowManager extends EventEmitter {
       });
 
       this.emit('result', {
+        id: stepId,
         step: step.name,
         agent: step.agent,
         output: resultText.substring(0, 500) + (resultText.length > 500 ? '...' : ''),
@@ -1104,6 +1109,7 @@ class WorkflowManager extends EventEmitter {
         this.currentStep = null;
 
         this.stepLogs.push({
+          id: stepId,
           stepName: step.name,
           agent: step.agent,
           status: 'completed',
@@ -1115,6 +1121,7 @@ class WorkflowManager extends EventEmitter {
         });
 
         this.emit('result', {
+          id: stepId,
           step: step.name,
           agent: step.agent,
           output: resultText.substring(0, 500) + (resultText.length > 500 ? '...' : ''),
@@ -1144,6 +1151,7 @@ class WorkflowManager extends EventEmitter {
 
       // Record failed step log
       this.stepLogs.push({
+        id: stepId,
         stepName: step.name,
         agent: step.agent,
         status: 'failed',
@@ -1155,6 +1163,7 @@ class WorkflowManager extends EventEmitter {
       });
 
       this.emit('result', {
+        id: stepId,
         step: step.name,
         agent: step.agent,
         output: `执行失败: ${errorMsg}`,
