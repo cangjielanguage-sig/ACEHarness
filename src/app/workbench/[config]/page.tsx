@@ -2488,7 +2488,7 @@ export default function WorkbenchPage() {
               <div className="bg-muted p-4 rounded-md border-l-[3px] border-l-blue-500 mb-4">
                 <p className="text-sm text-muted-foreground mb-2">来自 Agent: <strong className="text-foreground">{pendingPlanQuestion.fromAgent}</strong> (第 {pendingPlanQuestion.round + 1} 轮)</p>
               </div>
-              <p className="text-base mb-4">{pendingPlanQuestion.question}</p>
+              <p className="text-base mb-4 whitespace-pre-wrap break-words leading-relaxed">{pendingPlanQuestion.question}</p>
               <Textarea
                 value={planAnswer}
                 onChange={(e) => setPlanAnswer(e.target.value)}

@@ -78,8 +78,8 @@ function AgentNode({ data }: any) {
           : 'border-blue-300 bg-white dark:bg-gray-800 hover:shadow-xl'}
       `}
     >
-      <Handle type="target" position={Position.Top} className="!bg-gray-400" />
-      <Handle type="target" position={Position.Left} className="!bg-gray-400" />
+      <Handle id="target-bottom" type="target" position={Position.Bottom} className="!bg-gray-400" />
+      <Handle id="target-left" type="target" position={Position.Left} className="!bg-gray-400" />
       
       <div className="flex items-center gap-3">
         <div className={`
@@ -103,8 +103,8 @@ function AgentNode({ data }: any) {
         </div>
       )}
       
-      <Handle type="source" position={Position.Bottom} className="!bg-gray-400" />
-      <Handle type="source" position={Position.Right} className="!bg-gray-400" />
+      <Handle id="source-top" type="source" position={Position.Top} className="!bg-gray-400" />
+      <Handle id="source-right" type="source" position={Position.Right} className="!bg-gray-400" />
     </div>
   );
 }
@@ -114,8 +114,8 @@ function SupervisorNode({ data }: any) {
 
   return (
     <div className="px-6 py-5 rounded-2xl border-2 border-orange-400 bg-orange-50 dark:bg-orange-950 min-w-[220px] shadow-xl shadow-orange-200 dark:shadow-orange-900 cursor-move">
-      <Handle type="target" position={Position.Top} className="!bg-orange-400" />
-      <Handle type="target" position={Position.Left} className="!bg-orange-400" />
+      <Handle id="target-bottom" type="target" position={Position.Bottom} className="!bg-orange-400" />
+      <Handle id="target-left" type="target" position={Position.Left} className="!bg-orange-400" />
       
       <div className="flex items-center gap-3">
         <div className="w-14 h-14 rounded-full bg-orange-100 dark:bg-orange-900 flex items-center justify-center">
@@ -138,8 +138,8 @@ function SupervisorNode({ data }: any) {
         </div>
       )}
       
-      <Handle type="source" position={Position.Bottom} className="!bg-orange-400" />
-      <Handle type="source" position={Position.Right} className="!bg-orange-400" />
+      <Handle id="source-top" type="source" position={Position.Top} className="!bg-orange-400" />
+      <Handle id="source-right" type="source" position={Position.Right} className="!bg-orange-400" />
     </div>
   );
 }
@@ -185,9 +185,9 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number, a
   }
 
   // 默认三层布局：用户(上) -> Supervisor(中) -> Agents(下)
-  const userY = 40;
-  const supervisorY = 250;
-  const agentsY = 500;
+  const userY = 10;
+  const supervisorY = 320;
+  const agentsY = 700;
 
   // 按时间戳排序
   const sortedFlow = [...flow].sort((a, b) => 
@@ -235,9 +235,9 @@ function calculateInitialNodes(flow: AgentFlowRecord[], currentRound?: number, a
       data: { agentName: agent, isActive: !!isActive, stepName: latestAgentRecord?.stepName || '', isUser: false },
     });
   } else if (agentArray.length > 1) {
-    const maxSpacing = 260;
-    const minSpacing = 160;
-    const spacing = Math.max(minSpacing, Math.min(maxSpacing, Math.floor(1100 / agentArray.length)));
+    const maxSpacing = 380;
+    const minSpacing = 220;
+    const spacing = Math.max(minSpacing, Math.min(maxSpacing, Math.floor(1600 / agentArray.length)));
     const totalWidth = spacing * (agentArray.length - 1);
     const startX = centerX - totalWidth / 2;
 
@@ -307,12 +307,20 @@ function calculateEdges(flow: AgentFlowRecord[], nodes: Node[]): Edge[] {
       return;
     }
 
+    const sourceNode = nodes.find((n) => n.id === sourceId);
+    const targetNode = nodes.find((n) => n.id === targetId);
+    const dx = (targetNode?.position.x ?? 0) - (sourceNode?.position.x ?? 0);
+    const dy = (targetNode?.position.y ?? 0) - (sourceNode?.position.y ?? 0);
+    const useVerticalHandles = Math.abs(dy) >= Math.abs(dx);
+
     const color = getTypeColor(record.type);
 
     edgeList.push({
       id: `${record.id}-${sourceId}-${targetId}`,
       source: sourceId,
       target: targetId,
+      sourceHandle: useVerticalHandles ? 'source-top' : 'source-right',
+      targetHandle: useVerticalHandles ? 'target-bottom' : 'target-left',
       label: getTypeLabel(record.type),
       type: 'default',
       animated: true,

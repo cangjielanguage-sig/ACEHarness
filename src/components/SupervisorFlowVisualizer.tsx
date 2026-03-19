@@ -136,7 +136,7 @@ export default function SupervisorFlowVisualizer({
               </div>
 
               {record.question && (
-                <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-900/50 rounded p-2">
+                <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-900/50 rounded p-2 whitespace-pre-wrap break-words leading-relaxed">
                   {record.question}
                 </div>
               )}
