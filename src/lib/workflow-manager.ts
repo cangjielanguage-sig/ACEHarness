@@ -5,8 +5,9 @@
 
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
-import { readFile, readdir, stat } from 'fs/promises';
+import { readFile, readdir, stat, mkdir, cp, rm } from 'fs/promises';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 import { parse } from 'yaml';
 import { processManager } from './process-manager';
 import type { ClaudeJsonResult } from './process-manager';
@@ -74,6 +75,7 @@ class WorkflowManager extends EventEmitter {
   private stepLogs: PersistedStepLog[] = [];
   private forceCompleteFlag: boolean = false;
   private interruptFlag: boolean = false;
+  private feedbackInterrupt: boolean = false;
   private runStartTime: string | null = null;
   private runEndTime: string | null = null;
   /** Agent name → session_id for --resume in iterative phases */
@@ -96,6 +98,8 @@ class WorkflowManager extends EventEmitter {
   private workspaceSkillNames: Set<string> = new Set();
   /** Cached workflow-level skills from context.skills */
   private workflowSkillsContent: string = '';
+  /** Skills copied to workspace that need cleanup on finish */
+  private copiedSkills: { dir: string; names: string[]; indexCopied: boolean; dirExistedBefore: boolean } | null = null;
   /** Current engine instance (Kiro CLI, Codex, etc.) */
   private currentEngine: Engine | null = null;
   /** Current engine type */
@@ -184,6 +188,79 @@ class WorkflowManager extends EventEmitter {
     }
 
     return result;
+  }
+
+  /**
+   * Copy needed skills from server skills/ to workspace .claude/skills/
+   */
+  private async syncSkillsToWorkspace(config: any): Promise<void> {
+    const projectRoot = config.context?.projectRoot;
+    if (!projectRoot) return;
+
+    const serverSkillsDir = resolve(process.cwd(), 'skills', '.claude', 'skills');
+    const workspaceSkillsDir = resolve(process.cwd(), projectRoot, '.claude', 'skills');
+    if (!existsSync(serverSkillsDir)) return;
+
+    const needed = new Set<string>();
+    if (config.context?.skills) config.context.skills.forEach((s: string) => needed.add(s));
+    for (const phase of config.workflow?.phases || []) {
+      for (const step of phase.steps || []) {
+        if (step.skills) step.skills.forEach((s: string) => needed.add(s));
+      }
+    }
+    if (needed.size === 0) return;
+
+    const dirExistedBefore = existsSync(workspaceSkillsDir);
+    await mkdir(workspaceSkillsDir, { recursive: true });
+
+    const serverIndex = resolve(serverSkillsDir, 'SKILL.md');
+    const targetIndex = resolve(workspaceSkillsDir, 'SKILL.md');
+    let indexCopied = false;
+    if (existsSync(serverIndex) && !existsSync(targetIndex)) {
+      try { await cp(serverIndex, targetIndex); indexCopied = true; } catch { /* ignore */ }
+    }
+
+    const copiedNames: string[] = [];
+    for (const skillName of needed) {
+      const src = resolve(serverSkillsDir, skillName);
+      const dst = resolve(workspaceSkillsDir, skillName);
+      if (!existsSync(src)) continue;
+      try {
+        await cp(src, dst, { recursive: true, force: true });
+        copiedNames.push(skillName);
+        console.log(`[WF-Skills] 已复制 skill "${skillName}" → ${dst}`);
+      } catch (e) {
+        console.warn(`[WF-Skills] 复制 skill "${skillName}" 失败:`, e);
+      }
+    }
+
+    if (copiedNames.length > 0 || indexCopied) {
+      this.copiedSkills = { dir: workspaceSkillsDir, names: copiedNames, indexCopied, dirExistedBefore };
+    }
+  }
+
+  private async cleanupWorkspaceSkills(): Promise<void> {
+    if (!this.copiedSkills) return;
+    const { dir, names, indexCopied, dirExistedBefore } = this.copiedSkills;
+
+    for (const name of names) {
+      try { await rm(resolve(dir, name), { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    if (indexCopied) {
+      try { await rm(resolve(dir, 'SKILL.md'), { force: true }); } catch { /* ignore */ }
+    }
+    if (!dirExistedBefore) {
+      try {
+        const remaining = await readdir(dir);
+        if (remaining.length === 0) {
+          await rm(dir, { recursive: true, force: true });
+          const claudeDir = resolve(dir, '..');
+          const claudeRemaining = await readdir(claudeDir);
+          if (claudeRemaining.length === 0) await rm(claudeDir, { recursive: true, force: true });
+        }
+      } catch { /* ignore */ }
+    }
+    this.copiedSkills = null;
   }
 
   private async loadAgentConfigs(): Promise<RoleConfig[]> {
@@ -492,6 +569,9 @@ class WorkflowManager extends EventEmitter {
       // Initialize engine
       await this.initializeEngine();
 
+      // Sync skills to workspace before execution
+      await this.syncSkillsToWorkspace(workflowConfig);
+
       // Discover workspace skills from projectRoot/.claude/skills/
       if (workflowConfig.context.projectRoot) {
         this.workspaceSkills = await this.discoverWorkspaceSkills(workflowConfig.context.projectRoot);
@@ -556,6 +636,10 @@ class WorkflowManager extends EventEmitter {
   private async finalizeRun(status: 'completed' | 'failed' | 'stopped') {
     if (!this.currentRunId) return;
     this.runEndTime = new Date().toISOString();
+
+    // Cleanup copied skills from workspace
+    await this.cleanupWorkspaceSkills();
+
     try {
       const completedSteps = this.agents.reduce((sum, a) => sum + a.completedTasks, 0);
       await updateRun(this.currentRunId, {
@@ -566,7 +650,6 @@ class WorkflowManager extends EventEmitter {
       });
     } catch { /* non-critical */ }
     await this.persistState();
-    // Reset to idle so polling doesn't overwrite frontend with stale memory data
     this.status = 'idle';
   }
 
@@ -1386,7 +1469,9 @@ class WorkflowManager extends EventEmitter {
         } catch (err) {
           // If interrupted with feedback, preserve stream and resume with feedback
           if (this.interruptFlag && this.liveFeedback.length > 0) {
+            const isFeedbackOnly = this.feedbackInterrupt;
             this.interruptFlag = false;
+            this.feedbackInterrupt = false;
             const proc = processManager.getProcess(currentProcessId);
             if (proc?.streamContent) {
               accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
@@ -1402,13 +1487,15 @@ class WorkflowManager extends EventEmitter {
               saveStreamContent(this.currentRunId, step.name, accumulatedStream).catch(() => {});
             }
             currentSessionId = sessionId;
-            currentPrompt = `## 人工实时反馈（紧急打断）\n用户紧急打断了当前执行，请立即处理以下反馈：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
+            currentPrompt = isFeedbackOnly
+              ? `## 人工实时反馈\n用户在你执行过程中提供了补充反馈，请参考以下内容继续完成任务：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`
+              : `## 人工实时反馈（紧急打断）\n用户紧急打断了当前执行，请立即处理以下反馈：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
             currentProcessId = `${step.agent}-${step.name}-interrupt-${Date.now()}`;
             activeProcessId = currentProcessId;
             this.emit('step', {
               step: step.name,
               agent: step.agent,
-              message: `收到紧急反馈，打断并重新执行: ${step.name}`,
+              message: isFeedbackOnly ? `收到反馈，恢复执行: ${step.name}` : `收到紧急反馈，打断并重新执行: ${step.name}`,
               role: step.role,
             });
             continue;
@@ -1536,7 +1623,9 @@ class WorkflowManager extends EventEmitter {
       prompt += `3. **Skills 包含最佳实践**：每个 Skill 都经过验证，代表了该领域的最佳实践，偏离 Skill 指导可能导致错误或性能问题\n`;
       prompt += `4. **遇到问题先查 Skills**：如果遇到构建、测试、部署等问题，请首先检查是否有对应的 Skill 可用\n\n`;
       prompt += `### 如何使用 Skills\n\n`;
-      prompt += `- **阅读 SKILL.md**：每个 Skill 目录下的 SKILL.md 包含完整使用说明\n`;
+      const skillsAbsPath = resolve(process.cwd(), 'skills', '.claude', 'skills');
+      prompt += `- **Skills 目录绝对路径**: \`${skillsAbsPath}/\`\n`;
+      prompt += `- **阅读 SKILL.md**：每个 Skill 目录下的 SKILL.md 包含完整使用说明，例如 \`${skillsAbsPath}/build-cangjie/SKILL.md\`\n`;
       prompt += `- **查看 REFERENCE.md**：如需更多参数说明，参考同目录下的 REFERENCE.md\n`;
       prompt += `- **复制粘贴命令**：直接使用 Skill 中给出的示例命令，确保参数格式正确\n\n`;
 
@@ -1697,6 +1786,20 @@ class WorkflowManager extends EventEmitter {
     const entry = { message, timestamp: new Date().toISOString() };
     this.liveFeedback.push(message);
     this.emit('feedback-injected', entry);
+
+    // Interrupt the running process so feedback is delivered immediately via resume
+    if (this.status === 'running' && this.currentStep) {
+      this.interruptFlag = true;
+      this.feedbackInterrupt = true;
+
+      const allProcs = processManager.getAllProcesses();
+      const running = allProcs.find(
+        (p: any) => p.status === 'running' && (p.step === this.currentStep || p.id.startsWith(this.currentStep!.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_')))
+      );
+      if (running) {
+        processManager.killProcess(running.id);
+      }
+    }
   }
 
   /**

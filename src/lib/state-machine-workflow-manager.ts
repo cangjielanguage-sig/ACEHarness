@@ -5,8 +5,9 @@
 
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
-import { readFile, readdir, stat } from 'fs/promises';
+import { readFile, readdir, stat, mkdir, cp, rm } from 'fs/promises';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 import { parse } from 'yaml';
 import { processManager } from './process-manager';
 import type { ClaudeJsonResult } from './process-manager';
@@ -84,6 +85,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private stateContexts: Map<string, string> = new Map();
   private workspaceSkillsCache: string = '';
   private workspaceSkillsCacheProjectRoot: string = '';
+  private workspaceSkillNames: Set<string> = new Set();
+  /** Skills copied to workspace that need cleanup on finish */
+  private copiedSkills: { dir: string; indexCopied: boolean } | null = null;
   private currentStep: string | null = null;
   private completedSteps: string[] = [];
   private currentProcesses: PersistedProcessInfo[] = [];
@@ -124,32 +128,182 @@ export class StateMachineWorkflowManager extends EventEmitter {
    * Load and cache workspace skills from .claude/skills/
    */
   private async loadWorkspaceSkills(projectRoot: string): Promise<string> {
-    // Return cached result if same project root
     if (this.workspaceSkillsCache && this.workspaceSkillsCacheProjectRoot === projectRoot) {
       return this.workspaceSkillsCache;
     }
 
-    const absRoot = resolve(process.cwd(), projectRoot);
-    const skillsDir = resolve(absRoot, '.claude', 'skills');
+    // Try project-level first, then server-level skills directory
+    const candidates = [
+      resolve(process.cwd(), projectRoot, '.claude', 'skills'),
+      resolve(process.cwd(), 'skills', '.claude', 'skills'),
+    ];
 
-    try {
-      const skillIndex = resolve(skillsDir, 'SKILL.md');
-      const indexContent = await readFile(skillIndex, 'utf-8');
+    for (const skillsDir of candidates) {
+      try {
+        const skillIndex = resolve(skillsDir, 'SKILL.md');
+        const indexContent = await readFile(skillIndex, 'utf-8');
 
-      // Only include the index summary, not detailed sub-skill contents
-      const result = indexContent.trim();
+        this.workspaceSkillNames.clear();
+        try {
+          const entries = await readdir(skillsDir);
+          for (const entry of entries) {
+            const entryPath = resolve(skillsDir, entry);
+            const entryStat = await stat(entryPath).catch(() => null);
+            if (entryStat?.isDirectory()) {
+              this.workspaceSkillNames.add(entry);
+            }
+          }
+        } catch { /* ignore */ }
 
-      // Cache the result
-      this.workspaceSkillsCache = result;
-      this.workspaceSkillsCacheProjectRoot = projectRoot;
-
-      return result;
-    } catch {
-      // No skills directory or index — that's fine
-      this.workspaceSkillsCache = '';
-      this.workspaceSkillsCacheProjectRoot = projectRoot;
-      return '';
+        const result = indexContent.trim();
+        this.workspaceSkillsCache = result;
+        this.workspaceSkillsCacheProjectRoot = projectRoot;
+        return result;
+      } catch { /* try next candidate */ }
     }
+
+    this.workspaceSkillsCache = '';
+    this.workspaceSkillsCacheProjectRoot = projectRoot;
+    this.workspaceSkillNames.clear();
+    return '';
+  }
+
+  /**
+   * Load a single skill's content from project or system skills directory
+   */
+  private async loadSkillContent(skillName: string, projectRoot: string): Promise<string | null> {
+    const projectSkillPath = resolve(process.cwd(), projectRoot, '.claude', 'skills', skillName, 'SKILL.md');
+    try {
+      return await readFile(projectSkillPath, 'utf-8');
+    } catch { /* not found in project */ }
+
+    const systemSkillPath = resolve(process.cwd(), 'skills', '.claude', 'skills', skillName, 'SKILL.md');
+    try {
+      return await readFile(systemSkillPath, 'utf-8');
+    } catch { /* not found in system */ }
+
+    return null;
+  }
+
+  /**
+   * Load step-level and workflow-level skills, returning formatted prompt content
+   */
+  private async loadAdditionalSkills(skillNames: string[], projectRoot: string): Promise<string> {
+    const unique = [...new Set(skillNames)].filter(n => !this.workspaceSkillNames.has(n));
+    if (unique.length === 0) return '';
+
+    const loaded: { name: string; content: string }[] = [];
+    for (const name of unique) {
+      const content = await this.loadSkillContent(name, projectRoot);
+      if (content) loaded.push({ name, content });
+    }
+    if (loaded.length === 0) return '';
+
+    let result = `### 步骤/工作流指定 Skills\n\n`;
+    for (const skill of loaded) {
+      result += `#### ${skill.name}\n\n${skill.content}\n\n---\n\n`;
+    }
+    return result;
+  }
+
+  /**
+   * Copy skills from server skills/ directory to workspace .claude/skills/
+   * so that AI agents can discover and read them naturally.
+   */
+  private async syncSkillsToWorkspace(config: StateMachineWorkflowConfig): Promise<void> {
+    const projectRoot = config.context?.projectRoot;
+    if (!projectRoot) return;
+
+    const serverSkillsDir = resolve(process.cwd(), 'skills', '.claude', 'skills');
+    const workspaceSkillsDir = resolve(process.cwd(), projectRoot, '.claude', 'skills');
+
+    if (!existsSync(serverSkillsDir)) return;
+
+    // Collect all skill names needed: context.skills + all step.skills
+    const needed = new Set<string>();
+    if (config.context?.skills) config.context.skills.forEach(s => needed.add(s));
+    for (const state of config.workflow.states) {
+      for (const step of state.steps) {
+        if (step.skills) step.skills.forEach(s => needed.add(s));
+      }
+    }
+    if (needed.size === 0) return;
+
+    // Track what we copy for cleanup
+    const copiedNames: string[] = [];
+    const dirExistedBefore = existsSync(workspaceSkillsDir);
+
+    // Ensure target dir exists
+    await mkdir(workspaceSkillsDir, { recursive: true });
+
+    // Copy SKILL.md index if not exists
+    const serverIndex = resolve(serverSkillsDir, 'SKILL.md');
+    const targetIndex = resolve(workspaceSkillsDir, 'SKILL.md');
+    let indexCopied = false;
+    if (existsSync(serverIndex) && !existsSync(targetIndex)) {
+      try { await cp(serverIndex, targetIndex); indexCopied = true; } catch { /* ignore */ }
+    }
+
+    // Copy each needed skill directory
+    for (const skillName of needed) {
+      const src = resolve(serverSkillsDir, skillName);
+      const dst = resolve(workspaceSkillsDir, skillName);
+      if (!existsSync(src)) continue;
+      try {
+        await cp(src, dst, { recursive: true, force: true });
+        copiedNames.push(skillName);
+        console.log(`[SM-Skills] 已复制 skill "${skillName}" → ${dst}`);
+      } catch (e) {
+        console.warn(`[SM-Skills] 复制 skill "${skillName}" 失败:`, e);
+      }
+    }
+
+    if (copiedNames.length > 0 || indexCopied) {
+      this.copiedSkills = { dir: workspaceSkillsDir, indexCopied };
+      // Store copied names on the object for cleanup
+      (this.copiedSkills as any).names = copiedNames;
+      (this.copiedSkills as any).dirExistedBefore = dirExistedBefore;
+    }
+  }
+
+  /**
+   * Remove skills that were copied to workspace during syncSkillsToWorkspace
+   */
+  private async cleanupWorkspaceSkills(): Promise<void> {
+    if (!this.copiedSkills) return;
+    const { dir, indexCopied } = this.copiedSkills;
+    const names: string[] = (this.copiedSkills as any).names || [];
+    const dirExistedBefore: boolean = (this.copiedSkills as any).dirExistedBefore ?? true;
+
+    for (const name of names) {
+      const dst = resolve(dir, name);
+      try {
+        await rm(dst, { recursive: true, force: true });
+        console.log(`[SM-Skills] 已清理 skill "${name}"`);
+      } catch { /* ignore */ }
+    }
+
+    if (indexCopied) {
+      try { await rm(resolve(dir, 'SKILL.md'), { force: true }); } catch { /* ignore */ }
+    }
+
+    // If we created the .claude/skills/ dir and it's now empty, remove it
+    if (!dirExistedBefore) {
+      try {
+        const remaining = await readdir(dir);
+        if (remaining.length === 0) {
+          await rm(dir, { recursive: true, force: true });
+          // Also try removing .claude/ if empty
+          const claudeDir = resolve(dir, '..');
+          const claudeRemaining = await readdir(claudeDir);
+          if (claudeRemaining.length === 0) {
+            await rm(claudeDir, { recursive: true, force: true });
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    this.copiedSkills = null;
   }
 
   getStatus() {
@@ -209,6 +363,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       // Initialize engine based on .engine.json
       await this.initializeEngine();
+
+      // Sync skills to workspace before execution
+      await this.syncSkillsToWorkspace(workflowConfig);
 
       // Create run record
       const totalSteps = workflowConfig.workflow.states.reduce(
@@ -314,6 +471,23 @@ export class StateMachineWorkflowManager extends EventEmitter {
     console.log('[StateMachine] forceTransition called, targetState:', targetState, 'currentState:', this.currentState);
     this.pendingForceTransition = targetState;
     this.emit('force-transition', { targetState, from: this.currentState });
+
+    // Kill the running process so the main loop can pick up the forced transition immediately
+    const currentProcId = this.currentProcesses?.[0]?.id;
+    const currentStepId = this.currentProcesses?.[0]?.stepId;
+    if (currentProcId || currentStepId) {
+      const allProcs = processManager.getAllProcesses();
+      const running = allProcs.find(
+        (p: any) => (p.status === 'running' || p.status === 'queued') && (
+          (currentStepId && p.stepId === currentStepId) ||
+          (currentProcId && p.id === currentProcId)
+        )
+      );
+      if (running) {
+        console.log(`[StateMachine] forceTransition: killing process ${running.id}`);
+        processManager.killProcess(running.id);
+      }
+    }
   }
 
   setContext(scope: 'global' | 'phase', context: string, stateName?: string): void {
@@ -349,6 +523,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private async finalizeRun(status: 'completed' | 'failed' | 'stopped') {
     if (!this.currentRunId) return;
     this.runEndTime = new Date().toISOString();
+
+    // Cleanup copied skills from workspace
+    await this.cleanupWorkspaceSkills();
 
     try {
       const completedSteps = this.agents.reduce((sum, a) => sum + a.completedTasks, 0);
@@ -936,11 +1113,23 @@ export class StateMachineWorkflowManager extends EventEmitter {
       parts.push(`\n# 结构化输出要求\n在你的回复最末尾，请务必输出以下 JSON 块（用 \`\`\`json 包裹），用于自动化流程判断：\n\n\`\`\`json\n{\n  "verdict": "pass | conditional_pass | fail",\n  "remaining_issues": 0,\n  "summary": "一句话总结"\n}\n\`\`\`\n\n字段说明：\n- \`verdict\`: \`"pass"\` 表示无问题可通过，\`"conditional_pass"\` 表示有条件通过（存在需修复的问题但方向正确），\`"fail"\` 表示存在严重问题需要重做\n- \`remaining_issues\`: 剩余未解决的问题数量（整数）\n- \`summary\`: 一句话总结你的评估结论`);
     }
 
-    // Add workspace skills (index summary only)
+    // Add workspace skills (index summary + absolute path for AI to read details)
     if (config.context?.projectRoot) {
       const skills = await this.loadWorkspaceSkills(config.context.projectRoot);
       if (skills) {
-        parts.push(`\n# 可用 Skills（来自项目 .claude/skills/）\n\n${skills}`);
+        const skillsAbsPath = resolve(process.cwd(), 'skills', '.claude', 'skills');
+        parts.push(`\n# 可用 Skills\n\nSkills 目录绝对路径: \`${skillsAbsPath}/\`\n\n如需使用某个 Skill，请先用 Read 工具读取对应的 SKILL.md 文件获取详细说明。例如：\`${skillsAbsPath}/build-cangjie/SKILL.md\`\n\n${skills}`);
+      }
+    }
+
+    // Add workflow-level and step-level skills
+    const allSkillNames: string[] = [];
+    if (config.context?.skills) allSkillNames.push(...config.context.skills);
+    if (step.skills) allSkillNames.push(...step.skills);
+    if (allSkillNames.length > 0 && config.context?.projectRoot) {
+      const additionalSkills = await this.loadAdditionalSkills(allSkillNames, config.context.projectRoot);
+      if (additionalSkills) {
+        parts.push(`\n# 必须使用的 Skills\n\n⚠️ **重要提醒：以下 Skills 是本步骤/项目的核心工具，你必须严格遵循以下原则：**\n\n1. **优先阅读 Skills**：在执行任何任务前，请务必仔细阅读下方所有 Skills 的说明文档\n2. **使用 Skills 中的命令**：直接使用 Skills 中提供的命令格式和参数，**严禁**自行猜测命令或随意修改参数\n3. **Skills 包含最佳实践**：每个 Skill 都经过验证，代表了该领域的最佳实践\n4. **遇到问题先查 Skills**：如果遇到构建、测试、部署等问题，请首先检查是否有对应的 Skill 可用\n\n${additionalSkills}`);
       }
     }
 
@@ -1023,7 +1212,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       ? resolve(process.cwd(), config.context.projectRoot)
       : process.cwd();
 
-    let currentProcessId = `sm-${step.agent}-${Date.now()}`;
+    let currentProcessId = stepId || randomUUID();
     let currentPrompt = context;
     let currentSessionId: string | undefined;
     let accumulatedOutput = '';
@@ -1031,12 +1220,15 @@ export class StateMachineWorkflowManager extends EventEmitter {
     let accumulatedCost = 0;
     let accumulatedDuration = 0;
 
+    // Use state-prefixed step name so frontend stream polling matches persisted stream files
+    const streamStepName = this.currentState ? `${this.currentState}-${step.name}` : step.name;
+
     // Track process
     this.currentProcesses = [{
       pid: Date.now(),
       id: currentProcessId,
       agent: step.agent,
-      step: step.name,
+      step: streamStepName,
       stepId,
       startTime: new Date().toISOString(),
     }];
@@ -1055,7 +1247,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
           const fullStream = accumulatedStream
             ? accumulatedStream + '\n\n<!-- chunk-boundary -->\n\n' + content
             : content;
-          const streamStepName = this.currentState ? `${this.currentState}-${step.name}` : step.name;
           saveStreamContent(this.currentRunId, streamStepName, fullStream).catch(() => {});
         }
       }
@@ -1088,9 +1279,24 @@ export class StateMachineWorkflowManager extends EventEmitter {
           }
         );
       } catch (err) {
+        // If force transition killed the process, return partial output and let main loop handle it
+        if (this.pendingForceTransition) {
+          console.log(`[SM-ForceTransition] 进程被强制跳转终止，目标: ${this.pendingForceTransition}`);
+          const proc = processManager.getProcess(currentProcessId);
+          if (proc?.streamContent) {
+            accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
+          }
+          if (this.currentRunId) {
+            saveStreamContent(this.currentRunId, streamStepName, accumulatedStream).catch(() => {});
+          }
+          return { output: accumulatedOutput || '(强制跳转，步骤未完成)', costUsd: accumulatedCost, durationMs: accumulatedDuration };
+        }
         // If interrupted with feedback, resume with feedback
+        console.log(`[SM-Feedback] catch 块: interruptFlag=${this.interruptFlag}, feedbackCount=${this.liveFeedback.length}, err=${(err as Error).message?.substring(0, 100)}`);
         if (this.interruptFlag && this.liveFeedback.length > 0) {
+          const isFeedbackOnly = this.feedbackInterrupt;
           this.interruptFlag = false;
+          this.feedbackInterrupt = false;
           const proc = processManager.getProcess(currentProcessId);
           if (proc?.streamContent) {
             accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
@@ -1102,28 +1308,29 @@ export class StateMachineWorkflowManager extends EventEmitter {
           const feedbackTimestamp = new Date().toISOString();
           accumulatedStream += `\n\n<!-- chunk-boundary -->\n\n<!-- human-feedback: ${feedbackTimestamp} -->\n${feedbackPrompt}`;
           if (this.currentRunId) {
-            const streamStepName2 = this.currentState ? `${this.currentState}-${step.name}` : step.name;
-            saveStreamContent(this.currentRunId, streamStepName2, accumulatedStream).catch(() => {});
+            saveStreamContent(this.currentRunId, streamStepName, accumulatedStream).catch(() => {});
           }
           // If we have a session, resume it; otherwise start fresh with feedback prepended
           currentSessionId = sessionId || undefined;
-          currentPrompt = `## 人工实时反馈（紧急打断）\n用户紧急打断了当前执行，请立即处理以下反馈：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
+          currentPrompt = isFeedbackOnly
+            ? `## 人工实时反馈\n用户在你执行过程中提供了补充反馈，请参考以下内容继续完成任务：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`
+            : `## 人工实时反馈（紧急打断）\n用户紧急打断了当前执行，请立即处理以下反馈：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
           if (!sessionId) {
             // No session yet — prepend original context so the agent has full info
             currentPrompt = context + '\n\n' + currentPrompt;
           }
-          currentProcessId = `sm-${step.agent}-interrupt-${Date.now()}`;
+          currentProcessId = stepId || currentProcessId;
           this.currentProcesses = [{
             pid: Date.now(),
             id: currentProcessId,
             agent: step.agent,
-            step: step.name,
+            step: streamStepName,
             stepId,
             startTime: new Date().toISOString(),
           }];
           this.emit('step-start', {
             state: this.currentState,
-            step: step.name,
+            step: streamStepName,
             agent: step.agent,
           });
           this.emit('feedback-injected', {
@@ -1141,8 +1348,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
       }
       if (this.currentRunId) {
-        const streamStepName3 = this.currentState ? `${this.currentState}-${step.name}` : step.name;
-        saveStreamContent(this.currentRunId, streamStepName3, accumulatedStream).catch(() => {});
+        saveStreamContent(this.currentRunId, streamStepName, accumulatedStream).catch(() => {});
       }
 
       accumulatedOutput += (accumulatedOutput ? '\n\n---\n\n' : '') + (result.result || '');
@@ -1159,17 +1365,16 @@ export class StateMachineWorkflowManager extends EventEmitter {
         const feedbackTimestamp = new Date().toISOString();
         accumulatedStream += `\n\n<!-- chunk-boundary -->\n\n<!-- human-feedback: ${feedbackTimestamp} -->\n${feedbackPrompt}`;
         if (this.currentRunId) {
-          const streamStepName4 = this.currentState ? `${this.currentState}-${step.name}` : step.name;
-          saveStreamContent(this.currentRunId, streamStepName4, accumulatedStream).catch(() => {});
+          saveStreamContent(this.currentRunId, streamStepName, accumulatedStream).catch(() => {});
         }
         currentSessionId = sessionId;
         currentPrompt = `## 人工实时反馈\n以下是用户在你执行过程中提供的反馈意见，请基于这些反馈继续处理当前任务：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
-        currentProcessId = `sm-${step.agent}-feedback-${Date.now()}`;
+        currentProcessId = stepId || currentProcessId;
         this.currentProcesses = [{
           pid: Date.now(),
           id: currentProcessId,
           agent: step.agent,
-          step: step.name,
+          step: streamStepName,
           stepId,
           startTime: new Date().toISOString(),
         }];
@@ -1216,23 +1421,47 @@ export class StateMachineWorkflowManager extends EventEmitter {
       }
     }
 
-    // No matching transition - escalate to human
+    // No matching transition - wait for human decision instead of crashing
     this.emit('escalation', {
       state: result.stateName,
-      reason: '没有匹配的状态转移规则',
+      reason: `没有匹配的状态转移规则 (verdict: ${result.verdict})，等待人工决策`,
       result,
     });
 
-    throw new Error('没有匹配的状态转移规则，需要人工介入');
+    // Enter human approval mode so user can force-transition
+    this.pendingApprovalInfo = {
+      suggestedNextState: transitions[0]?.to || result.stateName,
+      availableStates: config.workflow.states.map(s => s.name),
+      result,
+    };
+
+    this.emit('human-approval-required', {
+      currentState: result.stateName,
+      suggestedNextState: transitions[0]?.to || result.stateName,
+      result,
+      availableStates: config.workflow.states.map(s => s.name),
+      reason: `verdict "${result.verdict}" 没有匹配的转移规则`,
+    });
+
+    // Wait for human to force-transition
+    await this.waitForHumanApproval();
+
+    const humanSelectedState = this.pendingForceTransition || transitions[0]?.to || result.stateName;
+    this.pendingForceTransition = null;
+    this.pendingApprovalInfo = null;
+    return humanSelectedState;
   }
 
   private matchCondition(
     condition: TransitionCondition,
     result: StateExecutionResult
   ): boolean {
-    // Check verdict
+    // Check verdict with compatibility: conditional_pass matches pass rules
     if (condition.verdict && result.verdict !== condition.verdict) {
-      return false;
+      // Allow conditional_pass to match pass transitions as fallback
+      if (!(result.verdict === 'conditional_pass' && condition.verdict === 'pass')) {
+        return false;
+      }
     }
 
     // Check issue types
@@ -1485,6 +1714,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   // ========== Live feedback functionality ==========
   private liveFeedback: string[] = [];
   private interruptFlag = false;
+  private feedbackInterrupt = false; // true = non-urgent feedback interrupt (softer prompt tone)
   private queuedApprovalAction: 'approve' | 'iterate' | null = null;
   private iterationFeedback: string = '';
 
@@ -1515,6 +1745,25 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const entry = { message, timestamp: new Date().toISOString() };
     this.liveFeedback.push(message);
     this.emit('feedback-injected', entry);
+
+    // Interrupt the running process so feedback is delivered immediately via resume
+    if (this.status === 'running' && this.currentState) {
+      this.interruptFlag = true;
+      this.feedbackInterrupt = true; // non-urgent flag, different prompt tone
+
+      const currentProcId = this.currentProcesses?.[0]?.id;
+      const currentStepId = this.currentProcesses?.[0]?.stepId;
+      const allProcs = processManager.getAllProcesses();
+      const running = allProcs.find(
+        (p: any) => (p.status === 'running' || p.status === 'queued') && (
+          (currentStepId && p.stepId === currentStepId) ||
+          (currentProcId && p.id === currentProcId)
+        )
+      );
+      if (running) {
+        processManager.killProcess(running.id);
+      }
+    }
   }
 
   recallLiveFeedback(message: string): boolean {
@@ -1526,7 +1775,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   interruptWithFeedback(message: string): boolean {
-    if (this.status !== 'running' || !this.currentState) return false;
+    if (this.status !== 'running' || !this.currentState) {
+      console.log(`[SM-Feedback] interruptWithFeedback 失败: status=${this.status}, currentState=${this.currentState}`);
+      return false;
+    }
 
     // Queue the feedback
     this.liveFeedback.push(message);
@@ -1536,6 +1788,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const currentProcId = this.currentProcesses?.[0]?.id;
     const currentStepId = this.currentProcesses?.[0]?.stepId;
     const allProcs = processManager.getAllProcesses();
+    console.log(`[SM-Feedback] 查找进程: procId=${currentProcId}, stepId=${currentStepId}, allProcs=${allProcs.length}, running=${allProcs.filter((p: any) => p.status === 'running').length}`);
     const running = allProcs.find(
       (p: any) => (p.status === 'running' || p.status === 'queued') && (
         (currentStepId && p.stepId === currentStepId) ||
@@ -1544,11 +1797,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
     );
 
     if (running) {
-      processManager.killProcess(running.id);
+      console.log(`[SM-Feedback] 找到进程 ${running.id} (status=${running.status}), 正在 kill...`);
+      const killed = processManager.killProcess(running.id);
+      console.log(`[SM-Feedback] kill 结果: ${killed}`);
       this.emit('feedback-injected', { message, timestamp: new Date().toISOString() });
       return true;
     }
 
+    console.log(`[SM-Feedback] 未找到匹配的运行中进程`);
     return false;
   }
 

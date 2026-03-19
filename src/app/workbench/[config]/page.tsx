@@ -99,7 +99,7 @@ export default function WorkbenchPage() {
   const [showDesignRequirements, setShowDesignRequirements] = useState(true);
   const [showRunRequirements, setShowRunRequirements] = useState(true);
   const [iterationFeedback, setIterationFeedback] = useState('');
-  const [liveStreamFeedback, setLiveStreamFeedback] = useState('');
+  const liveStreamFeedbackRef = useRef<HTMLInputElement>(null);
   const [sendingFeedback, setSendingFeedback] = useState(false);
   const [inlineFeedbacks, setInlineFeedbacks] = useState<{ message: string; timestamp: string; streamIndex: number }[]>([]);
   const [showContextEditor, setShowContextEditor] = useState(false);
@@ -1016,9 +1016,9 @@ export default function WorkbenchPage() {
   // --- Live stream polling ---
   const startLiveStream = () => {
     setShowLiveStream(true);
-    setLiveStream([]);
-    setLiveStreamFeedback('');
-    setInlineFeedbacks([]);
+    // Don't clear liveStream here — let the polling loop load persisted content
+    // so reopening the panel preserves history
+    if (liveStreamFeedbackRef.current) liveStreamFeedbackRef.current.value = '';
     liveStreamLenRef.current = 0;
     setLiveStreamVisibleCount(LIVE_STREAM_PAGE_SIZE);
     liveStreamUserScrolledUp.current = false;
@@ -1081,11 +1081,12 @@ export default function WorkbenchPage() {
   };
 
   const sendLiveFeedback = async (interrupt?: boolean) => {
-    if (!liveStreamFeedback.trim() || sendingFeedback) return;
+    const feedback = liveStreamFeedbackRef.current?.value || '';
+    if (!feedback.trim() || sendingFeedback) return;
     setSendingFeedback(true);
     try {
-      const res = await workflowApi.injectFeedback(liveStreamFeedback.trim(), interrupt);
-      setLiveStreamFeedback('');
+      const res = await workflowApi.injectFeedback(feedback.trim(), interrupt);
+      if (liveStreamFeedbackRef.current) liveStreamFeedbackRef.current.value = '';
       if (interrupt) {
         if (res.interrupted) {
           toast('success', '已打断当前执行，反馈将立即处理');
@@ -2564,17 +2565,17 @@ export default function WorkbenchPage() {
             </div>
             <div className="p-3 border-t flex gap-2">
               <Input
-                value={liveStreamFeedback}
-                onChange={(e) => setLiveStreamFeedback(e.target.value)}
+                ref={liveStreamFeedbackRef}
+                defaultValue=""
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendLiveFeedback(); } }}
                 placeholder="输入反馈意见..."
                 className="flex-1"
                 disabled={sendingFeedback}
               />
-              <Button size="sm" onClick={() => sendLiveFeedback()} disabled={sendingFeedback || !liveStreamFeedback.trim()} title="发送反馈（等待当前执行完成后处理）">
+              <Button size="sm" onClick={() => sendLiveFeedback()} disabled={sendingFeedback} title="发送反馈（等待当前执行完成后处理）">
                 <span className="material-symbols-outlined text-sm">send</span>
               </Button>
-              <Button size="sm" variant="destructive" onClick={() => sendLiveFeedback(true)} disabled={sendingFeedback || !liveStreamFeedback.trim()} title="打断当前执行，立即处理反馈">
+              <Button size="sm" variant="destructive" onClick={() => sendLiveFeedback(true)} disabled={sendingFeedback} title="打断当前执行，立即处理反馈">
                 <span className="material-symbols-outlined text-sm">bolt</span>
               </Button>
             </div>

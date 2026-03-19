@@ -209,6 +209,26 @@ export const runsApi = {
     return response.json();
   },
 
+  async renameDocument(id: string, file: string, newName: string): Promise<{ ok: boolean; newFilename: string }> {
+    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file, newName }),
+    });
+    if (!response.ok) throw new Error('重命名失败');
+    return response.json();
+  },
+
+  async deleteDocuments(id: string, files: string[]): Promise<{ ok: boolean; deleted: string[] }> {
+    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files }),
+    });
+    if (!response.ok) throw new Error('删除失败');
+    return response.json();
+  },
+
   async createRun(data: { configFile: string; totalSteps: number }): Promise<{ id: string }> {
     const response = await fetch(`${API_BASE}/runs`, {
       method: 'POST',
