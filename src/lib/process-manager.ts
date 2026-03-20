@@ -600,8 +600,16 @@ class ProcessManager extends EventEmitter {
             }
             if (obj.session_id) proc.sessionId = obj.session_id;
           } else if (obj.type === 'result') {
+            // Capture errors array (e.g. "No conversation found with session ID: ...")
+            const errorsText = Array.isArray(obj.errors) && obj.errors.length > 0
+              ? obj.errors.join('; ')
+              : '';
+            if (errorsText) {
+              proc.error += (proc.error ? '\n' : '') + errorsText;
+              proc.logLines.push(`[${ts()}] result errors: ${errorsText.substring(0, 300)}`);
+            }
             resultObj = {
-              result: obj.result || proc.output || proc.streamContent,
+              result: obj.result || errorsText || proc.output || proc.streamContent,
               session_id: obj.session_id || proc.sessionId || '',
               cost_usd: obj.cost_usd || 0,
               duration_ms: obj.duration_ms || 0,
