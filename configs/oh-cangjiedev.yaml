@@ -95,3 +95,4 @@ context:
   projectRoot: ""
   requirements: ""
   timeoutMinutes: 300
+  routerModel: claude-sonnet-4-6

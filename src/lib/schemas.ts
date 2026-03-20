@@ -80,6 +80,7 @@ export const contextConfigSchema = z.object({
   codebase: z.string().optional(),
   timeoutMinutes: z.number().min(1).optional(),
   skills: z.array(z.string()).optional(), // 启用的 skills 列表
+  routerModel: z.string().optional(), // Supervisor-Lite 路由模型（可选）
 });
 
 // 完整工作流配置 Schema

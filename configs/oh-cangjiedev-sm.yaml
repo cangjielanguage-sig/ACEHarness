@@ -251,4 +251,5 @@ context:
   projectRoot: /home/wujizhou/worksapce
   requirements: 请帮我分析ohos.file.fs这个对应ArkTS的鸿蒙API接口，然后开发对应的仓颉接口，并按照优先级排序，选取5个方法进行开发
   timeoutMinutes: 300
+  routerModel: claude-sonnet-4-6
   skills: []

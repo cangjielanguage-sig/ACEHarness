@@ -112,6 +112,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private currentEngine: Engine | null = null;
   /** Current engine type */
   private engineType: EngineType = 'claude-code';
+  /** Lightweight router model, configurable from workflow context.routerModel */
+  private lightweightRouterModel: string = 'claude-sonnet-4-6';
 
   // ========== Supervisor-Lite Plan 循环相关 ==========
   /** 待解答的用户问题 Promise 解析器 */
@@ -220,6 +222,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const configPath = resolve(process.cwd(), 'configs', configFile);
       const configContent = await readFile(configPath, 'utf-8');
       const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
+      this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
 
       // Use passed requirements, fallback to config context.requirements
       this.currentRequirements = requirements || workflowConfig.context?.requirements || '';
@@ -1598,6 +1601,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const configPath = resolve(process.cwd(), 'configs', runState.configFile);
     const configContent = await readFile(configPath, 'utf-8');
     const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
+    this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
 
     // Load agent configs and initialize agents
     await this.loadAgentConfigs();
@@ -1827,6 +1831,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const configPath = resolve(process.cwd(), 'configs', runState.configFile);
     const configContent = await readFile(configPath, 'utf-8');
     const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
+    this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
 
     // Load agent configs and initialize agents
     await this.loadAgentConfigs();
@@ -2101,7 +2106,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         'route',
         prompt,
         '你是一个路由器，根据问题选择最合适的 Agent。',
-        'claude-sonnet-4-6',
+        this.lightweightRouterModel,
         {
           workingDirectory: process.cwd(),
           timeoutMs: 120000, // 增加超时时间到 2 分钟
