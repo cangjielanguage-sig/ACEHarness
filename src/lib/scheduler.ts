@@ -276,7 +276,6 @@ class SchedulerService extends EventEmitter {
           this.jobs.set(job.id, job);
           if (job.enabled) this._scheduleJob(job);
         }
-        console.log(`[Scheduler] Restored ${data.length} jobs`);
       }
     } catch {
       // File doesn't exist yet — that's fine

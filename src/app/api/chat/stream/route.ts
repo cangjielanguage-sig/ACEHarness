@@ -20,21 +20,70 @@ export async function POST(request: NextRequest) {
     const chatId = `chat-${Date.now()}`;
     const useModel = model || '';
 
-    let systemPrompt = DEFAULT_PROMPT;
+    // On resume, skip full system prompt (session already has it).
+    // Only send a lightweight skill-status reminder if skills changed.
+    let systemPrompt = '';
+    const isResume = !!sessionId;
     if (mode === 'dashboard') {
       const settings = await loadChatSettings();
       const enabledSkills = Object.entries(settings.skills)
         .filter(([, v]) => v)
         .map(([k]) => k);
-      systemPrompt = await buildDashboardSystemPrompt(enabledSkills);
+      if (isResume) {
+        // Lightweight reminder — just list enabled skill names
+        systemPrompt = enabledSkills.length > 0
+          ? `当前启用的 Skills: ${enabledSkills.join(', ')}。需要时查阅 skills/.claude/skills/{skill-name}/SKILL.md。`
+          : '';
+      } else {
+        systemPrompt = await buildDashboardSystemPrompt(enabledSkills);
+      }
+    } else if (!isResume) {
+      systemPrompt = DEFAULT_PROMPT;
     }
 
-    // Start execution without awaiting — SSE will stream results
-    const execPromise = processManager.executeClaudeCli(
-      chatId, 'chat', 'chat', message, systemPrompt, useModel,
-      { resumeSessionId: sessionId || undefined, appendSystemPrompt: !!sessionId }
-    );
+    // Start execution without awaiting — SSE will stream results.
+    // If resume fails (expired session), automatically fall back to a new session.
+    const startExec = (resumeSid?: string) => {
+      let sp = systemPrompt;
+      let appendSp = isResume && !!systemPrompt;
+      // When falling back from a failed resume, use full system prompt for the new session
+      if (isResume && !resumeSid && mode === 'dashboard') {
+        // We'll build the full prompt asynchronously below; for now keep lightweight
+        appendSp = false;
+      }
+      return processManager.executeClaudeCli(
+        chatId, 'chat', 'chat', message, sp, useModel,
+        { resumeSessionId: resumeSid, appendSystemPrompt: appendSp }
+      );
+    };
 
+    // Wrap with retry: on "No conversation found", fall back to new session
+    const execWithRetry = async (): Promise<any> => {
+      if (!isResume) return startExec();
+      try {
+        return await startExec(sessionId);
+      } catch (err: any) {
+        const msg = (err?.message || '').toLowerCase();
+        if (msg.includes('no conversation found') || (msg.includes('session') && msg.includes('not found'))) {
+          // Session expired — retry as a new conversation with full system prompt
+          if (mode === 'dashboard') {
+            const settings = await loadChatSettings();
+            const enabledSkills = Object.entries(settings.skills)
+              .filter(([, v]) => v)
+              .map(([k]) => k);
+            systemPrompt = await buildDashboardSystemPrompt(enabledSkills);
+          } else {
+            systemPrompt = DEFAULT_PROMPT;
+          }
+          return processManager.executeClaudeCli(
+            chatId, 'chat', 'chat', message, systemPrompt, useModel, {}
+          );
+        }
+        throw err; // Not a session error — propagate
+      }
+    };
+
+    const execPromise = execWithRetry();
     const entry = { promise: execPromise, settled: false, chatId };
     activeChats.set(chatId, entry);
     execPromise

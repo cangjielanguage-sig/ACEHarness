@@ -41,19 +41,15 @@ export async function getConfiguredEngine(): Promise<EngineType> {
  */
 export async function createEngine(type?: EngineType): Promise<Engine | null> {
   const engineType = type || await getConfiguredEngine();
-  console.log(`[EngineFactory] createEngine called with type: ${engineType}`);
 
   switch (engineType) {
     case 'kiro-cli':
       const kiroEngine = new KiroCliEngineWrapper();
-      console.log('[EngineFactory] Checking kiro-cli availability...');
       const isAvailable = await kiroEngine.isAvailable();
-      console.log(`[EngineFactory] kiro-cli available: ${isAvailable}`);
       if (!isAvailable) {
         console.warn('[EngineFactory] Kiro CLI is not available, falling back to Claude Code');
         return null;
       }
-      console.log('[EngineFactory] Returning kiro-cli engine');
       return kiroEngine;
 
     case 'claude-code':

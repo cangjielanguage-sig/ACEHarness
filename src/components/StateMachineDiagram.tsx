@@ -175,8 +175,6 @@ function calculateNodeLayout(states: StateMachineState[], useAutoLayout: boolean
     });
   }
 
-  console.log('[Layout] Calculated positions:', Array.from(positions.entries()));
-
   return positions;
 }
 
@@ -371,8 +369,6 @@ function StateMachineDiagramInner({
 
   // 转换为 ReactFlow 节点
   const initialNodes: Node[] = useMemo(() => {
-    console.log('[StateMachineDiagram] Creating nodes from states:', states.length);
-
     // 计算布局 - 强制使用自动布局
     const layoutPositions = calculateNodeLayout(states, true);
 
@@ -381,12 +377,6 @@ function StateMachineDiagramInner({
         x: (index % 3) * 400 + 150,
         y: Math.floor(index / 3) * 350 + 150,
       };
-
-      console.log(`[StateMachineDiagram] Node ${state.name}:`, {
-        position,
-        hasPosition: !!state.position,
-        transitionsCount: state.transitions?.length || 0
-      });
 
       return {
         id: state.name,
@@ -436,14 +426,11 @@ function StateMachineDiagramInner({
       },
     });
 
-    console.log('[StateMachineDiagram] Total nodes created:', nodes.length);
-
     return nodes;
   }, [states, currentState, currentStep, completedSteps, onStepClick, onForceTransition, isRunning, stateHistory, supervisorFlow, currentPlanRound]);
 
   // 转换为 ReactFlow 边
   const initialEdges: Edge[] = useMemo(() => {
-    console.log('[StateMachineDiagram] Creating edges from states');
     const edges: Edge[] = [];
     const edgeSet = new Set<string>(); // 用于去重
 
@@ -461,13 +448,7 @@ function StateMachineDiagramInner({
 
     // 配置的状态转移边
     for (const state of states) {
-      console.log(`[StateMachineDiagram] Processing transitions for state: ${state.name}`, {
-        transitionsCount: state.transitions?.length || 0,
-        transitions: state.transitions
-      });
-
       if (!state.transitions || !Array.isArray(state.transitions)) {
-        console.warn(`[StateMachineDiagram] State ${state.name} has no transitions array, skipping`);
         continue;
       }
 
@@ -476,7 +457,6 @@ function StateMachineDiagramInner({
 
         // 检查是否已经添加过这条边
         if (edgeSet.has(edgeId)) {
-          console.warn(`[StateMachineDiagram] Duplicate edge detected: ${edgeId}, skipping`);
           continue;
         }
         edgeSet.add(edgeId);
@@ -489,13 +469,6 @@ function StateMachineDiagramInner({
 
         // 检查是否是当前状态的可用转移
         const isCurrentStateTransition = currentState === state.name;
-
-        console.log(`[StateMachineDiagram] Creating edge: ${edgeId}`, {
-          isInHistory,
-          historyIndex,
-          label: transition.label,
-          isCurrentStateTransition
-        });
 
         // 根据边的类型设置不同的样式
         let edgeStyle: any = {};
@@ -571,9 +544,6 @@ function StateMachineDiagramInner({
         });
       }
     }
-
-    console.log('[StateMachineDiagram] Total edges created:', edges.length);
-    console.log('[StateMachineDiagram] Edges:', edges.map(e => `${e.source} -> ${e.target}`));
 
     // 添加历史中实际发生但不在配置中的转移（如 __origin__ 或其他动态转移）
     for (let i = 0; i < stateHistory.length; i++) {
@@ -697,13 +667,6 @@ function StateMachineDiagramInner({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-
-  console.log('[StateMachineDiagram] Render:', {
-    nodesCount: nodes.length,
-    edgesCount: edges.length,
-    initialNodesCount: initialNodes.length,
-    initialEdgesCount: initialEdges.length
-  });
 
   // Sync node data when runtime state changes, without replacing node positions
   useEffect(() => {

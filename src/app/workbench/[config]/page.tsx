@@ -1182,7 +1182,6 @@ export default function WorkbenchPage() {
         // Use running process step name to track step changes across iterations
         const runningProc = processes.find((p: any) => p.status === 'running');
         const activeStep = runningProc?.step || currentStep || selectedStep?.name;
-        console.log(`[LiveStream] rid=${rid}, activeStep=${activeStep}, runningProc=${runningProc?.id}, processes=${processes.length}, streamContentLen=${runningProc?.streamContent?.length || 0}`);
         if (rid && activeStep) {
           // Detect step change — reset stream state when a new step starts
           if (activeStep !== liveStreamStepRef.current) {
@@ -1191,7 +1190,6 @@ export default function WorkbenchPage() {
             setLiveStream([]);
           }
           content = await streamApi.getStreamContent(rid, activeStep);
-          console.log(`[LiveStream] streamApi content length: ${content?.length || 0}`);
         }
         if (!content) {
           // Fallback: try in-memory process

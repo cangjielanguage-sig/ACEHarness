@@ -367,7 +367,6 @@ class ProcessManager extends EventEmitter {
     cliArgs.push('--dangerously-skip-permissions');
 
     proc.logLines.push(`[${ts()}] 命令: claude ${cliArgs.map(a => a.length > 100 ? a.substring(0, 100) + '...' : a.includes(' ') ? `"${a}"` : a).join(' ')}`);
-    console.log(`[ProcessManager] 启动 ${id}: claude -p [prompt ${prompt.length} chars] ${cliArgs.filter(a => a !== '-p' && a !== prompt).slice(0, 6).join(' ')}...`);
 
     // Flush log immediately so .tmp has a file right away
     await this.flushLog(proc, cliArgs);
@@ -500,11 +499,6 @@ class ProcessManager extends EventEmitter {
             // Tool result from CLI — display the output
             const toolResult = obj.tool_use_result;
             const msgContent = obj.message?.content;
-            // Debug: log Write tool results
-            if (lastToolName.toLowerCase() === 'write') {
-              console.log(`[ProcessManager] Write tool_result:`, JSON.stringify(toolResult)?.slice(0, 500));
-              console.log(`[ProcessManager] Write msgContent:`, JSON.stringify(msgContent)?.slice(0, 500));
-            }
             if (toolResult || msgContent) {
               // Resolve which tool this result belongs to
               let resolvedToolName = lastToolName;
@@ -692,7 +686,6 @@ class ProcessManager extends EventEmitter {
 
         const elapsed = Date.now() - proc.startTime.getTime();
         proc.logLines.push(`[${ts()}] 进程退出 code=${code}, 耗时 ${fmtMs(elapsed)}`);
-        console.log(`[ProcessManager] ${id} 退出 code=${code}, 耗时 ${fmtMs(elapsed)}`);
 
         if (proc.status === 'timeout' || proc.status === 'killed') {
           // Already handled — reject so the caller can proceed

@@ -210,7 +210,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setStreamingMessageId(null);
     apiLoadSession(activeSessionId).then(s => {
       if (!s) { setActiveSession(null); return; }
-      setActiveSession(reparseSession(s));
+      // Clean up empty assistant messages left by interrupted streams
+      const cleaned = {
+        ...s,
+        messages: s.messages.filter(m => !(m.role === 'assistant' && !m.content && !m.actions?.length && !m.cards?.length)),
+      };
+      setActiveSession(reparseSession(cleaned));
     });
   }, [activeSessionId]);
 
@@ -423,18 +428,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 reject(new Error('Stream error'));
               }
             });
-
-            es.onerror = () => {
-              es.close();
-              activeEventSourceRef.current = null;
-              if (reconnectAttempts < MAX_RECONNECTS) {
-                reconnectAttempts++;
-                setTimeout(connectSSE, 1000 * reconnectAttempts);
-              } else {
-                activeChatIdRef.current = null;
-                reject(new Error('SSE connection error'));
-              }
-            };
           };
 
           connectSSE();
@@ -488,12 +481,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         let accumulated = '';
         let reconnectAttempts = 0;
         const MAX_RECONNECTS = 3;
+        const INACTIVITY_TIMEOUT = 120_000; // 2 minutes without any data
+        let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const resetInactivityTimer = () => {
+          if (inactivityTimer) clearTimeout(inactivityTimer);
+          inactivityTimer = setTimeout(() => {
+            if (activeEventSourceRef.current) {
+              activeEventSourceRef.current.close();
+              activeEventSourceRef.current = null;
+            }
+            activeChatIdRef.current = null;
+            reject(new Error('响应超时，请重试'));
+          }, INACTIVITY_TIMEOUT);
+        };
 
         const connectSSE = () => {
           const es = new EventSource(`/api/chat/stream?id=${chatId}`);
           activeEventSourceRef.current = es;
+          resetInactivityTimer();
 
           es.addEventListener('delta', (e) => {
+            resetInactivityTimer();
             const { content } = JSON.parse(e.data);
             accumulated += content;
             updateActiveSession(s => ({
@@ -502,6 +511,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           });
 
           es.addEventListener('done', (e) => {
+            if (inactivityTimer) clearTimeout(inactivityTimer);
             const data = JSON.parse(e.data);
             es.close();
             activeEventSourceRef.current = null;
@@ -529,10 +539,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             resolve();
           });
 
-          es.addEventListener('error', (e) => {
+          es.addEventListener('error', () => {
+            if (inactivityTimer) clearTimeout(inactivityTimer);
             es.close();
             activeEventSourceRef.current = null;
-            // Try to reconnect if we haven't exceeded max attempts
             if (reconnectAttempts < MAX_RECONNECTS) {
               reconnectAttempts++;
               setTimeout(connectSSE, 1000 * reconnectAttempts);
@@ -541,18 +551,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               reject(new Error('Stream error'));
             }
           });
-
-          es.onerror = () => {
-            es.close();
-            activeEventSourceRef.current = null;
-            if (reconnectAttempts < MAX_RECONNECTS) {
-              reconnectAttempts++;
-              setTimeout(connectSSE, 1000 * reconnectAttempts);
-            } else {
-              activeChatIdRef.current = null;
-              reject(new Error('SSE connection error'));
-            }
-          };
         };
 
         connectSSE();

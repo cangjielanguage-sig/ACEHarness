@@ -41,17 +41,11 @@ export class KiroCliEngineWrapper extends EventEmitter implements Engine {
   }
 
   async isAvailable(): Promise<boolean> {
-    console.log('[KiroCliWrapper] isAvailable() called');
     try {
       const { execSync } = require('child_process');
-      // Use 'command -v' instead of 'which' for better compatibility
-      console.log('[KiroCliWrapper] Trying command -v kiro-cli...');
       execSync('command -v kiro-cli', { stdio: 'ignore', shell: '/bin/bash' });
-      console.log('[KiroCliWrapper] command -v succeeded');
       return true;
     } catch (e) {
-      console.log('[KiroCliWrapper] command -v failed:', (e as Error).message);
-      // Fallback: check common installation paths
       const fs = require('fs');
       const commonPaths = [
         '/root/.local/bin/kiro-cli',
@@ -59,27 +53,21 @@ export class KiroCliEngineWrapper extends EventEmitter implements Engine {
         '/usr/bin/kiro-cli',
       ];
       for (const p of commonPaths) {
-        console.log(`[KiroCliWrapper] Checking path: ${p}`);
         if (fs.existsSync(p)) {
-          console.log(`[KiroCliWrapper] Found at: ${p}`);
           return true;
         }
       }
-      console.log('[KiroCliWrapper] Not found in any path');
       return false;
     }
   }
 
   async execute(options: EngineOptions): Promise<EngineResult> {
     try {
-      console.log(`[KiroCliWrapper] execute() called for step: ${options.step}, agent: ${options.agent}`);
       // Create engine instance if needed, or recreate if agent changed
       if (!this.engine || this.currentAgent !== options.agent) {
         if (this.engine) {
-          console.log(`[KiroCliWrapper] Agent changed from ${this.currentAgent} to ${options.agent}, recreating engine`);
           this.engine.stop();
         }
-        console.log(`[KiroCliWrapper] Creating new KiroCliEngine instance, cwd: ${options.workingDirectory}, agent: ${options.agent}, model: ${options.model}`);
         this.currentAgent = options.agent;
         this.engine = new KiroCliEngine({
           workingDirectory: options.workingDirectory,
@@ -89,16 +77,12 @@ export class KiroCliEngineWrapper extends EventEmitter implements Engine {
         this.setupEngineEvents();
 
         // Start the engine
-        console.log('[KiroCliWrapper] Starting engine...');
         await this.engine.start();
-        console.log('[KiroCliWrapper] Engine started successfully');
       }
 
       // Create or reuse session
       if (!this.currentSessionId || !options.sessionId) {
-        console.log('[KiroCliWrapper] Creating new session...');
         this.currentSessionId = await this.engine.createSession();
-        console.log(`[KiroCliWrapper] Session created: ${this.currentSessionId}`);
       }
 
       // Build full prompt with system prompt
@@ -118,7 +102,6 @@ export class KiroCliEngineWrapper extends EventEmitter implements Engine {
       this.engine.on('agent-message', textHandler);
 
       // Send prompt with retry for throttling
-      console.log(`[KiroCliWrapper] Sending prompt (${fullPrompt.length} chars)...`);
       let stopReason: string | undefined;
       const maxRetries = 3;
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -130,7 +113,6 @@ export class KiroCliEngineWrapper extends EventEmitter implements Engine {
           const isThrottled = msg.includes('throttled') || msg.includes('rate') || msg.includes('Retry');
           if (isThrottled && attempt < maxRetries) {
             const delay = attempt * 30;
-            console.log(`[KiroCliWrapper] 限流，${delay}s 后重试 (${attempt}/${maxRetries})...`);
             this.emit('stream', { type: 'log', content: `⚠️ 服务限流，${delay}s 后重试...` });
             // Recreate engine for fresh connection
             this.engine.stop();
@@ -149,7 +131,6 @@ export class KiroCliEngineWrapper extends EventEmitter implements Engine {
           throw promptError;
         }
       }
-      console.log(`[KiroCliWrapper] Prompt completed, stopReason: ${stopReason}, output chunks: ${outputChunks.length}`);
 
       this.engine.off('agent-message', textHandler);
 
