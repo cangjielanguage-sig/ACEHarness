@@ -4,15 +4,17 @@
  */
 
 import { EventEmitter } from 'events';
-import { readFile, readdir, stat } from 'fs/promises';
+import { randomUUID } from 'crypto';
+import { readFile, readdir, stat, mkdir, cp, rm } from 'fs/promises';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 import { parse } from 'yaml';
 import { processManager } from './process-manager';
 import type { ClaudeJsonResult } from './process-manager';
 import { createRun, updateRun } from './run-store';
 import {
   saveRunState, saveProcessOutput, saveOutputToWorkspace, saveStreamContent,
-  loadRunState, loadStepOutputs, type PersistedRunState, type PersistedProcessInfo,
+  loadRunState, loadStepOutputs, type PersistedRunState, type PersistedProcessInfo, type PersistedStepLog,
 } from './run-state-persistence';
 import type {
   StateMachineWorkflowConfig, StateMachineState, StateTransition,
@@ -92,6 +94,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private stateContexts: Map<string, string> = new Map();
   private workspaceSkillsCache: string = '';
   private workspaceSkillsCacheProjectRoot: string = '';
+  private workspaceSkillNames: Set<string> = new Set();
+  /** Skills copied to workspace that need cleanup on finish */
+  private copiedSkills: { dir: string; indexCopied: boolean } | null = null;
   private currentStep: string | null = null;
   private completedSteps: string[] = [];
   private currentProcesses: PersistedProcessInfo[] = [];
@@ -108,6 +113,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     round: number;
     timestamp: string;
   }[] = [];
+  private stepLogs: PersistedStepLog[] = [];
   /** Current engine instance (Kiro CLI, etc.) */
   private currentEngine: Engine | null = null;
   /** Current engine type */
@@ -152,32 +158,182 @@ export class StateMachineWorkflowManager extends EventEmitter {
    * Load and cache workspace skills from .claude/skills/
    */
   private async loadWorkspaceSkills(projectRoot: string): Promise<string> {
-    // Return cached result if same project root
     if (this.workspaceSkillsCache && this.workspaceSkillsCacheProjectRoot === projectRoot) {
       return this.workspaceSkillsCache;
     }
 
-    const absRoot = resolve(process.cwd(), projectRoot);
-    const skillsDir = resolve(absRoot, '.claude', 'skills');
+    // Try project-level first, then server-level skills directory
+    const candidates = [
+      resolve(process.cwd(), projectRoot, '.claude', 'skills'),
+      resolve(process.cwd(), 'skills', '.claude', 'skills'),
+    ];
 
-    try {
-      const skillIndex = resolve(skillsDir, 'SKILL.md');
-      const indexContent = await readFile(skillIndex, 'utf-8');
+    for (const skillsDir of candidates) {
+      try {
+        const skillIndex = resolve(skillsDir, 'SKILL.md');
+        const indexContent = await readFile(skillIndex, 'utf-8');
 
-      // Only include the index summary, not detailed sub-skill contents
-      const result = indexContent.trim();
+        this.workspaceSkillNames.clear();
+        try {
+          const entries = await readdir(skillsDir);
+          for (const entry of entries) {
+            const entryPath = resolve(skillsDir, entry);
+            const entryStat = await stat(entryPath).catch(() => null);
+            if (entryStat?.isDirectory()) {
+              this.workspaceSkillNames.add(entry);
+            }
+          }
+        } catch { /* ignore */ }
 
-      // Cache the result
-      this.workspaceSkillsCache = result;
-      this.workspaceSkillsCacheProjectRoot = projectRoot;
-
-      return result;
-    } catch {
-      // No skills directory or index — that's fine
-      this.workspaceSkillsCache = '';
-      this.workspaceSkillsCacheProjectRoot = projectRoot;
-      return '';
+        const result = indexContent.trim();
+        this.workspaceSkillsCache = result;
+        this.workspaceSkillsCacheProjectRoot = projectRoot;
+        return result;
+      } catch { /* try next candidate */ }
     }
+
+    this.workspaceSkillsCache = '';
+    this.workspaceSkillsCacheProjectRoot = projectRoot;
+    this.workspaceSkillNames.clear();
+    return '';
+  }
+
+  /**
+   * Load a single skill's content from project or system skills directory
+   */
+  private async loadSkillContent(skillName: string, projectRoot: string): Promise<string | null> {
+    const projectSkillPath = resolve(process.cwd(), projectRoot, '.claude', 'skills', skillName, 'SKILL.md');
+    try {
+      return await readFile(projectSkillPath, 'utf-8');
+    } catch { /* not found in project */ }
+
+    const systemSkillPath = resolve(process.cwd(), 'skills', '.claude', 'skills', skillName, 'SKILL.md');
+    try {
+      return await readFile(systemSkillPath, 'utf-8');
+    } catch { /* not found in system */ }
+
+    return null;
+  }
+
+  /**
+   * Load step-level and workflow-level skills, returning formatted prompt content
+   */
+  private async loadAdditionalSkills(skillNames: string[], projectRoot: string): Promise<string> {
+    const unique = [...new Set(skillNames)].filter(n => !this.workspaceSkillNames.has(n));
+    if (unique.length === 0) return '';
+
+    const loaded: { name: string; content: string }[] = [];
+    for (const name of unique) {
+      const content = await this.loadSkillContent(name, projectRoot);
+      if (content) loaded.push({ name, content });
+    }
+    if (loaded.length === 0) return '';
+
+    let result = `### 步骤/工作流指定 Skills\n\n`;
+    for (const skill of loaded) {
+      result += `#### ${skill.name}\n\n${skill.content}\n\n---\n\n`;
+    }
+    return result;
+  }
+
+  /**
+   * Copy skills from server skills/ directory to workspace .claude/skills/
+   * so that AI agents can discover and read them naturally.
+   */
+  private async syncSkillsToWorkspace(config: StateMachineWorkflowConfig): Promise<void> {
+    const projectRoot = config.context?.projectRoot;
+    if (!projectRoot) return;
+
+    const serverSkillsDir = resolve(process.cwd(), 'skills', '.claude', 'skills');
+    const workspaceSkillsDir = resolve(process.cwd(), projectRoot, '.claude', 'skills');
+
+    if (!existsSync(serverSkillsDir)) return;
+
+    // Collect all skill names needed: context.skills + all step.skills
+    const needed = new Set<string>();
+    if (config.context?.skills) config.context.skills.forEach(s => needed.add(s));
+    for (const state of config.workflow.states) {
+      for (const step of state.steps) {
+        if (step.skills) step.skills.forEach(s => needed.add(s));
+      }
+    }
+    if (needed.size === 0) return;
+
+    // Track what we copy for cleanup
+    const copiedNames: string[] = [];
+    const dirExistedBefore = existsSync(workspaceSkillsDir);
+
+    // Ensure target dir exists
+    await mkdir(workspaceSkillsDir, { recursive: true });
+
+    // Copy SKILL.md index if not exists
+    const serverIndex = resolve(serverSkillsDir, 'SKILL.md');
+    const targetIndex = resolve(workspaceSkillsDir, 'SKILL.md');
+    let indexCopied = false;
+    if (existsSync(serverIndex) && !existsSync(targetIndex)) {
+      try { await cp(serverIndex, targetIndex); indexCopied = true; } catch { /* ignore */ }
+    }
+
+    // Copy each needed skill directory
+    for (const skillName of needed) {
+      const src = resolve(serverSkillsDir, skillName);
+      const dst = resolve(workspaceSkillsDir, skillName);
+      if (!existsSync(src)) continue;
+      try {
+        await cp(src, dst, { recursive: true, force: true });
+        copiedNames.push(skillName);
+        console.log(`[SM-Skills] 已复制 skill "${skillName}" → ${dst}`);
+      } catch (e) {
+        console.warn(`[SM-Skills] 复制 skill "${skillName}" 失败:`, e);
+      }
+    }
+
+    if (copiedNames.length > 0 || indexCopied) {
+      this.copiedSkills = { dir: workspaceSkillsDir, indexCopied };
+      // Store copied names on the object for cleanup
+      (this.copiedSkills as any).names = copiedNames;
+      (this.copiedSkills as any).dirExistedBefore = dirExistedBefore;
+    }
+  }
+
+  /**
+   * Remove skills that were copied to workspace during syncSkillsToWorkspace
+   */
+  private async cleanupWorkspaceSkills(): Promise<void> {
+    if (!this.copiedSkills) return;
+    const { dir, indexCopied } = this.copiedSkills;
+    const names: string[] = (this.copiedSkills as any).names || [];
+    const dirExistedBefore: boolean = (this.copiedSkills as any).dirExistedBefore ?? true;
+
+    for (const name of names) {
+      const dst = resolve(dir, name);
+      try {
+        await rm(dst, { recursive: true, force: true });
+        console.log(`[SM-Skills] 已清理 skill "${name}"`);
+      } catch { /* ignore */ }
+    }
+
+    if (indexCopied) {
+      try { await rm(resolve(dir, 'SKILL.md'), { force: true }); } catch { /* ignore */ }
+    }
+
+    // If we created the .claude/skills/ dir and it's now empty, remove it
+    if (!dirExistedBefore) {
+      try {
+        const remaining = await readdir(dir);
+        if (remaining.length === 0) {
+          await rm(dir, { recursive: true, force: true });
+          // Also try removing .claude/ if empty
+          const claudeDir = resolve(dir, '..');
+          const claudeRemaining = await readdir(claudeDir);
+          if (claudeRemaining.length === 0) {
+            await rm(claudeDir, { recursive: true, force: true });
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    this.copiedSkills = null;
   }
 
   getStatus() {
@@ -199,6 +355,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       globalContext: this.globalContext,
       phaseContexts: Object.fromEntries(this.stateContexts),
       supervisorFlow: this.supervisorFlow,
+      agentFlow: this.agentFlow,
+      stepLogs: this.stepLogs,
     };
   }
 
@@ -216,6 +374,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.completedSteps = [];
       this.supervisorFlow = [];
       this.agentFlow = [];
+      this.stepLogs = [];
       this.runStartTime = new Date().toISOString();
       this.currentConfigFile = configFile;
       // Load config
@@ -240,6 +399,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       // Initialize engine based on .engine.json
       await this.initializeEngine();
+
+      // Sync skills to workspace before execution
+      await this.syncSkillsToWorkspace(workflowConfig);
 
       // Create run record
       const totalSteps = workflowConfig.workflow.states.reduce(
@@ -323,6 +485,18 @@ export class StateMachineWorkflowManager extends EventEmitter {
       endTime: this.runEndTime,
       currentConfigFile: this.currentConfigFile
     });
+
+    // Kill any running child processes immediately
+    const currentProcId = this.currentProcesses?.[0]?.id;
+    if (currentProcId) {
+      const proc = processManager.getProcessRaw(currentProcId);
+      if (proc?.childProcess) {
+        try { proc.childProcess.kill('SIGTERM'); } catch { /* already dead */ }
+        proc.status = 'killed';
+        proc.endTime = new Date();
+      }
+    }
+
     await this.finalizeRun('stopped');
   }
 
@@ -336,6 +510,23 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.pendingForceInstruction = instruction;
     }
     this.emit('force-transition', { targetState, from: this.currentState, instruction });
+
+    // Kill the running process so the main loop can pick up the forced transition immediately
+    const currentProcId = this.currentProcesses?.[0]?.id;
+    const currentStepId = this.currentProcesses?.[0]?.stepId;
+    if (currentProcId || currentStepId) {
+      const allProcs = processManager.getAllProcesses();
+      const running = allProcs.find(
+        (p: any) => (p.status === 'running' || p.status === 'queued') && (
+          (currentStepId && p.stepId === currentStepId) ||
+          (currentProcId && p.id === currentProcId)
+        )
+      );
+      if (running) {
+        console.log(`[StateMachine] forceTransition: killing process ${running.id}`);
+        processManager.killProcess(running.id);
+      }
+    }
   }
 
   setContext(scope: 'global' | 'phase', context: string, stateName?: string): void {
@@ -372,6 +563,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
     if (!this.currentRunId) return;
     this.runEndTime = new Date().toISOString();
 
+    // Cleanup copied skills from workspace
+    await this.cleanupWorkspaceSkills();
+
     try {
       const completedSteps = this.agents.reduce((sum, a) => sum + a.completedTasks, 0);
       await updateRun(this.currentRunId, {
@@ -395,7 +589,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       await saveRunState({
         runId: this.currentRunId,
         configFile: this.currentConfigFile,
-        status: finalStatus || (this.status === 'idle' ? 'running' : this.status) as any,
+        status: finalStatus || (this.shouldStop ? 'stopped' : this.status === 'idle' ? 'running' : this.status) as any,
         statusReason: this.statusReason || undefined,
         startTime: this.runStartTime || new Date().toISOString(),
         endTime: finalStatus ? this.runEndTime : null,
@@ -403,7 +597,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         currentStep: this.currentStep,
         completedSteps: this.completedSteps,
         failedSteps: [],
-        stepLogs: [],
+        stepLogs: [...this.stepLogs],
         agents: this.agents.map(a => ({
           name: a.name,
           team: a.team,
@@ -493,7 +687,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     console.log(`[StateMachineWorkflowManager] 使用 ${this.engineType} 引擎执行: ${step}`);
 
     // Register process in processManager so it's visible to the frontend
-    const proc = processManager.registerExternalProcess(processId, agent, step, options.runId);
+    const proc = processManager.registerExternalProcess(processId, agent, step, options.runId, options.stepId);
 
     const streamHandler = (event: EngineStreamEvent) => {
       // Accumulate stream content on the registered process
@@ -625,6 +819,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       // Check if final state
       if (stateConfig.isFinal) {
+        // Execute final state steps (e.g. regression tests) before completing
+        if (stateConfig.steps.length > 0) {
+          await this.executeState(stateConfig, config, requirements);
+        }
         this.emit('state-change', {
           state: this.currentState,
           message: `到达终止状态: ${this.currentState}`,
@@ -818,26 +1016,34 @@ export class StateMachineWorkflowManager extends EventEmitter {
         await new Promise(r => setTimeout(r, 30000));
       }
 
-      // ========== Supervisor-Lite: 判断是否启用 Plan 循环 ==========
-      let output: string;
-      if (step.enablePlanLoop) {
-        output = await this.executeStepWithInfoGathering(step, state, config, requirements);
-      } else {
-        output = await this.executeStep(step, state, config, requirements);
-      }
-      stepOutputs.push(output);
-
-      // Parse issues from output
-      const stepIssues = this.parseIssuesFromOutput(output, step, state.name);
-      issues.push(...stepIssues);
-
-      // Update verdict based on step role
-      if (step.role === 'judge') {
-        const stepVerdict = this.parseVerdict(output);
-        if (stepVerdict === 'fail') verdict = 'fail';
-        else if (stepVerdict === 'conditional_pass' && verdict === 'pass') {
-          verdict = 'conditional_pass';
+      try {
+        // ========== Supervisor-Lite: 判断是否启用 Plan 循环 ==========
+        let output: string;
+        if (step.enablePlanLoop) {
+          output = await this.executeStepWithInfoGathering(step, state, config, requirements);
+        } else {
+          output = await this.executeStep(step, state, config, requirements);
         }
+        stepOutputs.push(output);
+
+        // Parse issues from output
+        const stepIssues = this.parseIssuesFromOutput(output, step, state.name);
+        issues.push(...stepIssues);
+
+        // Update verdict based on step role
+        if (step.role === 'judge') {
+          const stepVerdict = this.parseVerdict(output);
+          if (stepVerdict === 'fail') verdict = 'fail';
+          else if (stepVerdict === 'conditional_pass' && verdict === 'pass') {
+            verdict = 'conditional_pass';
+          }
+        }
+      } catch (stepError: any) {
+        const errorMsg = stepError.message || String(stepError);
+        console.error(`[StateMachineWorkflowManager] Step "${step.name}" in state "${state.name}" failed: ${errorMsg}`);
+        stepOutputs.push(`ERROR: ${errorMsg}`);
+        verdict = 'fail';
+        // Continue to next step instead of aborting the entire state
       }
     }
 
@@ -865,9 +1071,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
       throw new Error(`找不到 agent: ${step.agent}`);
     }
 
+    const stepId = randomUUID();
+    const stepKey = `${state.name}-${step.name}`;
+
     agent.status = 'running';
     agent.currentTask = step.name;
-    this.currentStep = `${state.name}-${step.name}`;
+    this.currentStep = stepKey;
     this.emit('agents', { agents: this.agents });
     
     this.agentFlow.push({
@@ -885,6 +1094,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     await this.persistState();
 
     this.emit('step-start', {
+      id: stepId,
       state: state.name,
       step: step.name,
       agent: step.agent,
@@ -911,22 +1121,40 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const context = await this.buildStepContext(step, state, config, requirements, extraContext);
 
       // Execute step (reuse existing process manager logic)
-      const output = await this.runAgentStep(step, context, config);
+      const stepResult = await this.runAgentStep(step, context, config, stepId);
+      const output = stepResult.output;
 
       agent.status = 'completed';
       agent.completedTasks++;
       agent.lastOutput = output;
       this.currentStep = null;
-      this.completedSteps.push(`${state.name}-${step.name}`);
+      this.completedSteps.push(stepKey);
       this.currentProcesses = [];
+
+      // Record step log for persistence
+      this.stepLogs.push({
+        id: stepId,
+        stepName: stepKey,
+        agent: step.agent,
+        status: 'completed',
+        output,
+        error: '',
+        costUsd: stepResult.costUsd,
+        durationMs: stepResult.durationMs,
+        timestamp: new Date().toISOString(),
+      });
+
       this.emit('agents', { agents: this.agents });
       await this.persistState();
 
       this.emit('step-complete', {
+        id: stepId,
         state: state.name,
         step: step.name,
         agent: step.agent,
         output,
+        costUsd: stepResult.costUsd,
+        durationMs: stepResult.durationMs,
       });
 
       // 记录步骤完成的流转线
@@ -951,15 +1179,18 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       // Save output to file system
       if (this.currentRunId) {
-        const stepFileName = `${state.name}-${step.name}`;
+        const stepFileName = stepKey;
         await saveProcessOutput(this.currentRunId, stepFileName, output).catch(() => {});
 
-        // Also save to workspace if projectRoot is configured
+        // Save conclusion to workspace with timestamp to avoid overwriting
+        // the detailed report the agent wrote, and to handle re-execution on iteration/state-loop
         if (config.context?.projectRoot) {
+          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const conclusionFileName = `${ts}-${stepKey}-结论`;
           await saveOutputToWorkspace(
             config.context.projectRoot,
             this.currentRunId,
-            stepFileName,
+            conclusionFileName,
             output
           ).catch(() => {});
         }
@@ -970,14 +1201,27 @@ export class StateMachineWorkflowManager extends EventEmitter {
       agent.status = 'failed';
       this.currentStep = null;
       this.currentProcesses = [];
+
+      // Record failed step log
+      const errorMsg = error.message || String(error);
+      this.stepLogs.push({
+        id: stepId,
+        stepName: stepKey,
+        agent: step.agent,
+        status: 'failed',
+        output: '',
+        error: errorMsg,
+        costUsd: 0,
+        durationMs: 0,
+        timestamp: new Date().toISOString(),
+      });
+
       this.emit('agents', { agents: this.agents });
       await this.persistState();
 
       // Save error output
       if (this.currentRunId) {
-        const stepFileName = `${state.name}-${step.name}`;
-        const errorMsg = error.message || String(error);
-        await saveProcessOutput(this.currentRunId, stepFileName, `ERROR: ${errorMsg}`).catch(() => {});
+        await saveProcessOutput(this.currentRunId, stepKey, `ERROR: ${errorMsg}`).catch(() => {});
       }
 
       throw error;
@@ -1024,14 +1268,34 @@ export class StateMachineWorkflowManager extends EventEmitter {
     // Add document output path
     if (this.currentRunId && config.context?.projectRoot) {
       const outputPath = `${config.context.projectRoot}/.ace-outputs/${this.currentRunId}/`;
-      parts.push(`\n# 文档输出要求\n请将你产出的所有文档、报告、分析结果等写入以下目录：\n\`${outputPath}\`\n\n文件命名建议使用步骤名或有意义的名称，格式为 Markdown (.md)。这样其他 Agent 和人类审阅者都能方便地查看你的产出。`);
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const safeName = `${state.name}-${step.name}`.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+      const fullPath = `${outputPath}${ts}-${safeName}.md`;
+      parts.push(`\n# 文档输出要求\n请将你产出的所有文档、报告、分析结果等写入以下目录：\n\`${outputPath}\`\n\n本步骤的文档路径: \`${fullPath}\`\n\n**重要**: 文件名必须以时间戳开头（格式 \`YYYY-MM-DDTHH-MM-SS-\`），这样便于按时间排序。如果你需要写多个文件，都放在上述目录下，每个文件名都以时间戳开头。`);
     }
 
-    // Add workspace skills (index summary only)
+    // Add structured JSON output requirement for attacker/judge roles
+    if (step.role === 'attacker' || step.role === 'judge') {
+      parts.push(`\n# 结构化输出要求\n在你的回复最末尾，请务必输出以下 JSON 块（用 \`\`\`json 包裹），用于自动化流程判断：\n\n\`\`\`json\n{\n  "verdict": "pass | conditional_pass | fail",\n  "remaining_issues": 0,\n  "summary": "一句话总结"\n}\n\`\`\`\n\n字段说明：\n- \`verdict\`: \`"pass"\` 表示无问题可通过，\`"conditional_pass"\` 表示有条件通过（存在需修复的问题但方向正确），\`"fail"\` 表示存在严重问题需要重做\n- \`remaining_issues\`: 剩余未解决的问题数量（整数）\n- \`summary\`: 一句话总结你的评估结论`);
+    }
+
+    // Add workspace skills (index summary + absolute path for AI to read details)
     if (config.context?.projectRoot) {
       const skills = await this.loadWorkspaceSkills(config.context.projectRoot);
       if (skills) {
-        parts.push(`\n# 可用 Skills（来自项目 .claude/skills/）\n\n${skills}`);
+        const skillsAbsPath = resolve(process.cwd(), 'skills', '.claude', 'skills');
+        parts.push(`\n# 可用 Skills\n\nSkills 目录绝对路径: \`${skillsAbsPath}/\`\n\n如需使用某个 Skill，请先用 Read 工具读取对应的 SKILL.md 文件获取详细说明。例如：\`${skillsAbsPath}/build-cangjie/SKILL.md\`\n\n${skills}`);
+      }
+    }
+
+    // Add workflow-level and step-level skills
+    const allSkillNames: string[] = [];
+    if (config.context?.skills) allSkillNames.push(...config.context.skills);
+    if (step.skills) allSkillNames.push(...step.skills);
+    if (allSkillNames.length > 0 && config.context?.projectRoot) {
+      const additionalSkills = await this.loadAdditionalSkills(allSkillNames, config.context.projectRoot);
+      if (additionalSkills) {
+        parts.push(`\n# 必须使用的 Skills\n\n⚠️ **重要提醒：以下 Skills 是本步骤/项目的核心工具，你必须严格遵循以下原则：**\n\n1. **优先阅读 Skills**：在执行任何任务前，请务必仔细阅读下方所有 Skills 的说明文档\n2. **使用 Skills 中的命令**：直接使用 Skills 中提供的命令格式和参数，**严禁**自行猜测命令或随意修改参数\n3. **Skills 包含最佳实践**：每个 Skill 都经过验证，代表了该领域的最佳实践\n4. **遇到问题先查 Skills**：如果遇到构建、测试、部署等问题，请首先检查是否有对应的 Skill 可用\n\n${additionalSkills}`);
       }
     }
 
@@ -1217,8 +1481,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private async runAgentStep(
     step: WorkflowStep,
     context: string,
-    config: StateMachineWorkflowConfig
-  ): Promise<string> {
+    config: StateMachineWorkflowConfig,
+    stepId?: string
+  ): Promise<{ output: string; costUsd: number; durationMs: number }> {
     // Find agent config for system prompt and model
     const roleConfig = this.agentConfigs.find(r => r.name === step.agent)
       || config.roles?.find(r => r.name === step.agent);
@@ -1229,18 +1494,24 @@ export class StateMachineWorkflowManager extends EventEmitter {
       ? resolve(process.cwd(), config.context.projectRoot)
       : process.cwd();
 
-    let currentProcessId = `sm-${step.agent}-${Date.now()}`;
+    let currentProcessId = stepId || randomUUID();
     let currentPrompt = context;
     let currentSessionId: string | undefined;
     let accumulatedOutput = '';
     let accumulatedStream = '';
+    let accumulatedCost = 0;
+    let accumulatedDuration = 0;
+
+    // Use state-prefixed step name so frontend stream polling matches persisted stream files
+    const streamStepName = this.currentState ? `${this.currentState}-${step.name}` : step.name;
 
     // Track process
     this.currentProcesses = [{
       pid: Date.now(),
       id: currentProcessId,
       agent: step.agent,
-      step: step.name,
+      step: streamStepName,
+      stepId,
       startTime: new Date().toISOString(),
     }];
     await this.persistState();
@@ -1258,7 +1529,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
           const fullStream = accumulatedStream
             ? accumulatedStream + '\n\n<!-- chunk-boundary -->\n\n' + content
             : content;
-          const streamStepName = this.currentState ? `${this.currentState}-${step.name}` : step.name;
           saveStreamContent(this.currentRunId, streamStepName, fullStream).catch(() => {});
         }
       }
@@ -1268,6 +1538,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
     // Feedback loop: run agent, handle interrupts and pending feedback
     try {
     while (true) {
+      // Check if workflow was stopped
+      if (this.shouldStop) {
+        throw new Error('工作流已停止');
+      }
       let result: ClaudeJsonResult;
       try {
         result = await this.executeWithEngine(
@@ -1281,42 +1555,64 @@ export class StateMachineWorkflowManager extends EventEmitter {
             workingDirectory,
             timeoutMs: (config.context?.timeoutMinutes || 60) * 60 * 1000,
             runId: this.currentRunId || undefined,
+            stepId,
             resumeSessionId: currentSessionId,
             appendSystemPrompt: !!currentSessionId,
           }
         );
       } catch (err) {
+        // If force transition killed the process, return partial output and let main loop handle it
+        if (this.pendingForceTransition) {
+          console.log(`[SM-ForceTransition] 进程被强制跳转终止，目标: ${this.pendingForceTransition}`);
+          const proc = processManager.getProcess(currentProcessId);
+          if (proc?.streamContent) {
+            accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
+          }
+          if (this.currentRunId) {
+            saveStreamContent(this.currentRunId, streamStepName, accumulatedStream).catch(() => {});
+          }
+          return { output: accumulatedOutput || '(强制跳转，步骤未完成)', costUsd: accumulatedCost, durationMs: accumulatedDuration };
+        }
         // If interrupted with feedback, resume with feedback
+        console.log(`[SM-Feedback] catch 块: interruptFlag=${this.interruptFlag}, feedbackCount=${this.liveFeedback.length}, err=${(err as Error).message?.substring(0, 100)}`);
         if (this.interruptFlag && this.liveFeedback.length > 0) {
+          const isFeedbackOnly = this.feedbackInterrupt;
           this.interruptFlag = false;
+          this.feedbackInterrupt = false;
           const proc = processManager.getProcess(currentProcessId);
           if (proc?.streamContent) {
             accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
           }
           const sessionId = proc?.sessionId;
-          if (!sessionId) throw err;
 
           const feedbackPrompt = this.liveFeedback.map((fb, i) => `${i + 1}. ${fb}`).join('\n');
           this.liveFeedback = [];
           const feedbackTimestamp = new Date().toISOString();
           accumulatedStream += `\n\n<!-- chunk-boundary -->\n\n<!-- human-feedback: ${feedbackTimestamp} -->\n${feedbackPrompt}`;
           if (this.currentRunId) {
-            const streamStepName2 = this.currentState ? `${this.currentState}-${step.name}` : step.name;
-            saveStreamContent(this.currentRunId, streamStepName2, accumulatedStream).catch(() => {});
+            saveStreamContent(this.currentRunId, streamStepName, accumulatedStream).catch(() => {});
           }
-          currentSessionId = sessionId;
-          currentPrompt = `## 人工实时反馈（紧急打断）\n用户紧急打断了当前执行，请立即处理以下反馈：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
-          currentProcessId = `sm-${step.agent}-interrupt-${Date.now()}`;
+          // If we have a session, resume it; otherwise start fresh with feedback prepended
+          currentSessionId = sessionId || undefined;
+          currentPrompt = isFeedbackOnly
+            ? `## 人工实时反馈\n用户在你执行过程中提供了补充反馈，请参考以下内容继续完成任务：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`
+            : `## 人工实时反馈（紧急打断）\n用户紧急打断了当前执行，请立即处理以下反馈：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
+          if (!sessionId) {
+            // No session yet — prepend original context so the agent has full info
+            currentPrompt = context + '\n\n' + currentPrompt;
+          }
+          currentProcessId = stepId || currentProcessId;
           this.currentProcesses = [{
             pid: Date.now(),
             id: currentProcessId,
             agent: step.agent,
-            step: step.name,
+            step: streamStepName,
+            stepId,
             startTime: new Date().toISOString(),
           }];
           this.emit('step-start', {
             state: this.currentState,
-            step: step.name,
+            step: streamStepName,
             agent: step.agent,
           });
           this.emit('feedback-injected', {
@@ -1334,11 +1630,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
         accumulatedStream += (accumulatedStream ? '\n\n<!-- chunk-boundary -->\n\n' : '') + proc.streamContent;
       }
       if (this.currentRunId) {
-        const streamStepName3 = this.currentState ? `${this.currentState}-${step.name}` : step.name;
-        saveStreamContent(this.currentRunId, streamStepName3, accumulatedStream).catch(() => {});
+        saveStreamContent(this.currentRunId, streamStepName, accumulatedStream).catch(() => {});
       }
 
       accumulatedOutput += (accumulatedOutput ? '\n\n---\n\n' : '') + (result.result || '');
+      accumulatedCost += result.cost_usd || 0;
+      accumulatedDuration += result.duration_ms || 0;
 
       // Check for pending live feedback after completion
       if (this.liveFeedback.length > 0 && !this.shouldStop) {
@@ -1350,17 +1647,17 @@ export class StateMachineWorkflowManager extends EventEmitter {
         const feedbackTimestamp = new Date().toISOString();
         accumulatedStream += `\n\n<!-- chunk-boundary -->\n\n<!-- human-feedback: ${feedbackTimestamp} -->\n${feedbackPrompt}`;
         if (this.currentRunId) {
-          const streamStepName4 = this.currentState ? `${this.currentState}-${step.name}` : step.name;
-          saveStreamContent(this.currentRunId, streamStepName4, accumulatedStream).catch(() => {});
+          saveStreamContent(this.currentRunId, streamStepName, accumulatedStream).catch(() => {});
         }
         currentSessionId = sessionId;
         currentPrompt = `## 人工实时反馈\n以下是用户在你执行过程中提供的反馈意见，请基于这些反馈继续处理当前任务：\n\n${feedbackPrompt}\n\n请根据以上反馈继续完成任务。`;
-        currentProcessId = `sm-${step.agent}-feedback-${Date.now()}`;
+        currentProcessId = stepId || currentProcessId;
         this.currentProcesses = [{
           pid: Date.now(),
           id: currentProcessId,
           agent: step.agent,
-          step: step.name,
+          step: streamStepName,
+          stepId,
           startTime: new Date().toISOString(),
         }];
         this.emit('feedback-injected', {
@@ -1375,7 +1672,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     } finally {
       processManager.off('stream', streamFlushHandler);
     }
-    return accumulatedOutput;
+    return { output: accumulatedOutput, costUsd: accumulatedCost, durationMs: accumulatedDuration };
   }
 
   private async evaluateTransitions(
@@ -1406,21 +1703,52 @@ export class StateMachineWorkflowManager extends EventEmitter {
       }
     }
 
-    // No matching transition - escalate to human
+    // conditional_pass without explicit rule → self-transition (continue iterating)
+    if (result.verdict === 'conditional_pass') {
+      this.emit('escalation', {
+        state: result.stateName,
+        reason: `有条件通过 (conditional_pass)，继续迭代当前状态`,
+        result,
+      });
+      return result.stateName;
+    }
+
+    // No matching transition - wait for human decision instead of crashing
     this.emit('escalation', {
       state: result.stateName,
-      reason: '没有匹配的状态转移规则',
+      reason: `没有匹配的状态转移规则 (verdict: ${result.verdict})，等待人工决策`,
       result,
     });
 
-    throw new Error('没有匹配的状态转移规则，需要人工介入');
+    // Enter human approval mode so user can force-transition
+    this.pendingApprovalInfo = {
+      suggestedNextState: transitions[0]?.to || result.stateName,
+      availableStates: config.workflow.states.map(s => s.name),
+      result,
+    };
+
+    this.emit('human-approval-required', {
+      currentState: result.stateName,
+      suggestedNextState: transitions[0]?.to || result.stateName,
+      result,
+      availableStates: config.workflow.states.map(s => s.name),
+      reason: `verdict "${result.verdict}" 没有匹配的转移规则`,
+    });
+
+    // Wait for human to force-transition
+    await this.waitForHumanApproval();
+
+    const humanSelectedState = this.pendingForceTransition || transitions[0]?.to || result.stateName;
+    this.pendingForceTransition = null;
+    this.pendingApprovalInfo = null;
+    return humanSelectedState;
   }
 
   private matchCondition(
     condition: TransitionCondition,
     result: StateExecutionResult
   ): boolean {
-    // Check verdict
+    // Check verdict match (strict — no fallback for conditional_pass)
     if (condition.verdict && result.verdict !== condition.verdict) {
       return false;
     }
@@ -1580,6 +1908,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.issueTracker = (runState.issueTracker || []) as Issue[];
     this.transitionCount = runState.transitionCount || 0;
     this.completedSteps = runState.completedSteps || [];
+    this.stepLogs = runState.stepLogs || [];
     this.runStartTime = runState.startTime || null;
     this.globalContext = runState.globalContext || '';
     this.stateContexts = new Map(Object.entries(runState.phaseContexts || {}));
@@ -1669,12 +1998,41 @@ export class StateMachineWorkflowManager extends EventEmitter {
     }
 
     // Continue execution from current state
-    await this.executeStateMachine(workflowConfig, runState.requirements);
+    try {
+      await this.executeStateMachine(workflowConfig, runState.requirements);
+
+      if (!this.shouldStop) {
+        this.status = 'completed';
+        this.emit('status', {
+          status: 'completed',
+          message: '工作流执行完成',
+          startTime: this.runStartTime,
+          endTime: this.runEndTime,
+          currentConfigFile: this.currentConfigFile
+        });
+        await this.finalizeRun('completed');
+      }
+    } catch (error: any) {
+      if (!this.shouldStop) {
+        this.status = 'failed';
+        this.statusReason = error.message || String(error);
+        this.emit('status', {
+          status: 'failed',
+          message: error.message,
+          startTime: this.runStartTime,
+          endTime: this.runEndTime,
+          currentConfigFile: this.currentConfigFile
+        });
+        await this.finalizeRun('failed');
+      }
+      throw error;
+    }
   }
 
   // ========== Live feedback functionality ==========
   private liveFeedback: string[] = [];
   private interruptFlag = false;
+  private feedbackInterrupt = false; // true = non-urgent feedback interrupt (softer prompt tone)
   private queuedApprovalAction: 'approve' | 'iterate' | null = null;
   private iterationFeedback: string = '';
   /** 最近一次预执行命令（preCommands）的输出，会注入到对应步骤上下文中 */
@@ -1707,6 +2065,25 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const entry = { message, timestamp: new Date().toISOString() };
     this.liveFeedback.push(message);
     this.emit('feedback-injected', entry);
+
+    // Interrupt the running process so feedback is delivered immediately via resume
+    if (this.status === 'running' && this.currentState) {
+      this.interruptFlag = true;
+      this.feedbackInterrupt = true; // non-urgent flag, different prompt tone
+
+      const currentProcId = this.currentProcesses?.[0]?.id;
+      const currentStepId = this.currentProcesses?.[0]?.stepId;
+      const allProcs = processManager.getAllProcesses();
+      const running = allProcs.find(
+        (p: any) => (p.status === 'running' || p.status === 'queued') && (
+          (currentStepId && p.stepId === currentStepId) ||
+          (currentProcId && p.id === currentProcId)
+        )
+      );
+      if (running) {
+        processManager.killProcess(running.id);
+      }
+    }
   }
 
   recallLiveFeedback(message: string): boolean {
@@ -1718,29 +2095,36 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   interruptWithFeedback(message: string): boolean {
-    if (this.status !== 'running' || !this.currentState) return false;
+    if (this.status !== 'running' || !this.currentState) {
+      console.log(`[SM-Feedback] interruptWithFeedback 失败: status=${this.status}, currentState=${this.currentState}`);
+      return false;
+    }
 
     // Queue the feedback
     this.liveFeedback.push(message);
     this.interruptFlag = true;
 
-    // Find and kill the running process — use tracked currentProcesses first,
-    // then fall back to scanning all processes by id prefix or step name
+    // Find and kill the running process by stepId (most reliable), then fall back to processId
     const currentProcId = this.currentProcesses?.[0]?.id;
+    const currentStepId = this.currentProcesses?.[0]?.stepId;
     const allProcs = processManager.getAllProcesses();
+    console.log(`[SM-Feedback] 查找进程: procId=${currentProcId}, stepId=${currentStepId}, allProcs=${allProcs.length}, running=${allProcs.filter((p: any) => p.status === 'running').length}`);
     const running = allProcs.find(
-      (p: any) => p.status === 'running' && (
-        (currentProcId && p.id === currentProcId) ||
-        p.id?.startsWith('sm-') && (p.step === this.currentStep || p.agent === this.currentProcesses?.[0]?.agent)
+      (p: any) => (p.status === 'running' || p.status === 'queued') && (
+        (currentStepId && p.stepId === currentStepId) ||
+        (currentProcId && p.id === currentProcId)
       )
     );
 
     if (running) {
-      processManager.killProcess(running.id);
-      this.emit('feedback-interrupted', { message, timestamp: new Date().toISOString() });
+      console.log(`[SM-Feedback] 找到进程 ${running.id} (status=${running.status}), 正在 kill...`);
+      const killed = processManager.killProcess(running.id);
+      console.log(`[SM-Feedback] kill 结果: ${killed}`);
+      this.emit('feedback-injected', { message, timestamp: new Date().toISOString() });
       return true;
     }
 
+    console.log(`[SM-Feedback] 未找到匹配的运行中进程`);
     return false;
   }
 
@@ -1750,13 +2134,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
       return null;
     }
 
-    // Find the running process — use tracked currentProcesses first
+    // Find the running process by stepId (most reliable), then fall back to processId
     const currentProcId = this.currentProcesses?.[0]?.id;
+    const currentStepId = this.currentProcesses?.[0]?.stepId;
     const allProcs = processManager.getAllProcesses();
     const running = allProcs.find(
-      (p: any) => p.status === 'running' && (
-        (currentProcId && p.id === currentProcId) ||
-        p.id?.startsWith('sm-') && (p.step === this.currentStep || p.agent === this.currentProcesses?.[0]?.agent)
+      (p: any) => (p.status === 'running' || p.status === 'queued') && (
+        (currentStepId && p.stepId === currentStepId) ||
+        (currentProcId && p.id === currentProcId)
       )
     );
 
@@ -1810,6 +2195,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.issueTracker = (runState.issueTracker || []) as Issue[];
     this.transitionCount = stateIndex + 1;
     this.completedSteps = runState.completedSteps || [];
+    this.stepLogs = runState.stepLogs || [];
     this.runStartTime = runState.startTime || null;
     this.globalContext = runState.globalContext || '';
     this.stateContexts = new Map(Object.entries(runState.phaseContexts || {}));
@@ -1838,7 +2224,35 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.initializeAgents(workflowConfig);
 
     // Continue execution from this state
-    await this.executeStateMachine(workflowConfig, runState.requirements);
+    try {
+      await this.executeStateMachine(workflowConfig, runState.requirements);
+
+      if (!this.shouldStop) {
+        this.status = 'completed';
+        this.emit('status', {
+          status: 'completed',
+          message: '工作流执行完成',
+          startTime: this.runStartTime,
+          endTime: this.runEndTime,
+          currentConfigFile: this.currentConfigFile
+        });
+        await this.finalizeRun('completed');
+      }
+    } catch (error: any) {
+      if (!this.shouldStop) {
+        this.status = 'failed';
+        this.statusReason = error.message || String(error);
+        this.emit('status', {
+          status: 'failed',
+          message: error.message,
+          startTime: this.runStartTime,
+          endTime: this.runEndTime,
+          currentConfigFile: this.currentConfigFile
+        });
+        await this.finalizeRun('failed');
+      }
+      throw error;
+    }
   }
 
   // ========== Supervisor-Lite Plan 循环实现 ==========

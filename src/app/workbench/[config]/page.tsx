@@ -17,6 +17,7 @@ import AgentConfigPanel from '@/components/AgentConfigPanel';
 import EditNodeModal from '@/components/EditNodeModal';
 import ProcessPanel from '@/components/ProcessPanel';
 import DocumentsPanel from '@/components/DocumentsPanel';
+import SchedulesPanel from '@/components/SchedulesPanel';
 import Markdown from '@/components/Markdown';
 import ResizablePanels from '@/components/ResizablePanels';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,8 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useToast } from '@/components/ui/toast';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
@@ -123,7 +126,7 @@ export default function WorkbenchPage() {
   const [currentPlanRound, setCurrentPlanRound] = useState<number>(0);
   const [planAnswer, setPlanAnswer] = useState('');
   const [sendingPlanAnswer, setSendingPlanAnswer] = useState(false);
-  const [liveStreamFeedback, setLiveStreamFeedback] = useState('');
+  const liveStreamFeedbackRef = useRef<HTMLInputElement>(null);
   const [sendingFeedback, setSendingFeedback] = useState(false);
   const [inlineFeedbacks, setInlineFeedbacks] = useState<{ message: string; timestamp: string; streamIndex: number }[]>([]);
   const [showContextEditor, setShowContextEditor] = useState(false);
@@ -153,7 +156,7 @@ export default function WorkbenchPage() {
     workflowStatus, runId, currentPhase, currentStep, agents, logs, completedSteps, failedSteps,
     showCheckpoint, checkpointMessage, checkpointIsIterative, activeTab, selectedAgent, selectedStep,
     projectRoot, requirements, timeoutMinutes, skills, showProcessPanel,
-    showEditNodeModal, editingNode, iterationStates, stepResults,
+    showEditNodeModal, editingNode, iterationStates, stepResults, stepIdMap,
     globalContext, phaseContexts,
   } = state;
 
@@ -206,18 +209,24 @@ export default function WorkbenchPage() {
         }
 
         {
-          const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
           if (status.stepLogs?.length) {
-            for (const log of status.stepLogs) {
-              restoredResults[log.stepName] = {
+            const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
+            const restoredIdMap: Record<string, string> = {};
+            for (const log of status.stepLogs as any[]) {
+              const key = log.id || log.stepName;
+              restoredResults[key] = {
                 output: log.output || '',
                 error: log.error || undefined,
                 costUsd: log.costUsd || undefined,
                 durationMs: log.durationMs || undefined,
               };
+              if (log.id) {
+                restoredIdMap[log.stepName] = log.id;
+              }
             }
+            dispatch({ type: 'MERGE_STEP_RESULTS', payload: restoredResults });
+            dispatch({ type: 'MERGE_STEP_ID_MAP', payload: restoredIdMap });
           }
-          dispatch({ type: 'SET_STEP_RESULTS', payload: restoredResults });
         }
         if (status.iterationStates) {
           Object.entries(status.iterationStates).forEach(([phase, iterState]) => {
@@ -366,17 +375,24 @@ export default function WorkbenchPage() {
 
       // Restore step results from stepLogs
       const restoredResults: Record<string, any> = {};
+      const restoredIdMap: Record<string, string> = {};
       if (detail.stepLogs) {
         for (const log of detail.stepLogs) {
-          restoredResults[log.stepName] = {
+          // Use step ID as key if available, fall back to stepName for legacy data
+          const key = log.id || log.stepName;
+          restoredResults[key] = {
             output: log.output || '',
             error: log.error || undefined,
             costUsd: log.costUsd || undefined,
             durationMs: log.durationMs || undefined,
           };
+          if (log.id) {
+            restoredIdMap[log.stepName] = log.id;
+          }
         }
       }
       dispatch({ type: 'SET_STEP_RESULTS', payload: restoredResults });
+      dispatch({ type: 'SET_STEP_ID_MAP', payload: restoredIdMap });
 
       // Restore iteration states
       if (detail.iterationStates) {
@@ -515,22 +531,26 @@ export default function WorkbenchPage() {
         break;
       case 'step':
         dispatch({ type: 'SET_CURRENT_STEP', payload: event.data.step });
+        if (event.data.id) {
+          dispatch({ type: 'MAP_STEP_ID', payload: { stepName: event.data.step, stepId: event.data.id } });
+        }
         addLog(event.data.agent, 'info', `开始执行: ${event.data.step}`);
         break;
-      case 'result':
+      case 'result': {
+        const resultKey = event.data.id || event.data.step;
         if (event.data.error) {
           addLog(event.data.agent, 'error', event.data.output);
           dispatch({ type: 'ADD_FAILED_STEP', payload: event.data.step });
           dispatch({ type: 'SET_CURRENT_STEP', payload: '' });
           dispatch({ type: 'SET_STEP_RESULT', payload: {
-            step: event.data.step,
+            step: resultKey,
             result: { output: '', error: event.data.errorDetail || event.data.output },
           }});
         } else {
           addLog(event.data.agent, 'success', `完成: ${event.data.step}`);
           dispatch({ type: 'ADD_COMPLETED_STEP', payload: event.data.step });
           dispatch({ type: 'SET_STEP_RESULT', payload: {
-            step: event.data.step,
+            step: resultKey,
             result: {
               output: event.data.fullOutput || event.data.output,
               costUsd: event.data.costUsd,
@@ -539,6 +559,7 @@ export default function WorkbenchPage() {
           }});
         }
         break;
+      }
       case 'agents':
         dispatch({ type: 'SET_AGENTS', payload: event.data.agents });
         if (!selectedAgent && event.data.agents.length > 0) {
@@ -1047,33 +1068,76 @@ export default function WorkbenchPage() {
     setLoadingOutput(false);
   };
 
-  const openMarkdownModal = async (stepName: string) => {
-    const result = stepResults[stepName];
+  const openMarkdownModal = async (resultKey: string) => {
+    const result = stepResults[resultKey];
     if (!result) return;
+    // For UUID keys, find the step name for file lookup
+    const fileName = Object.entries(stepIdMap).find(([, id]) => id === resultKey)?.[0] || resultKey;
     const rid = runId || selectedRun?.id;
     if (rid) {
       try {
         // Try stream file first (has chunk separators for visual separation)
-        const streamContent = await streamApi.getStreamContent(rid, stepName);
+        const streamContent = await streamApi.getStreamContent(rid, fileName);
         if (streamContent) {
           const chunks = streamContent.split(CHUNK_SEP).filter(Boolean);
           if (chunks.length > 1) {
-            setMarkdownModal({ title: stepName, chunks });
+            setMarkdownModal({ title: fileName, chunks });
             return;
           }
         }
         // Fall back to output file
-        const { content } = await runsApi.getStepOutput(rid, stepName);
-        setMarkdownModal({ title: stepName, chunks: [content] });
+        const { content } = await runsApi.getStepOutput(rid, fileName);
+        setMarkdownModal({ title: fileName, chunks: [content] });
         return;
       } catch { /* fall through to local */ }
     }
-    setMarkdownModal({ title: stepName, chunks: [result.output] });
+    setMarkdownModal({ title: fileName, chunks: [result.output] });
   };
 
   // Chunk separator used in persisted stream files
   const CHUNK_SEP = '\n\n<!-- chunk-boundary -->\n\n';
   const CHUNK_WITH_TIME_REGEX = /^<!-- timestamp: (.+?) -->\n/;
+
+  /** Merge consecutive 🤖 sub-task <details> blocks into a single grouped block */
+  const mergeSubtaskDetails = (text: string): string => {
+    // Match <details><summary>🤖 子任务结果...  </summary>...\n</details>
+    const pattern = /\n<details><summary>(🤖 子任务结果[^<]*)<\/summary>\n([\s\S]*?)\n<\/details>\n/g;
+    const blocks: { start: number; end: number; label: string; inner: string }[] = [];
+    let m;
+    while ((m = pattern.exec(text)) !== null) {
+      blocks.push({ start: m.index, end: m.index + m[0].length, label: m[1], inner: m[2].trim() });
+    }
+    if (blocks.length < 2) return text;
+
+    // Group consecutive blocks (adjacent or separated only by whitespace)
+    const groups: (typeof blocks)[] = [];
+    let cur = [blocks[0]];
+    for (let i = 1; i < blocks.length; i++) {
+      const gap = text.substring(cur[cur.length - 1].end, blocks[i].start).trim();
+      if (gap === '') {
+        cur.push(blocks[i]);
+      } else {
+        groups.push(cur);
+        cur = [blocks[i]];
+      }
+    }
+    groups.push(cur);
+
+    // Replace groups of 2+ with merged block (process in reverse to preserve indices)
+    let result = text;
+    for (let g = groups.length - 1; g >= 0; g--) {
+      const group = groups[g];
+      if (group.length < 2) continue;
+      const innerParts = group.map((b, i) => {
+        const shortLabel = b.label.replace(/🤖 子任务结果[：:]\s*/, '').replace(/\s*\(\d+ 行\)/, '');
+        const summary = shortLabel || `结果 ${i + 1}`;
+        return `<details><summary>${summary}</summary>\n${b.inner}\n</details>`;
+      });
+      const merged = `\n<details><summary>🤖 子任务结果（${group.length} 条记录）</summary>\n\n${innerParts.join('\n\n')}\n\n</details>\n`;
+      result = result.substring(0, group[0].start) + merged + result.substring(group[group.length - 1].end);
+    }
+    return result;
+  };
 
   // Parse chunk with optional timestamp
   const HUMAN_FEEDBACK_REGEX = /^<!-- human-feedback: (.+?) -->\n/;
@@ -1102,9 +1166,9 @@ export default function WorkbenchPage() {
   // --- Live stream polling ---
   const startLiveStream = () => {
     setShowLiveStream(true);
-    setLiveStream([]);
-    setLiveStreamFeedback('');
-    setInlineFeedbacks([]);
+    // Don't clear liveStream here — let the polling loop load persisted content
+    // so reopening the panel preserves history
+    if (liveStreamFeedbackRef.current) liveStreamFeedbackRef.current.value = '';
     liveStreamLenRef.current = 0;
     setLiveStreamVisibleCount(LIVE_STREAM_PAGE_SIZE);
     liveStreamUserScrolledUp.current = false;
@@ -1167,13 +1231,18 @@ export default function WorkbenchPage() {
   };
 
   const sendLiveFeedback = async (interrupt?: boolean) => {
-    if (!liveStreamFeedback.trim() || sendingFeedback) return;
+    const feedback = liveStreamFeedbackRef.current?.value || '';
+    if (!feedback.trim() || sendingFeedback) return;
     setSendingFeedback(true);
     try {
-      await workflowApi.injectFeedback(liveStreamFeedback.trim(), interrupt);
-      setLiveStreamFeedback('');
+      const res = await workflowApi.injectFeedback(feedback.trim(), interrupt);
+      if (liveStreamFeedbackRef.current) liveStreamFeedbackRef.current.value = '';
       if (interrupt) {
-        toast('success', '已打断当前执行，反馈将立即处理');
+        if (res.interrupted) {
+          toast('success', '已打断当前执行，反馈将立即处理');
+        } else {
+          toast('warning', '打断信号已发送，反馈已排队等待处理');
+        }
       }
     } catch (error: any) {
       toast('error', `发送反馈失败: ${error.message}`);
@@ -1255,66 +1324,46 @@ export default function WorkbenchPage() {
     ? agentConfigs.find((r: any) => r.name === selectedStep.agent)
     : null;
 
-  // Find the latest iteration result key for a step (e.g. "代码审计" → "代码审计-迭代3" if that's the latest)
+  // Find the latest iteration result key for a step (e.g. "代码审计" → UUID or "代码审计-迭代3" if that's the latest)
   const getLatestStepKey = (baseName: string): string => {
     if (!baseName) return baseName;
-    // If baseName itself has an iteration suffix (e.g. "设计修复方案-迭代2"), try it directly first,
-    // then fall back to the base name (without suffix) in case stepLogs use the base name as key.
-    const iterSuffixMatch = baseName.match(/^(.+)-迭代(\d+)$/);
-    const effectiveBase = iterSuffixMatch ? iterSuffixMatch[1] : baseName;
 
-    // If currentStep matches this base step, prefer it (it's the active iteration)
-    // Return currentStep even if stepResults doesn't have it yet (for running steps)
-    if (currentStep && (currentStep === effectiveBase || currentStep.startsWith(effectiveBase + '-迭代')
-      || currentStep.endsWith('-' + effectiveBase))) {
+    // 1. Exact match in stepIdMap (e.g. "问题复现-构造最小复现用例")
+    if (stepIdMap[baseName] && stepResults[stepIdMap[baseName]]) {
+      return stepIdMap[baseName];
+    }
+
+    // 2. State machine format: stepIdMap key is "stateName-stepName", baseName is just "stepName"
+    for (const [mapKey, mapId] of Object.entries(stepIdMap)) {
+      if (mapKey.endsWith('-' + baseName) && stepResults[mapId]) {
+        return mapId;
+      }
+    }
+
+    // 3. Check iteration variants in stepIdMap (e.g. "根因定位-定位空指针路径-迭代2")
+    //    Find the highest iteration that has results
+    let bestKey = '';
+    let bestIter = -1;
+    for (const [mapKey, mapId] of Object.entries(stepIdMap)) {
+      if (!stepResults[mapId]) continue;
+      // Match "stateName-baseName-迭代N" or "baseName-迭代N"
+      const iterMatch = mapKey.match(new RegExp(`(?:^|-)${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
+      if (iterMatch) {
+        const n = parseInt(iterMatch[1], 10);
+        if (n > bestIter) { bestIter = n; bestKey = mapId; }
+      }
+    }
+    if (bestKey) return bestKey;
+
+    // 4. Fallback: direct key match in stepResults (legacy, no UUID)
+    if (stepResults[baseName]) return baseName;
+
+    // 5. If currently running this step, return baseName for stream display
+    if (currentStep && (currentStep === baseName || currentStep.endsWith('-' + baseName))) {
       return currentStep;
     }
 
-    // If user clicked on a specific iteration node (e.g. "功能测试-迭代4")
-    if (iterSuffixMatch) {
-      const clickedIterNum = parseInt(iterSuffixMatch[2], 10);
-      // Check if this specific iteration is currently running
-      const expectedCurrentStep = baseName;
-      if (currentStep === expectedCurrentStep || currentStep?.startsWith(effectiveBase + '-迭代' + clickedIterNum)) {
-        return baseName;
-      }
-      // If the exact key exists in results, use it
-      if (stepResults[baseName]) return baseName;
-
-      // Check if this iteration number is higher than any existing iteration
-      let maxExistingIter = 0;
-      for (const key of Object.keys(stepResults)) {
-        const m = key.match(new RegExp(`^${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
-        if (m) {
-          const n = parseInt(m[1], 10);
-          if (n > maxExistingIter) maxExistingIter = n;
-        }
-      }
-      // If clicked iteration is higher than existing, return baseName (will show as not executed)
-      if (clickedIterNum > maxExistingIter) return baseName;
-    }
-
-    // Find highest iteration number in stepResults for the effective base name
-    // Also check state-machine format keys like "stateName-stepName"
-    let latest = effectiveBase;
-    let maxIter = 0;
-    for (const key of Object.keys(stepResults)) {
-      if (key === effectiveBase) { if (maxIter === 0) latest = key; continue; }
-      // Match state-machine format: "stateName-stepName" (key ends with "-baseName")
-      if (key.endsWith('-' + effectiveBase)) { if (maxIter === 0) latest = key; continue; }
-      const m = key.match(new RegExp(`^${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
-      if (m) {
-        const n = parseInt(m[1], 10);
-        if (n > maxIter) { maxIter = n; latest = key; }
-      }
-      // Also match state-machine iteration format: "stateName-stepName-迭代N"
-      const sm = key.match(new RegExp(`-${effectiveBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-迭代(\\d+)$`));
-      if (sm) {
-        const n = parseInt(sm[1], 10);
-        if (n > maxIter) { maxIter = n; latest = key; }
-      }
-    }
-    return latest;
+    return baseName;
   };
 
   const handleSelectNode = (type: 'phase' | 'step', phaseIndex: number, stepIndex?: number) => {
@@ -1736,6 +1785,9 @@ export default function WorkbenchPage() {
                   <TabsTrigger value="documents" className="flex-1 flex items-center justify-center gap-1 text-xs">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>description</span>文档
                   </TabsTrigger>
+                  <TabsTrigger value="schedules" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                    <span className="material-symbols-outlined" style={{ fontSize: 14 }}>schedule</span>定时
+                  </TabsTrigger>
                 </TabsList>
                 <div className="flex-1 overflow-hidden min-h-0">
                 <TabsContent value="workflow" className="mt-0 overflow-y-auto h-full p-4">
@@ -1817,6 +1869,9 @@ export default function WorkbenchPage() {
           </div></TabsContent>}
 <TabsContent value="documents" className="mt-0 h-full">
                   <DocumentsPanel runId={runId || selectedRun?.id || null} />
+                </TabsContent>
+                <TabsContent value="schedules" className="mt-0 h-full">
+                  <SchedulesPanel configFile={configFile} />
                 </TabsContent>
               </div>
             </Tabs>
@@ -1920,7 +1975,7 @@ export default function WorkbenchPage() {
                   </div>
                   <div className="mb-2.5">
                     <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">任务描述</div>
-                    <div className="text-sm leading-relaxed">{selectedStep.task}</div>
+                    <div className="text-sm leading-relaxed max-h-[300px] overflow-y-auto"><Markdown>{selectedStep.task}</Markdown></div>
                   </div>
                   {selectedStep.constraints?.length > 0 && (
                     <div className="mb-2.5">
@@ -2035,13 +2090,17 @@ export default function WorkbenchPage() {
                         <div className={`${styles.markdownContent} bg-background border rounded p-2 text-sm leading-relaxed max-h-[200px] overflow-y-auto mt-1.5`}>
                           {dedupedChunks.map((chunk, i) => (
                             <div key={i} className={i < dedupedChunks.length - 1 ? 'border-b border-border/50 pb-3 mb-3' : ''}>
-                              <Markdown>{chunk}</Markdown>
+                              <Markdown>{mergeSubtaskDetails(chunk)}</Markdown>
                             </div>
                           ))}
                         </div>
                         {!fullStepOutput && stepResult.output.length > 2000 && (runId || selectedRun?.id) && (
                           <Button variant="secondary" size="sm" className="mt-1.5 text-[11px]"
-                            onClick={() => loadFullOutput(stepKey)}
+                            onClick={() => {
+                              // For UUID keys, find the step name for file lookup
+                              const fileName = Object.entries(stepIdMap).find(([, id]) => id === stepKey)?.[0] || stepKey;
+                              loadFullOutput(fileName);
+                            }}
                             disabled={loadingOutput}>
                             {loadingOutput ? '加载中...' : (<><span className="material-symbols-outlined text-xs">description</span> 查看完整输出</>)}
                           </Button>
@@ -2719,17 +2778,17 @@ export default function WorkbenchPage() {
             </div>
             <div className="p-3 border-t flex gap-2">
               <Input
-                value={liveStreamFeedback}
-                onChange={(e) => setLiveStreamFeedback(e.target.value)}
+                ref={liveStreamFeedbackRef}
+                defaultValue=""
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendLiveFeedback(); } }}
                 placeholder="输入反馈意见..."
                 className="flex-1"
                 disabled={sendingFeedback}
               />
-              <Button size="sm" onClick={() => sendLiveFeedback()} disabled={sendingFeedback || !liveStreamFeedback.trim()} title="发送反馈（等待当前执行完成后处理）">
+              <Button size="sm" onClick={() => sendLiveFeedback()} disabled={sendingFeedback} title="发送反馈（等待当前执行完成后处理）">
                 <span className="material-symbols-outlined text-sm">send</span>
               </Button>
-              <Button size="sm" variant="destructive" onClick={() => sendLiveFeedback(true)} disabled={sendingFeedback || !liveStreamFeedback.trim()} title="打断当前执行，立即处理反馈">
+              <Button size="sm" variant="destructive" onClick={() => sendLiveFeedback(true)} disabled={sendingFeedback} title="打断当前执行，立即处理反馈">
                 <span className="material-symbols-outlined text-sm">bolt</span>
               </Button>
             </div>
@@ -2767,14 +2826,14 @@ export default function WorkbenchPage() {
                     });
                     return filtered.map((chunk, i) => (
                       <div key={i} className={`${styles.markdownContent} text-sm border-b border-border/50 pb-3 last:border-0`}>
-                        <Markdown>{chunk}</Markdown>
+                        <Markdown>{mergeSubtaskDetails(chunk)}</Markdown>
                       </div>
                     ));
                   })()}
                 </div>
               ) : (
                 <div className={styles.markdownContent}>
-                  <Markdown>{markdownModal.chunks[0]}</Markdown>
+                  <Markdown>{mergeSubtaskDetails(markdownModal.chunks[0])}</Markdown>
                 </div>
               )}
             </div>
@@ -2839,6 +2898,7 @@ export default function WorkbenchPage() {
         </div>
       )}
       {confirmDialogProps && <ConfirmDialog {...confirmDialogProps} />}
+
       {showContextEditor && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setShowContextEditor(false)}>
           <div className="bg-card rounded-lg w-[600px] max-w-[90%] border" onClick={(e) => e.stopPropagation()}>
