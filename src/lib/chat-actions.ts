@@ -293,7 +293,7 @@ async function executeActionInner(type: ActionType, params: Record<string, any>)
 
     // Runs
     case 'runs.list':
-      return runsApi.listByConfig(params.configFile);
+      return params.configFile ? runsApi.listByConfig(params.configFile) : runsApi.listAll();
     case 'runs.detail':
       return runsApi.getRunDetail(params.runId);
 

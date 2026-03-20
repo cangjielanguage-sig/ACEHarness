@@ -409,6 +409,11 @@ class ProcessManager extends EventEmitter {
 
       let buffer = '';
       let resultObj: ClaudeJsonResult | null = null;
+      // First-response timeout for --resume: if system.init arrives but nothing
+      // else within 30s, the session is likely expired and the process is stuck.
+      let gotPostInitEvent = false;
+      let firstResponseTimer: ReturnType<typeof setTimeout> | null = null;
+      const FIRST_RESPONSE_TIMEOUT = 30_000;
       // Track current tool_use block being streamed
       let currentToolUse: { name: string; inputJson: string; id?: string } | null = null;
       // Track whether the last content block was a tool_use (to insert separator before text)
@@ -646,7 +651,8 @@ class ProcessManager extends EventEmitter {
       }, 5000);
 
       child.stdout!.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString();
+        const raw = chunk.toString();
+        buffer += raw;
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
         for (const line of lines) {
@@ -725,7 +731,7 @@ class ProcessManager extends EventEmitter {
           if (hasApiError) {
             proc.status = 'failed';
             const errMsg = proc.error || resultObj.result || 'API Error';
-            proc.logLines.push(`[${ts()}] ✗ 失败: API 错误或 is_error=true`);
+            proc.logLines.push(`[${ts()}] ✗ 失败: API 错误或 is_error=true, errMsg="${errMsg.slice(0, 200)}"`);
             this.running--;
             this.flushLog(proc, cliArgs);
             this.processNext();

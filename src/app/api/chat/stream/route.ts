@@ -2,17 +2,127 @@ import { NextRequest, NextResponse } from 'next/server';
 import { processManager } from '@/lib/process-manager';
 import { buildDashboardSystemPrompt } from '@/lib/chat-system-prompt';
 import { loadChatSettings } from '@/lib/chat-settings';
+import { spawn } from 'child_process';
+import { readFile } from 'fs/promises';
+import { resolve } from 'path';
 
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_PROMPT = '你是一个 AI 助手，简洁回答问题。';
 
+const SESSIONS_DIR = resolve(process.cwd(), 'data', 'chat-sessions');
+const MAX_HISTORY_CHARS = 6000;
+
+/**
+ * Load chat history from a frontend session file and format as context summary.
+ * Returns empty string if session not found or no messages.
+ */
+async function loadChatHistory(frontendSessionId: string): Promise<string> {
+  try {
+    const filePath = resolve(SESSIONS_DIR, `${frontendSessionId}.json`);
+    const content = await readFile(filePath, 'utf-8');
+    const session = JSON.parse(content);
+    const messages: { role: string; content: string }[] = session.messages || [];
+    if (messages.length === 0) return '';
+
+    // Build a condensed history: keep role + truncated content
+    let history = '';
+    for (const msg of messages) {
+      if (!msg.content) continue;
+      const role = msg.role === 'user' ? '用户' : msg.role === 'assistant' ? 'AI' : '系统';
+      // Truncate long messages, remove action/card code blocks to save tokens
+      let text = msg.content
+        .replace(/```(?:action|card)\s*\n[\s\S]*?```/g, '[action/card block]')
+        .trim();
+      if (text.length > 500) text = text.slice(0, 500) + '...';
+      history += `${role}: ${text}\n\n`;
+      if (history.length > MAX_HISTORY_CHARS) break;
+    }
+    if (!history) return '';
+    return `\n\n## 之前的对话记录（会话已过期重建，以下是历史上下文）\n${history.slice(0, MAX_HISTORY_CHARS)}`;
+  } catch {
+    return '';
+  }
+}
+
 // Track active chat streams
 const activeChats = new Map<string, { promise: Promise<any>; settled: boolean; chatId: string }>();
 
+/**
+ * Pre-check whether a claude session ID is still valid.
+ * Spawns a lightweight `claude --output-format json` process without
+ * --verbose/--include-partial-messages (which cause hangs on expired sessions).
+ * Returns true if session is valid, false if expired/not found.
+ */
+function checkSessionValid(sessionId: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+    delete env.CLAUDE_CODE_SESSION;
+    delete env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC;
+    env.IS_SANDBOX = '1';
+
+    const child = spawn('claude', [
+      '--output-format', 'json',
+      '-p', '.',
+      '--resume', sessionId,
+      '--dangerously-skip-permissions',
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+    });
+
+    let resolved = false;
+    let output = '';
+
+    const done = (valid: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+      console.log(`[checkSessionValid] sessionId=${sessionId}, valid=${valid}, output=${output.slice(0, 200)}`);
+      resolve(valid);
+    };
+
+    const timer = setTimeout(() => {
+      console.log(`[checkSessionValid] timeout for ${sessionId}`);
+      done(false);
+    }, 10_000);
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+      // JSON mode: error result contains "no conversation found" in errors array
+      if (output.toLowerCase().includes('no conversation found')) {
+        done(false);
+      }
+    });
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+      if (output.toLowerCase().includes('no conversation found')) {
+        done(false);
+      }
+    });
+
+    child.on('close', (code) => {
+      // Process exited without triggering early detection.
+      // code !== 0 or any error text = likely invalid
+      const hasError = output.toLowerCase().includes('no conversation found')
+        || output.toLowerCase().includes('is_error')
+        || code !== 0;
+      done(!hasError);
+    });
+
+    child.on('error', () => {
+      done(false);
+    });
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { message, model, sessionId, mode } = await request.json();
+    const { message, model, sessionId, frontendSessionId, mode } = await request.json();
     if (!message?.trim()) {
       return NextResponse.json({ error: '消息不能为空' }, { status: 400 });
     }
@@ -41,49 +151,43 @@ export async function POST(request: NextRequest) {
       systemPrompt = DEFAULT_PROMPT;
     }
 
-    // Start execution without awaiting — SSE will stream results.
-    // If resume fails (expired session), automatically fall back to a new session.
-    const startExec = (resumeSid?: string) => {
-      let sp = systemPrompt;
-      let appendSp = isResume && !!systemPrompt;
-      // When falling back from a failed resume, use full system prompt for the new session
-      if (isResume && !resumeSid && mode === 'dashboard') {
-        // We'll build the full prompt asynchronously below; for now keep lightweight
-        appendSp = false;
-      }
-      return processManager.executeClaudeCli(
-        chatId, 'chat', 'chat', message, sp, useModel,
-        { resumeSessionId: resumeSid, appendSystemPrompt: appendSp }
-      );
-    };
-
-    // Wrap with retry: on "No conversation found", fall back to new session
-    const execWithRetry = async (): Promise<any> => {
-      if (!isResume) return startExec();
-      try {
-        return await startExec(sessionId);
-      } catch (err: any) {
-        const msg = (err?.message || '').toLowerCase();
-        if (msg.includes('no conversation found') || (msg.includes('session') && msg.includes('not found'))) {
-          // Session expired — retry as a new conversation with full system prompt
-          if (mode === 'dashboard') {
-            const settings = await loadChatSettings();
-            const enabledSkills = Object.entries(settings.skills)
-              .filter(([, v]) => v)
-              .map(([k]) => k);
-            systemPrompt = await buildDashboardSystemPrompt(enabledSkills);
-          } else {
-            systemPrompt = DEFAULT_PROMPT;
-          }
-          return processManager.executeClaudeCli(
-            chatId, 'chat', 'chat', message, systemPrompt, useModel, {}
-          );
+    // If resuming, pre-check whether the session is still valid.
+    // The claude CLI hangs in pipe mode with --verbose on expired sessions,
+    // so we do a lightweight probe first without those flags.
+    let validResumeSid: string | undefined = undefined;
+    if (isResume) {
+      const valid = await checkSessionValid(sessionId);
+      if (valid) {
+        validResumeSid = sessionId;
+      } else {
+        // Rebuild full system prompt for new session
+        if (mode === 'dashboard') {
+          const settings = await loadChatSettings();
+          const enabledSkills = Object.entries(settings.skills)
+            .filter(([, v]) => v)
+            .map(([k]) => k);
+          systemPrompt = await buildDashboardSystemPrompt(enabledSkills);
+        } else {
+          systemPrompt = DEFAULT_PROMPT;
         }
-        throw err; // Not a session error — propagate
+        // Inject previous chat history so the new session has context
+        if (frontendSessionId) {
+          const history = await loadChatHistory(frontendSessionId);
+          if (history) {
+            systemPrompt += history;
+          }
+        }
       }
-    };
+    }
 
-    const execPromise = execWithRetry();
+    // Start execution — SSE will stream results
+    const execPromise = processManager.executeClaudeCli(
+      chatId, 'chat', 'chat', message, systemPrompt, useModel,
+      {
+        resumeSessionId: validResumeSid,
+        appendSystemPrompt: !!validResumeSid && !!systemPrompt,
+      }
+    );
     const entry = { promise: execPromise, settled: false, chatId };
     activeChats.set(chatId, entry);
     execPromise

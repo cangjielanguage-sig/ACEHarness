@@ -183,6 +183,12 @@ export const agentApi = {
 };
 
 export const runsApi = {
+  async listAll(): Promise<{ runs: RunRecord[] }> {
+    const response = await fetch(`${API_BASE}/runs`);
+    if (!response.ok) throw new Error('获取运行记录失败');
+    return response.json();
+  },
+
   async listByConfig(configFile: string): Promise<{ runs: RunRecord[] }> {
     const response = await fetch(`${API_BASE}/runs/by-config/${encodeURIComponent(configFile)}`);
     if (!response.ok) throw new Error('获取运行记录失败');

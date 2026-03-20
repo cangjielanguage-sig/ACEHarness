@@ -358,10 +358,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       try {
         const backendSid = activeSessionRef.current?.backendSessionId;
+        const frontendSid = activeSessionRef.current?.id;
         const startRes = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: followUpPrompt, model, sessionId: backendSid || undefined, mode: 'dashboard' }),
+          body: JSON.stringify({ message: followUpPrompt, model, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard' }),
         });
         const { chatId } = await startRes.json();
         if (!chatId) throw new Error('Failed to start stream');
@@ -459,10 +460,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     try {
       const backendSid = activeSessionRef.current?.backendSessionId;
+      const frontendSid = activeSessionRef.current?.id;
       const startRes = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, model, sessionId: backendSid || undefined, mode: 'dashboard' }),
+        body: JSON.stringify({ message: text, model, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard' }),
       });
       const startData = await startRes.json();
       if (!startRes.ok || startData.error) {
