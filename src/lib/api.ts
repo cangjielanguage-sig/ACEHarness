@@ -25,6 +25,7 @@ interface ConfigResponse {
 interface ApiResponse {
   success: boolean;
   message: string;
+  interrupted?: boolean;
 }
 
 interface WorkflowStatusResponse {
@@ -91,7 +92,15 @@ export const configApi = {
 
   async getConfig(filename: string): Promise<ConfigResponse> {
     const response = await fetch(`${API_BASE}/configs/${filename}`);
-    if (!response.ok) throw new Error('读取配置失败');
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      const available = data?.availableConfigs;
+      let msg = data?.message || `读取配置失败: ${filename} 不存在或无法读取`;
+      if (available?.length) {
+        msg += `。可用的配置文件: ${available.join(', ')}`;
+      }
+      throw new Error(msg);
+    }
     return response.json();
   },
 
@@ -101,7 +110,11 @@ export const configApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config }),
     });
-    if (!response.ok) throw new Error('保存配置失败');
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      const details = data?.details?.map((d: any) => `${d.path?.join('.')}: ${d.message}`).join('; ');
+      throw new Error(data?.error ? `${data.error}${details ? ` (${details})` : ''}` : '保存配置失败');
+    }
     return response.json();
   },
 
@@ -214,6 +227,26 @@ export const runsApi = {
   async getDocumentContent(id: string, filename: string): Promise<{ file: string; content: string }> {
     const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents?file=${encodeURIComponent(filename)}`);
     if (!response.ok) throw new Error('获取文档内容失败');
+    return response.json();
+  },
+
+  async renameDocument(id: string, file: string, newName: string): Promise<{ ok: boolean; newFilename: string }> {
+    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file, newName }),
+    });
+    if (!response.ok) throw new Error('重命名失败');
+    return response.json();
+  },
+
+  async deleteDocuments(id: string, files: string[]): Promise<{ ok: boolean; deleted: string[] }> {
+    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files }),
+    });
+    if (!response.ok) throw new Error('删除失败');
     return response.json();
   },
 
@@ -425,5 +458,50 @@ export const streamApi = {
     if (!response.ok) return '';
     const data = await response.json();
     return data.content || '';
+  },
+};
+
+export const scheduleApi = {
+  async list(): Promise<{ jobs: any[] }> {
+    const res = await fetch(`${API_BASE}/schedules`);
+    if (!res.ok) throw new Error('获取定时任务列表失败');
+    return res.json();
+  },
+  async get(id: string): Promise<{ job: any }> {
+    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error('获取定时任务失败');
+    return res.json();
+  },
+  async create(job: any): Promise<{ job: any }> {
+    const res = await fetch(`${API_BASE}/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(job),
+    });
+    if (!res.ok) throw new Error('创建定时任务失败');
+    return res.json();
+  },
+  async update(id: string, patch: any): Promise<{ job: any }> {
+    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error('更新定时任务失败');
+    return res.json();
+  },
+  async delete(id: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('删除定时任务失败');
+  },
+  async trigger(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/trigger`, { method: 'POST' });
+    if (!res.ok) throw new Error('触发定时任务失败');
+    return res.json();
+  },
+  async toggle(id: string): Promise<{ job: any }> {
+    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/toggle`, { method: 'POST' });
+    if (!res.ok) throw new Error('切换定时任务状态失败');
+    return res.json();
   },
 };

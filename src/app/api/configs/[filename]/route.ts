@@ -30,9 +30,21 @@ export async function GET(
 
     return NextResponse.json({ config, raw: content, agents });
   } catch (error: any) {
+    // List available configs to help AI self-correct
+    let available: string[] = [];
+    try {
+      const configsDir = resolve(process.cwd(), 'configs');
+      const files = await readdir(configsDir);
+      available = files.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+    } catch { /* ignore */ }
+    const filename = (await params).filename;
     return NextResponse.json(
-      { error: '读取配置失败', message: error.message },
-      { status: 500 }
+      {
+        error: '读取配置失败',
+        message: `文件 ${filename} 不存在或无法读取`,
+        availableConfigs: available,
+      },
+      { status: 404 }
     );
   }
 }

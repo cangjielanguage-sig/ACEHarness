@@ -11,10 +11,29 @@ import ChatSidebar from '@/components/chat/ChatSidebar';
 import ChatMessage from '@/components/chat/ChatMessage';
 import QuickActions, { QuickActionsBar } from '@/components/chat/QuickActions';
 
+const SIDEBAR_STORAGE_KEY = 'chat-sidebar-width';
+const DEFAULT_WIDTH = 264;
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 480;
+const MOBILE_BREAKPOINT = 768;
+
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  return isMobile;
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const {
-    activeSession, sessions, createSession, sendMessage, loading,
+    activeSession, sessions, createSession, sendMessage, stopStreaming,
+    deleteMessage, retryFromMessage,
+    loading, streamingMessageId,
     model, setModel, confirmAction, rejectAction, undoActionById, retryAction,
     skillSettings,
   } = useChat();
@@ -22,6 +41,49 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const isMobile = useIsMobile();
+
+  // --- Resizable sidebar state ---
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
+  const [isResizing, setIsResizing] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Load saved width
+  useEffect(() => {
+    const saved = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    if (saved) {
+      const w = parseInt(saved, 10);
+      if (w >= MIN_WIDTH && w <= MAX_WIDTH) setSidebarWidth(w);
+    }
+  }, []);
+
+  // Hide sidebar by default on mobile
+  useEffect(() => {
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
+
+  // Resize drag handler
+  useEffect(() => {
+    if (!isResizing) return;
+    const onMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const x = e.clientX - containerRef.current.getBoundingClientRect().left;
+      const clamped = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, x));
+      setSidebarWidth(clamped);
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, clamped.toString());
+    };
+    const onUp = () => setIsResizing(false);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -56,8 +118,34 @@ export default function ChatPage() {
   const messages = activeSession?.messages || [];
 
   return (
-    <div className="h-screen flex overflow-hidden bg-background">
-      {sidebarOpen && <ChatSidebar />}
+    <div ref={containerRef} className="h-screen flex overflow-hidden bg-background">
+      {/* Mobile overlay backdrop */}
+      {isMobile && sidebarOpen && (
+        <div className="fixed inset-0 bg-black/40 z-30" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* Sidebar */}
+      {sidebarOpen && (
+        <div
+          className={
+            isMobile
+              ? 'fixed inset-y-0 left-0 z-40 bg-background shadow-xl'
+              : 'relative shrink-0'
+          }
+          style={{ width: isMobile ? `${Math.min(sidebarWidth, 320)}px` : `${sidebarWidth}px` }}
+        >
+          <ChatSidebar />
+          {/* Resize handle (desktop only) */}
+          {!isMobile && (
+            <div
+              className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:w-1.5 transition-all ${
+                isResizing ? 'bg-primary w-1.5' : 'bg-border hover:bg-primary/60'
+              }`}
+              onMouseDown={e => { e.preventDefault(); setIsResizing(true); }}
+            />
+          )}
+        </div>
+      )}
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
@@ -69,7 +157,7 @@ export default function ChatPage() {
             <span className="font-semibold text-sm">AceFlow 对话</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-48">
+            <div className="w-48 hidden sm:block">
               <ModelSelect value={model} onChange={setModel} className="h-8 text-xs" />
             </div>
             <Button size="sm" variant="ghost" onClick={() => createSession()} title="新建会话">
@@ -77,8 +165,8 @@ export default function ChatPage() {
             </Button>
             <ThemeToggle />
             <Button size="sm" variant="outline" onClick={() => router.push('/dashboard')} title="切换到控制台">
-              <span className="material-symbols-outlined text-sm mr-1">dashboard</span>
-              控制台
+              <span className="material-symbols-outlined text-sm sm:mr-1">dashboard</span>
+              <span className="hidden sm:inline">控制台</span>
             </Button>
           </div>
         </div>
@@ -118,24 +206,16 @@ export default function ChatPage() {
             <ChatMessage
               key={msg.id}
               message={msg}
-              onConfirmAction={(actionId) => confirmAction(msg.id, actionId)}
-              onRejectAction={(actionId) => rejectAction(msg.id, actionId)}
-              onUndoAction={(actionId) => undoActionById(msg.id, actionId)}
-              onRetryAction={(actionId) => retryAction(msg.id, actionId)}
+              isStreaming={msg.id === streamingMessageId}
+              onConfirmAction={(id) => confirmAction(msg.id, id)}
+              onRejectAction={(id) => rejectAction(msg.id, id)}
+              onUndoAction={(id) => undoActionById(msg.id, id)}
+              onRetryAction={(id) => retryAction(msg.id, id)}
               onAction={handleQuickAction}
+              onDelete={deleteMessage}
+              onRetryFromMessage={msg.role === 'user' ? retryFromMessage : undefined}
             />
           ))}
-          {loading && (
-            <div className="flex mb-4">
-              <div className="rounded-2xl rounded-bl-sm px-4 py-3 bg-muted">
-                <div className="flex gap-1 text-muted-foreground">
-                  <span className="animate-bounce">●</span>
-                  <span className="animate-bounce" style={{ animationDelay: '0.1s' }}>●</span>
-                  <span className="animate-bounce" style={{ animationDelay: '0.2s' }}>●</span>
-                </div>
-              </div>
-            </div>
-          )}
           <div ref={messagesEndRef} />
         </div>
 
@@ -155,9 +235,15 @@ export default function ChatPage() {
               rows={1}
               disabled={loading}
             />
-            <Button className="rounded-xl h-[42px] px-4" onClick={handleSend} disabled={loading || !input.trim()}>
-              <span className="material-symbols-outlined text-lg">send</span>
-            </Button>
+            {loading ? (
+              <Button className="rounded-xl h-[42px] px-4" variant="destructive" onClick={stopStreaming} title="停止生成">
+                <span className="material-symbols-outlined text-lg">stop</span>
+              </Button>
+            ) : (
+              <Button className="rounded-xl h-[42px] px-4" onClick={handleSend} disabled={!input.trim()}>
+                <span className="material-symbols-outlined text-lg">send</span>
+              </Button>
+            )}
           </div>
         </div>
       </div>

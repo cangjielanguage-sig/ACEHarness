@@ -264,6 +264,16 @@
   50% { opacity: 1; }
 }
 
+@keyframes botBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes dotFade {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+
 .animate-float {
   animation: float 6s ease-in-out infinite;
 }

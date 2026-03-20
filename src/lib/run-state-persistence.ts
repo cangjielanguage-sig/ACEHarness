@@ -35,10 +35,12 @@ export interface PersistedProcessInfo {
   id: string;
   agent: string;
   step: string;
+  stepId?: string;
   startTime: string;
 }
 
 export interface PersistedStepLog {
+  id: string; // UUID for this step execution
   stepName: string;
   agent: string;
   status: 'completed' | 'failed';

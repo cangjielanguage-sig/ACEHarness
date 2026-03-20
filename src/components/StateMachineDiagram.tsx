@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useEffect, useState } from 'react';
+import { useCallback, useMemo, useEffect, useState, useRef } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -223,7 +223,7 @@ function StateNode({ data }: any) {
 
       {/* 步骤列表 */}
       <div className="space-y-0.5 mt-1.5">
-        {state.steps.map((step: any, idx: number) => {
+        {(state.steps || []).map((step: any, idx: number) => {
           const isDone = completedSteps.includes(step.name) || completedSteps.includes(`${state.name}-${step.name}`);
           const isRunningStep = currentStep === step.name || currentStep === `${state.name}-${step.name}`;
           return (
@@ -366,7 +366,8 @@ function StateMachineDiagramInner({
 }: StateMachineDiagramProps) {
   const [showAllEdges, setShowAllEdges] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
-  const { setCenter } = useReactFlow();
+  const { setCenter, fitView: rfFitView } = useReactFlow();
+  const initialFitDone = useRef(false);
 
   // 转换为 ReactFlow 节点
   const initialNodes: Node[] = useMemo(() => {
@@ -704,10 +705,23 @@ function StateMachineDiagramInner({
     initialEdgesCount: initialEdges.length
   });
 
-  // Sync nodes when initialNodes changes
+  // Sync node data when runtime state changes, without replacing node positions
   useEffect(() => {
-    setNodes(initialNodes);
-  }, [initialNodes, setNodes]);
+    setNodes(prev => {
+      if (prev.length !== initialNodes.length) return initialNodes;
+      return prev.map((node, i) => {
+        const newNode = initialNodes[i];
+        if (!newNode || node.id !== newNode.id) return newNode || node;
+        // Only update data, keep existing position (user may have dragged)
+        return { ...node, data: newNode.data };
+      });
+    });
+    // Only fitView on first render, not on subsequent node updates
+    if (!initialFitDone.current) {
+      initialFitDone.current = true;
+      setTimeout(() => rfFitView({ padding: 0.3, maxZoom: 1.2 }), 50);
+    }
+  }, [initialNodes, setNodes, rfFitView]);
 
   // Sync edges when initialEdges changes
   useEffect(() => {
@@ -743,11 +757,12 @@ function StateMachineDiagramInner({
   }, [hoveredNode, setEdges, stateHistory, showAllEdges]);
 
   // 当 focusedState 改变时，自动聚焦到对应节点（用于视图跳转，不影响执行状态）
+  const prevFocusedState = useRef<string | null>(null);
   useEffect(() => {
-    if (focusedState) {
+    if (focusedState && focusedState !== prevFocusedState.current) {
+      prevFocusedState.current = focusedState;
       const targetNode = initialNodes.find(n => n.id === focusedState);
       if (targetNode) {
-        // 延迟执行以确保节点已渲染
         setTimeout(() => {
           setCenter(targetNode.position.x, targetNode.position.y, {
             zoom: 1.0,
@@ -756,7 +771,8 @@ function StateMachineDiagramInner({
         }, 100);
       }
     }
-  }, [focusedState, initialNodes, setCenter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedState, setCenter]);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge(params, eds)),
@@ -810,12 +826,6 @@ function StateMachineDiagramInner({
         onNodeMouseLeave={onNodeMouseLeave}
         onEdgeClick={onEdgeClick}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{
-          padding: 0.3,
-          minZoom: 0.4,
-          maxZoom: 1.2,
-        }}
         defaultViewport={{ x: 0, y: 0, zoom: 0.6 }}
         minZoom={0.2}
         maxZoom={1.5}

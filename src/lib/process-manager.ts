@@ -172,6 +172,7 @@ export interface ProcessInfo {
   id: string;
   agent: string;
   step: string;
+  stepId?: string;
   status: 'running' | 'completed' | 'failed' | 'killed' | 'timeout' | 'queued';
   pid?: number;
   sessionId?: string;
@@ -198,6 +199,7 @@ interface ExecuteOptions {
   appendSystemPrompt?: boolean;
   timeoutMs?: number;
   runId?: string;
+  stepId?: string;
   agents?: Record<string, any>; // For review panel mode
 }
 
@@ -266,6 +268,7 @@ class ProcessManager extends EventEmitter {
   ): Promise<ClaudeJsonResult> {
     const proc: ProcessInfo = {
       id, agent, step,
+      stepId: options.stepId,
       status: 'queued',
       startTime: new Date(),
       queuedAt: new Date(),
@@ -408,10 +411,14 @@ class ProcessManager extends EventEmitter {
       let buffer = '';
       let resultObj: ClaudeJsonResult | null = null;
       // Track current tool_use block being streamed
-      let currentToolUse: { name: string; inputJson: string } | null = null;
+      let currentToolUse: { name: string; inputJson: string; id?: string } | null = null;
       // Track whether the last content block was a tool_use (to insert separator before text)
       let lastBlockWasTool = false;
-      // Track the last tool name for formatting tool results
+      // Track tool calls by id for matching results to the correct tool (supports parallel calls)
+      const pendingToolCalls: Map<string, { name: string; description?: string }> = new Map();
+      // Ordered queue of tool names for fallback when tool_use_id is missing
+      const toolCallQueue: Array<{ name: string; description?: string }> = [];
+      // Track the last tool name for formatting tool results (fallback)
       let lastToolName = '';
       // Track the last Task tool description for labeling subagent results
       let lastTaskDescription = '';
@@ -455,7 +462,8 @@ class ProcessManager extends EventEmitter {
             } else if (evt?.type === 'content_block_start' && evt.content_block?.type === 'tool_use') {
               // Tool call started — show tool name
               const toolName = evt.content_block.name || 'unknown';
-              currentToolUse = { name: toolName, inputJson: '' };
+              const toolId = evt.content_block.id || '';
+              currentToolUse = { name: toolName, inputJson: '', id: toolId };
               const header = `\n\n**🔧 ${toolName}**\n`;
               proc.streamContent += header;
               this.emit('stream', { id, step, delta: header, total: proc.streamContent });
@@ -471,12 +479,20 @@ class ProcessManager extends EventEmitter {
               }
               lastToolName = currentToolUse.name;
               // Save Task description for labeling subagent results
+              let taskDesc = '';
               if (currentToolUse.name.toLowerCase() === 'task') {
                 try {
                   const parsed = JSON.parse(currentToolUse.inputJson);
-                  lastTaskDescription = parsed.description || '';
+                  taskDesc = parsed.description || '';
+                  lastTaskDescription = taskDesc;
                 } catch { lastTaskDescription = ''; }
               }
+              // Register in pending map (by tool_use_id) and queue for result matching
+              const toolInfo = { name: currentToolUse.name, description: taskDesc || undefined };
+              if (currentToolUse.id) {
+                pendingToolCalls.set(currentToolUse.id, toolInfo);
+              }
+              toolCallQueue.push(toolInfo);
               currentToolUse = null;
               lastBlockWasTool = true;
             }
@@ -490,9 +506,23 @@ class ProcessManager extends EventEmitter {
               console.log(`[ProcessManager] Write msgContent:`, JSON.stringify(msgContent)?.slice(0, 500));
             }
             if (toolResult || msgContent) {
+              // Resolve which tool this result belongs to
+              let resolvedToolName = lastToolName;
+              let resolvedTaskDesc = lastTaskDescription;
+              const toolUseId = toolResult?.tool_use_id || (Array.isArray(msgContent) && msgContent[0]?.tool_use_id);
+              if (toolUseId && pendingToolCalls.has(toolUseId)) {
+                const info = pendingToolCalls.get(toolUseId)!;
+                resolvedToolName = info.name;
+                resolvedTaskDesc = info.description || '';
+                pendingToolCalls.delete(toolUseId);
+              } else if (toolCallQueue.length > 0) {
+                const info = toolCallQueue.shift()!;
+                resolvedToolName = info.name;
+                resolvedTaskDesc = info.description || '';
+              }
               let resultBlock = '';
               // Format based on tool type
-              const tn = lastToolName.toLowerCase();
+              const tn = resolvedToolName.toLowerCase();
               if (toolResult) {
                 const stdout = toolResult.stdout || '';
                 const stderr = toolResult.stderr || '';
@@ -501,10 +531,10 @@ class ProcessManager extends EventEmitter {
                   const lines = output.split('\n');
                   if (tn === 'task' || tn === 'taskoutput') {
                     // Subagent results: always collapsed with descriptive label
-                    const label = lastTaskDescription
-                      ? `🤖 子任务结果: ${lastTaskDescription} (${lines.length} 行)`
+                    const label = resolvedTaskDesc
+                      ? `🤖 子任务结果: ${resolvedTaskDesc} (${lines.length} 行)`
                       : `🤖 子任务结果 (${lines.length} 行)`;
-                    resultBlock = `\n<details><summary>${label}</summary>\n\n${output}\n\n</details>\n`;
+                    resultBlock = `\n<details><summary>${label}</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>\n`;
                   } else if (tn === 'bash' || tn === 'glob' || tn === 'grep') {
                     if (lines.length <= 5 && output.length <= 500) {
                       resultBlock = `\n\`\`\`\n${output}\n\`\`\`\n`;
@@ -520,17 +550,37 @@ class ProcessManager extends EventEmitter {
                   }
                 }
               } else if (Array.isArray(msgContent)) {
-                // Fallback: extract content from message
+                // Fallback: extract content from message (may contain multiple tool_results)
                 for (const block of msgContent) {
                   if (block.type === 'tool_result' && block.content) {
+                    // Resolve tool name for this specific result
+                    let blockToolName = resolvedToolName;
+                    let blockTaskDesc = resolvedTaskDesc;
+                    if (block.tool_use_id && pendingToolCalls.has(block.tool_use_id)) {
+                      const info = pendingToolCalls.get(block.tool_use_id)!;
+                      blockToolName = info.name;
+                      blockTaskDesc = info.description || '';
+                      pendingToolCalls.delete(block.tool_use_id);
+                    } else if (toolCallQueue.length > 0) {
+                      const info = toolCallQueue.shift()!;
+                      blockToolName = info.name;
+                      blockTaskDesc = info.description || '';
+                    }
                     const content = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
                     const lines = content.split('\n');
-                    if (lines.length <= 5 && content.length <= 500) {
-                      resultBlock = `\n\`\`\`\n${content}\n\`\`\`\n`;
+                    const btn = blockToolName.toLowerCase();
+                    let blockResult = '';
+                    if (btn === 'task' || btn === 'taskoutput') {
+                      const label = blockTaskDesc
+                        ? `🤖 子任务结果: ${blockTaskDesc} (${lines.length} 行)`
+                        : `🤖 子任务结果 (${lines.length} 行)`;
+                      blockResult = `\n<details><summary>${label}</summary>\n\n\`\`\`\n${content}\n\`\`\`\n\n</details>\n`;
+                    } else if (lines.length <= 5 && content.length <= 500) {
+                      blockResult = `\n\`\`\`\n${content}\n\`\`\`\n`;
                     } else {
-                      resultBlock = `\n<details><summary>返回结果 (${lines.length} 行)</summary>\n\n\`\`\`\n${content}\n\`\`\`\n\n</details>\n`;
+                      blockResult = `\n<details><summary>返回结果 (${lines.length} 行)</summary>\n\n\`\`\`\n${content}\n\`\`\`\n\n</details>\n`;
                     }
-                    break;
+                    resultBlock += blockResult;
                   }
                 }
               }
@@ -815,9 +865,9 @@ class ProcessManager extends EventEmitter {
    * Register an external process (e.g. from alternative engines like Kiro CLI)
    * so it appears in getAllProcesses() and getProcess().
    */
-  registerExternalProcess(id: string, agent: string, step: string, runId?: string): ProcessInfo {
+  registerExternalProcess(id: string, agent: string, step: string, runId?: string, stepId?: string): ProcessInfo {
     const proc: ProcessInfo = {
-      id, agent, step,
+      id, agent, step, stepId,
       status: 'running',
       startTime: new Date(),
       output: '', error: '',

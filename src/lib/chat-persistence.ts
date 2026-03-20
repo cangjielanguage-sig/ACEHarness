@@ -1,12 +1,11 @@
 /**
  * 聊天会话持久化层
- * 将聊天记录存储为 YAML 文件：data/chat-sessions/{sessionId}.yaml
+ * 将聊天记录存储为 JSON 文件：data/chat-sessions/{sessionId}.json
  */
 
-import { mkdir, writeFile, readFile, readdir, unlink, rm } from 'fs/promises';
+import { mkdir, writeFile, readFile, readdir, unlink } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
-import { stringify, parse } from 'yaml';
 
 const CHAT_DIR = resolve(process.cwd(), 'data', 'chat-sessions');
 
@@ -59,17 +58,16 @@ async function ensureDir() {
 
 function sessionPath(id: string): string {
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return resolve(CHAT_DIR, `${safeId}.yaml`);
+  return resolve(CHAT_DIR, `${safeId}.json`);
 }
 
-/** 截断过长的 action result，避免 YAML 文件过大 */
+/** 截断过长的 action result，避免文件过大 */
 function truncateResults(messages: PersistedMessage[]): PersistedMessage[] {
   const MAX_RESULT_LEN = 5000;
   return messages.map(m => ({
     ...m,
     actions: m.actions?.map(a => {
       let result = a.result;
-      // Strip large fields before size check
       if (result && typeof result === 'object') {
         if (Array.isArray(result.skills)) {
           result = { ...result, skills: result.skills.map((s: any) => ({ ...s, detailedDescription: undefined })) };
@@ -83,7 +81,7 @@ function truncateResults(messages: PersistedMessage[]): PersistedMessage[] {
         result: result && JSON.stringify(result).length > MAX_RESULT_LEN
           ? { _truncated: true, summary: JSON.stringify(result).slice(0, 500) }
           : result,
-        snapshot: undefined, // 不持久化 snapshot，太大
+        snapshot: undefined,
       };
     }),
   }));
@@ -95,14 +93,13 @@ export async function saveChatSession(session: PersistedChatSession): Promise<vo
     ...session,
     messages: truncateResults(session.messages),
   };
-  const content = '# Chat session\n' + stringify(data);
-  await writeFile(sessionPath(session.id), content, 'utf-8');
+  await writeFile(sessionPath(session.id), JSON.stringify(data, null, 2), 'utf-8');
 }
 
 export async function loadChatSession(id: string): Promise<PersistedChatSession | null> {
   try {
     const content = await readFile(sessionPath(id), 'utf-8');
-    return parse(content) as PersistedChatSession;
+    return JSON.parse(content) as PersistedChatSession;
   } catch {
     return null;
   }
@@ -111,13 +108,13 @@ export async function loadChatSession(id: string): Promise<PersistedChatSession 
 export async function listChatSessions(): Promise<ChatSessionSummary[]> {
   await ensureDir();
   const files = await readdir(CHAT_DIR);
-  const yamlFiles = files.filter(f => f.endsWith('.yaml'));
+  const jsonFiles = files.filter(f => f.endsWith('.json'));
 
   const summaries: ChatSessionSummary[] = [];
-  for (const file of yamlFiles) {
+  for (const file of jsonFiles) {
     try {
       const content = await readFile(resolve(CHAT_DIR, file), 'utf-8');
-      const session = parse(content) as PersistedChatSession;
+      const session = JSON.parse(content) as PersistedChatSession;
       const lastMsg = session.messages?.filter(m => m.role !== 'error').slice(-1)[0];
       summaries.push({
         id: session.id,
@@ -147,9 +144,9 @@ export async function deleteChatSession(id: string): Promise<boolean> {
 export async function deleteAllChatSessions(): Promise<number> {
   await ensureDir();
   const files = await readdir(CHAT_DIR);
-  const yamlFiles = files.filter(f => f.endsWith('.yaml'));
-  for (const file of yamlFiles) {
+  const jsonFiles = files.filter(f => f.endsWith('.json'));
+  for (const file of jsonFiles) {
     await unlink(resolve(CHAT_DIR, file));
   }
-  return yamlFiles.length;
+  return jsonFiles.length;
 }
