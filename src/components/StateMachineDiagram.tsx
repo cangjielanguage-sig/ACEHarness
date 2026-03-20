@@ -29,6 +29,16 @@ function formatStateName(name: string): string {
   return name;
 }
 
+interface SupervisorFlowRecord {
+  type: 'question' | 'decision';
+  from: string;
+  to: string;
+  question?: string;
+  method?: string;
+  round: number;
+  timestamp: string;
+}
+
 interface StateMachineDiagramProps {
   states: StateMachineState[];
   onStateClick?: (stateName: string) => void;
@@ -40,7 +50,9 @@ interface StateMachineDiagramProps {
   completedSteps?: string[];
   stateHistory?: StateTransitionRecord[];
   isRunning?: boolean;
-  focusedState?: string | null; // 新增：用于视图跳转的状态，不影响执行状态
+  focusedState?: string | null;
+  supervisorFlow?: SupervisorFlowRecord[];
+  currentPlanRound?: number;
 }
 
 // 自动布局算法：基于层次结构排列节点，优化空间利用
@@ -266,8 +278,33 @@ function StateNode({ data }: any) {
   );
 }
 
+// Supervisor 节点组件
+function SupervisorNode({ data }: any) {
+  const { currentRound, flowCount } = data;
+
+  return (
+    <div className="px-3 py-2 rounded-lg border-2 border-purple-400 bg-purple-50 dark:bg-purple-950 min-w-[180px] shadow-lg">
+      <Handle type="target" position={Position.Top} id="top" />
+      <Handle type="target" position={Position.Left} id="left" />
+      <Handle type="source" position={Position.Bottom} id="bottom" />
+      <Handle type="source" position={Position.Right} id="right" />
+
+      <div className="flex items-center gap-2">
+        <span className="material-symbols-outlined text-purple-500" style={{ fontSize: 18 }}>hub</span>
+        <div className="font-semibold text-sm text-purple-700 dark:text-purple-300">Supervisor</div>
+      </div>
+      {currentRound !== undefined && (
+        <div className="mt-1 text-xs text-purple-600 dark:text-purple-400">
+          第 {currentRound + 1} 轮 · {flowCount} 条记录
+        </div>
+      )}
+    </div>
+  );
+}
+
 const nodeTypes: NodeTypes = {
   stateNode: StateNode,
+  supervisorNode: SupervisorNode,
 };
 
 // 根据两个节点的相对位置计算最佳连接点
@@ -324,6 +361,8 @@ function StateMachineDiagramInner({
   stateHistory = [],
   isRunning = false,
   focusedState,
+  supervisorFlow = [],
+  currentPlanRound,
 }: StateMachineDiagramProps) {
   const [showAllEdges, setShowAllEdges] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
@@ -397,8 +436,9 @@ function StateMachineDiagramInner({
     });
 
     console.log('[StateMachineDiagram] Total nodes created:', nodes.length);
+
     return nodes;
-  }, [states, currentState, currentStep, completedSteps, onStepClick, onForceTransition, isRunning, stateHistory]);
+  }, [states, currentState, currentStep, completedSteps, onStepClick, onForceTransition, isRunning, stateHistory, supervisorFlow, currentPlanRound]);
 
   // 转换为 ReactFlow 边
   const initialEdges: Edge[] = useMemo(() => {
@@ -652,7 +692,7 @@ function StateMachineDiagramInner({
     }
 
     return edges;
-  }, [states, stateHistory, currentState, showAllEdges]);
+  }, [states, stateHistory, currentState, showAllEdges, supervisorFlow, currentPlanRound]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);

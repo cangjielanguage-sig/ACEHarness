@@ -15,6 +15,10 @@ allowedTools:
   - Edit
   - Glob
   - Grep
+keywords:
+  - 编码
+  - FFI
+  - 实现
 capabilities:
   - 仓颉接口实现
   - C++ FFI 实现

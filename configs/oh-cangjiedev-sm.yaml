@@ -22,6 +22,8 @@ workflow:
             .ace-outputs/{runId}/Gap_分析.md。
           skills:
             - ohos-cangjie-analyst-skill
+          enablePlanLoop: true
+          maxPlanRounds: 2
       transitions:
         - to: 架构设计
           condition:
@@ -58,6 +60,8 @@ workflow:
             3. 输出路径：.ace-outputs/{runId}/架构设计.md
           skills:
             - ohos-cangjie-architect-skill
+          enablePlanLoop: true
+          maxPlanRounds: 2
       transitions:
         - to: 实现编码
           condition:
@@ -109,6 +113,8 @@ workflow:
             - cat out/rk3568/error.log 2>/dev/null | head -80
           skills:
             - ohos-cangjie-reviewer-skill
+          enablePlanLoop: true
+          maxPlanRounds: 2
       transitions:
         - to: 红军审查
           condition:
@@ -161,6 +167,8 @@ workflow:
             } ``` pass/conditional_pass 时 next_state 填「最终验证」，fail 时填「实现编码」。
           skills:
             - ohos-cangjie-reviewer-skill
+          enablePlanLoop: true
+          maxPlanRounds: 2
       transitions:
         - to: 最终验证
           condition:
@@ -206,6 +214,8 @@ workflow:
             } ``` pass 时 next_state 填「完成」，fail 时填「实现编码」。
           skills:
             - ohos-cangjie-reviewer-skill
+          enablePlanLoop: true
+          maxPlanRounds: 2
       transitions:
         - to: 完成
           condition:
@@ -241,4 +251,5 @@ context:
   projectRoot: /home/wujizhou/worksapce
   requirements: 请帮我分析ohos.file.fs这个对应ArkTS的鸿蒙API接口，然后开发对应的仓颉接口，并按照优先级排序，选取5个方法进行开发
   timeoutMinutes: 300
+  routerModel: claude-sonnet-4-6
   skills: []
