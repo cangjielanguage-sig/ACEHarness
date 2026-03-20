@@ -1654,9 +1654,11 @@ class WorkflowManager extends EventEmitter {
       prompt += `## 信息请求协议\n`;
       prompt += `在执行任务前，请先评估你是否有足够的信息。\n`;
       prompt += `如果信息不足，先进行信息收集而不直接执行任务，请使用以下格式声明你需要的信息：\n`;
-      prompt += `- 需要技术/专业信息：[NEED_INFO] 问题描述\n`;
-      prompt += `- 需要用户/人类确认：[NEED_INFO:human] 问题描述\n`;
-      prompt += `- 信息已充分可以执行：[PLAN_DONE]，并执行具体任务\n`;
+      prompt += `- 需要技术/专业信息补充信息时：[NEED_INFO] 问题描述\n`;
+      prompt += `- 需要用户/人工补充信息时：[NEED_INFO:human] 问题描述\n`;
+      prompt += `- 如果有多个问题需要确认，也只需要列出一个[NEED_INFO]/[NEED_INFO:human]，并在问题描述中列出所有需要确认的问题\n`;
+      prompt += `- 如果有问题需要确认，则不执行任务，直接将问题以上述格式进行输出，结束本轮执行，不需要等待回复，supervisor会给你路由到对应的专家，信息收集可能存在多轮\n`;
+      prompt += `- 如果信息已充分可以执行：输出[PLAN_DONE]，并执行具体任务\n`;
       prompt += `\n注意：你不需要指定由谁来回答技术问题，系统会自动路由到合适的专家。\n\n`;
     }
 
