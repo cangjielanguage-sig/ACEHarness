@@ -1421,6 +1421,16 @@ export class StateMachineWorkflowManager extends EventEmitter {
       }
     }
 
+    // conditional_pass without explicit rule → self-transition (continue iterating)
+    if (result.verdict === 'conditional_pass') {
+      this.emit('escalation', {
+        state: result.stateName,
+        reason: `有条件通过 (conditional_pass)，继续迭代当前状态`,
+        result,
+      });
+      return result.stateName;
+    }
+
     // No matching transition - wait for human decision instead of crashing
     this.emit('escalation', {
       state: result.stateName,
@@ -1456,12 +1466,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
     condition: TransitionCondition,
     result: StateExecutionResult
   ): boolean {
-    // Check verdict with compatibility: conditional_pass matches pass rules
+    // Check verdict match (strict — no fallback for conditional_pass)
     if (condition.verdict && result.verdict !== condition.verdict) {
-      // Allow conditional_pass to match pass transitions as fallback
-      if (!(result.verdict === 'conditional_pass' && condition.verdict === 'pass')) {
-        return false;
-      }
+      return false;
     }
 
     // Check issue types

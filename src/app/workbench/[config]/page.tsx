@@ -4,7 +4,7 @@ import { useEffect, useCallback, useState, useRef } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ClipLoader } from 'react-spinners';
-import { configApi, workflowApi, agentApi, runsApi, processApi, streamApi } from '@/lib/api';
+import { configApi, workflowApi, agentApi, runsApi, processApi, streamApi, scheduleApi } from '@/lib/api';
 import { useWorkflowState } from '@/hooks/useWorkflowState';
 import type { ViewMode } from '@/hooks/useWorkflowState';
 import FlowDiagram from '@/components/FlowDiagram';
@@ -27,6 +27,8 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useToast } from '@/components/ui/toast';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
@@ -117,6 +119,9 @@ export default function WorkbenchPage() {
   const [showSkillSelector, setShowSkillSelector] = useState(false);
   const [designTab, setDesignTab] = useState<'workflow' | 'config'>('workflow');
   const [forceTransitionModal, setForceTransitionModal] = useState<{ targetState: string; instruction: string } | null>(null);
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [scheduleJobs, setScheduleJobs] = useState<any[]>([]);
+  const [loadingSchedules, setLoadingSchedules] = useState(false);
   const liveStreamRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveStreamLenRef = useRef(0);
   const liveStreamStepRef = useRef<string>('');
@@ -653,6 +658,31 @@ export default function WorkbenchPage() {
     } catch (error: any) {
       addLog('system', 'error', `停止失败: ${error.message}`);
     }
+  };
+
+  const loadScheduleJobs = async () => {
+    setLoadingSchedules(true);
+    try {
+      const data = await scheduleApi.list();
+      setScheduleJobs((data.jobs || []).filter((j: any) => j.configFile === configFile));
+    } catch { setScheduleJobs([]); }
+    setLoadingSchedules(false);
+  };
+
+  const handleQuickCreateSchedule = async () => {
+    try {
+      const now = new Date();
+      await scheduleApi.create({
+        name: `${workflowConfig?.workflow?.name || configFile} - 定时`,
+        configFile,
+        enabled: false,
+        mode: 'simple',
+        interval: { value: 1, unit: 'day' },
+        fixedTime: { hour: now.getHours(), minute: 0 },
+      });
+      toast('success', '已创建定时任务（默认禁用），请编辑调度规则后启用');
+      loadScheduleJobs();
+    } catch (e: any) { toast('error', e.message); }
   };
 
   const handleForceTransition = (targetState: string) => {
@@ -1550,6 +1580,9 @@ export default function WorkbenchPage() {
             </Button>
             <Button variant="secondary" size="sm" onClick={() => openContextEditor('global')} title="全局上下文">
               <span className="material-symbols-outlined text-sm">edit_note</span><span className="hidden sm:inline">上下文</span>
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => { setShowScheduleDialog(true); loadScheduleJobs(); }} title="定时执行">
+              <span className="material-symbols-outlined text-sm">schedule</span><span className="hidden sm:inline">定时</span>
             </Button>
           </>)}
           {isDesignMode && (
@@ -2685,6 +2718,57 @@ export default function WorkbenchPage() {
         </div>
       )}
       {confirmDialogProps && <ConfirmDialog {...confirmDialogProps} />}
+
+      {/* Schedule Dialog */}
+      <Dialog open={showScheduleDialog} onOpenChange={setShowScheduleDialog}>
+        <DialogContent className="max-w-lg">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <span className="material-symbols-outlined">schedule</span>定时执行
+              </h3>
+              <Button size="sm" onClick={handleQuickCreateSchedule}>
+                <span className="material-symbols-outlined text-sm mr-1">add</span>快速创建
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">当前配置: {configFile}</p>
+            {loadingSchedules ? (
+              <div className="text-center py-6 text-muted-foreground">加载中...</div>
+            ) : scheduleJobs.length === 0 ? (
+              <div className="text-center py-6 text-muted-foreground">
+                <p>暂无定时任务</p>
+                <p className="text-xs mt-1">点击「快速创建」添加每天凌晨自动执行，或前往定时任务页面自定义</p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {scheduleJobs.map((job: any) => (
+                  <div key={job.id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{job.name}</div>
+                      <div className="text-xs text-muted-foreground font-mono">{job.cronExpression || '未配置'}</div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 ml-3">
+                      <Switch checked={job.enabled} onCheckedChange={async () => { await scheduleApi.toggle(job.id); loadScheduleJobs(); }} />
+                      <Button variant="ghost" size="sm" onClick={async () => { await scheduleApi.trigger(job.id); toast('success', '已触发'); }} title="立即执行">
+                        <span className="material-symbols-outlined text-sm">play_arrow</span>
+                      </Button>
+                      <Button variant="ghost" size="sm" className="text-destructive" onClick={async () => { await scheduleApi.delete(job.id); loadScheduleJobs(); }} title="删除">
+                        <span className="material-symbols-outlined text-sm">delete</span>
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-between pt-2 border-t">
+              <Button variant="link" size="sm" onClick={() => { setShowScheduleDialog(false); window.open('/schedules', '_blank'); }}>
+                <span className="material-symbols-outlined text-sm mr-1">open_in_new</span>管理所有定时任务
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setShowScheduleDialog(false)}>关闭</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       {showContextEditor && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setShowContextEditor(false)}>
           <div className="bg-card rounded-lg w-[600px] max-w-[90%] border" onClick={(e) => e.stopPropagation()}>

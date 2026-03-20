@@ -439,3 +439,48 @@ export const streamApi = {
     return data.content || '';
   },
 };
+
+export const scheduleApi = {
+  async list(): Promise<{ jobs: any[] }> {
+    const res = await fetch(`${API_BASE}/schedules`);
+    if (!res.ok) throw new Error('获取定时任务列表失败');
+    return res.json();
+  },
+  async get(id: string): Promise<{ job: any }> {
+    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error('获取定时任务失败');
+    return res.json();
+  },
+  async create(job: any): Promise<{ job: any }> {
+    const res = await fetch(`${API_BASE}/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(job),
+    });
+    if (!res.ok) throw new Error('创建定时任务失败');
+    return res.json();
+  },
+  async update(id: string, patch: any): Promise<{ job: any }> {
+    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error('更新定时任务失败');
+    return res.json();
+  },
+  async delete(id: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('删除定时任务失败');
+  },
+  async trigger(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/trigger`, { method: 'POST' });
+    if (!res.ok) throw new Error('触发定时任务失败');
+    return res.json();
+  },
+  async toggle(id: string): Promise<{ job: any }> {
+    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/toggle`, { method: 'POST' });
+    if (!res.ok) throw new Error('切换定时任务状态失败');
+    return res.json();
+  },
+};

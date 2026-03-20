@@ -2,7 +2,7 @@
  * Chat Action Block 协议 - 类型定义 + 执行器
  */
 
-import { configApi, agentApi, runsApi, workflowApi } from './api';
+import { configApi, agentApi, runsApi, workflowApi, scheduleApi } from './api';
 
 // Action 类型枚举
 export type ActionType =
@@ -15,6 +15,9 @@ export type ActionType =
   | 'skill.list'
   | 'prompt.analyze' | 'prompt.optimize'
   | 'wizard.workflow' | 'wizard.agent' | 'wizard.skill'
+  // Schedule actions
+  | 'schedule.list' | 'schedule.get' | 'schedule.create' | 'schedule.update'
+  | 'schedule.delete' | 'schedule.trigger' | 'schedule.toggle'
   // GitCode actions
   | 'gitcode.get_pr' | 'gitcode.get_issue' | 'gitcode.get_pr_commits'
   | 'gitcode.get_pr_changed_files' | 'gitcode.get_pr_comments' | 'gitcode.get_issues_by_pr'
@@ -54,6 +57,14 @@ export const RISK_MAP: Record<ActionType, RiskLevel> = {
   'wizard.workflow': 'safe',
   'wizard.agent': 'safe',
   'wizard.skill': 'safe',
+  // Schedule
+  'schedule.list': 'safe',
+  'schedule.get': 'safe',
+  'schedule.create': 'mutating',
+  'schedule.update': 'mutating',
+  'schedule.delete': 'destructive',
+  'schedule.trigger': 'mutating',
+  'schedule.toggle': 'mutating',
   // GitCode - safe (read-only)
   'gitcode.get_pr': 'safe',
   'gitcode.get_issue': 'safe',
@@ -319,6 +330,23 @@ async function executeActionInner(type: ActionType, params: Record<string, any>)
       return { wizardType: 'agent', step: params.step || 1, totalSteps: 3, data: params };
     case 'wizard.skill':
       return { wizardType: 'skill', step: params.step || 1, totalSteps: 3, data: params };
+
+    // Schedule actions
+    case 'schedule.list':
+      return scheduleApi.list();
+    case 'schedule.get':
+      return scheduleApi.get(params.id);
+    case 'schedule.create':
+      return scheduleApi.create(params);
+    case 'schedule.update':
+      return scheduleApi.update(params.id, params);
+    case 'schedule.delete':
+      await scheduleApi.delete(params.id);
+      return { success: true };
+    case 'schedule.trigger':
+      return scheduleApi.trigger(params.id);
+    case 'schedule.toggle':
+      return scheduleApi.toggle(params.id);
 
     default: {
       // GitCode actions - route to /api/gitcode

@@ -29,9 +29,8 @@ interface DocumentsPanelProps {
   runId: string | null;
 }
 
-type SortField = 'name' | 'time' | 'size' | 'phase';
+type SortField = 'name' | 'time' | 'size';
 type SortOrder = 'asc' | 'desc';
-type GroupBy = 'none' | 'phase' | 'role';
 
 const roleBadge: Record<string, string> = {
   attacker: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
@@ -40,6 +39,14 @@ const roleBadge: Record<string, string> = {
 };
 const roleIcon: Record<string, string> = { attacker: 'swords', defender: 'shield', judge: 'gavel' };
 const roleLabel: Record<string, string> = { attacker: '攻击方', defender: '防守方', judge: '裁判' };
+
+/** Extract group name from filename: "根因定位-定位空指针路径.md" → "根因定位" */
+function getFileGroup(filename: string): string {
+  const base = filename.replace(/\.md$/i, '');
+  const idx = base.indexOf('-');
+  if (idx > 0) return base.substring(0, idx);
+  return '其他';
+}
 
 export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
   const [files, setFiles] = useState<DocFile[]>([]);
@@ -50,9 +57,8 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
   // Sorting / filtering
   const [sortField, setSortField] = useState<SortField>('time');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
-  const [groupBy, setGroupBy] = useState<GroupBy>('phase');
-  const [filterPhase, setFilterPhase] = useState('all');
-  const [filterRole, setFilterRole] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeGroup, setActiveGroup] = useState<string | null>(null); // null = all
 
   // Selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -81,33 +87,34 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
 
   useEffect(() => { loadFiles(); }, [loadFiles]);
 
-  const phases = useMemo(() => Array.from(new Set(files.map(f => f.phaseName).filter(Boolean))).sort(), [files]);
-  const roles = useMemo(() => Array.from(new Set(files.map(f => f.role).filter(Boolean))), [files]);
+  // Build groups from filenames
+  const groups = useMemo(() => {
+    const map: Record<string, DocFile[]> = {};
+    files.forEach(f => {
+      const g = getFileGroup(f.filename);
+      (map[g] ||= []).push(f);
+    });
+    return map;
+  }, [files]);
 
+  const groupNames = useMemo(() => Object.keys(groups).sort(), [groups]);
+
+  // Filtered + sorted files
   const processedFiles = useMemo(() => {
-    let filtered = [...files];
-    if (filterPhase !== 'all') filtered = filtered.filter(f => f.phaseName === filterPhase);
-    if (filterRole !== 'all') filtered = filtered.filter(f => f.role === filterRole);
+    let filtered = activeGroup ? (groups[activeGroup] || []) : [...files];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(f => f.filename.toLowerCase().includes(q) || f.baseName.toLowerCase().includes(q));
+    }
     filtered.sort((a, b) => {
       let c = 0;
       if (sortField === 'name') c = a.baseName.localeCompare(b.baseName);
       else if (sortField === 'time') c = new Date(a.modifiedTime).getTime() - new Date(b.modifiedTime).getTime();
       else if (sortField === 'size') c = a.size - b.size;
-      else if (sortField === 'phase') c = (a.phaseName || '').localeCompare(b.phaseName || '');
       return sortOrder === 'asc' ? c : -c;
     });
     return filtered;
-  }, [files, filterPhase, filterRole, sortField, sortOrder]);
-
-  const groupedFiles = useMemo(() => {
-    if (groupBy === 'none') return { '所有文档': processedFiles };
-    const groups: Record<string, DocFile[]> = {};
-    processedFiles.forEach(f => {
-      const key = groupBy === 'phase' ? (f.phaseName || '其他') : (roleLabel[f.role] || f.role || '未知');
-      (groups[key] ||= []).push(f);
-    });
-    return groups;
-  }, [processedFiles, groupBy]);
+  }, [files, groups, activeGroup, searchQuery, sortField, sortOrder]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) setSortOrder(o => o === 'asc' ? 'desc' : 'asc');
@@ -159,7 +166,6 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
 
   const downloadFile = (file: DocFile) => {
     const blob = new Blob([previewContent || ''], { type: 'text/markdown;charset=utf-8' });
-    // If we don't have content loaded, fetch it first
     if (!previewContent || previewFile?.filename !== file.filename) {
       runsApi.getDocumentContent(runId!, file.filename).then(({ content }) => {
         const b = new Blob([content], { type: 'text/markdown;charset=utf-8' });
@@ -186,24 +192,59 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
     );
   }
 
+  // --- Left sidebar: folder tree ---
+  const folderTree = () => (
+    <div className="w-48 shrink-0 border-r border-border bg-muted/20 flex flex-col overflow-hidden">
+      <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border/50">文件夹</div>
+      <div className="flex-1 overflow-y-auto">
+        <div
+          className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer transition-colors hover:bg-muted/50 ${activeGroup === null ? 'bg-accent text-accent-foreground font-medium' : ''}`}
+          onClick={() => setActiveGroup(null)}
+        >
+          <span className="material-symbols-outlined text-sm">folder</span>
+          <span className="flex-1">全部文件</span>
+          <span className="text-[10px] text-muted-foreground">{files.length}</span>
+        </div>
+        {groupNames.map(g => (
+          <div
+            key={g}
+            className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer transition-colors hover:bg-muted/50 ${activeGroup === g ? 'bg-accent text-accent-foreground font-medium' : ''}`}
+            onClick={() => setActiveGroup(g)}
+          >
+            <span className="material-symbols-outlined text-sm">folder</span>
+            <span className="flex-1 truncate">{g}</span>
+            <span className="text-[10px] text-muted-foreground">{groups[g]?.length || 0}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // --- Toolbar ---
   const toolbar = (compact?: boolean) => (
     <div className={`flex items-center gap-2 flex-wrap ${compact ? 'p-2' : 'p-3'}`}>
-      <Select value={groupBy} onValueChange={v => setGroupBy(v as GroupBy)}>
-        <SelectTrigger className="h-7 text-xs w-[100px]"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="none">不分组</SelectItem>
-          <SelectItem value="phase">按阶段</SelectItem>
-          <SelectItem value="role">按角色</SelectItem>
-        </SelectContent>
-      </Select>
-      {phases.length > 1 && (
-        <Select value={filterPhase} onValueChange={setFilterPhase}>
-          <SelectTrigger className="h-7 text-xs w-[100px]"><SelectValue placeholder="筛选阶段" /></SelectTrigger>
+      {!compact && (
+        <Input
+          placeholder="搜索文件..."
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          className="h-7 text-xs w-40"
+        />
+      )}
+      {!compact && (
+        <Select value={sortField} onValueChange={v => { setSortField(v as SortField); }}>
+          <SelectTrigger className="h-7 text-xs w-[90px]"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">所有阶段</SelectItem>
-            {phases.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+            <SelectItem value="name">按名称</SelectItem>
+            <SelectItem value="time">按时间</SelectItem>
+            <SelectItem value="size">按大小</SelectItem>
           </SelectContent>
         </Select>
+      )}
+      {!compact && (
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setSortOrder(o => o === 'asc' ? 'desc' : 'asc')} title={sortOrder === 'asc' ? '升序' : '降序'}>
+          <span className="material-symbols-outlined text-sm">{sortOrder === 'asc' ? 'arrow_upward' : 'arrow_downward'}</span>
+        </Button>
       )}
       <div className="flex-1" />
       {selected.size > 0 && (
@@ -227,13 +268,13 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
     </div>
   );
 
+  // --- File row ---
   const fileRow = (file: DocFile, compact: boolean) => {
     const isRenaming = renamingFile === file.filename;
     const isSelected = selected.has(file.filename);
     const isActive = previewFile?.filename === file.filename;
 
     if (compact) {
-      // Embedded mode: just show name, click opens modal with preview
       return (
         <div
           key={file.filename}
@@ -246,7 +287,6 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
       );
     }
 
-    // Full mode (inside modal)
     return (
       <div
         key={file.filename}
@@ -275,6 +315,7 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
           </Badge>
         )}
         <span className="text-[10px] text-muted-foreground shrink-0 w-14 text-right">{(file.size / 1024).toFixed(1)}K</span>
+        <span className="text-[10px] text-muted-foreground shrink-0 w-20 text-right">{new Date(file.modifiedTime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={e => e.stopPropagation()}>
             <Button variant="ghost" size="sm" className="h-5 w-5 p-0 shrink-0"><span className="material-symbols-outlined text-sm">more_vert</span></Button>
@@ -296,33 +337,54 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
     );
   };
 
+  // --- File list ---
   const fileList = (compact: boolean) => (
     <div className="flex-1 overflow-y-auto">
       {loading && <div className="text-center text-xs text-muted-foreground py-8">加载中...</div>}
       {!loading && processedFiles.length === 0 && (
         <div className="text-center text-xs text-muted-foreground py-8">暂无文档</div>
       )}
-      {!loading && Object.entries(groupedFiles).map(([group, gFiles]) => (
-        <div key={group}>
-          {groupBy !== 'none' && (
-            <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground bg-muted/30 border-b border-border/30 sticky top-0 z-10">
-              {group} ({gFiles.length})
-            </div>
-          )}
-          {!compact && groupBy === 'none' && processedFiles.length > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-muted-foreground border-b border-border/30">
-              <Checkbox checked={selected.size === processedFiles.length && processedFiles.length > 0} onCheckedChange={toggleSelectAll} className="h-3 w-3" />
-              <span>全选</span>
-            </div>
-          )}
-          {gFiles.map(f => fileRow(f, compact))}
+      {!loading && !compact && processedFiles.length > 0 && (
+        <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-muted-foreground border-b border-border/30 bg-muted/20">
+          <Checkbox checked={selected.size === processedFiles.length && processedFiles.length > 0} onCheckedChange={toggleSelectAll} className="h-3 w-3" />
+          <span className="flex-1 cursor-pointer" onClick={() => toggleSort('name')}>
+            文件名 {sortField === 'name' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}
+          </span>
+          <span className="w-14 text-right cursor-pointer" onClick={() => toggleSort('size')}>
+            大小 {sortField === 'size' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}
+          </span>
+          <span className="w-20 text-right cursor-pointer" onClick={() => toggleSort('time')}>
+            时间 {sortField === 'time' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}
+          </span>
+          <span className="w-5" />
+        </div>
+      )}
+      {!loading && processedFiles.map(f => fileRow(f, compact))}
+    </div>
+  );
+
+  // --- Compact embedded: show folder groups + files ---
+  const compactView = () => (
+    <div className="flex-1 overflow-y-auto">
+      {loading && <div className="text-center text-xs text-muted-foreground py-8">加载中...</div>}
+      {!loading && files.length === 0 && (
+        <div className="text-center text-xs text-muted-foreground py-8">暂无文档</div>
+      )}
+      {!loading && groupNames.map(g => (
+        <div key={g}>
+          <div className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-semibold text-muted-foreground bg-muted/30 border-b border-border/30 sticky top-0 z-10">
+            <span className="material-symbols-outlined text-xs">folder</span>
+            {g} ({groups[g]?.length || 0})
+          </div>
+          {(groups[g] || []).map(f => fileRow(f, true))}
         </div>
       ))}
     </div>
   );
 
+  // --- Preview pane ---
   const previewPane = () => (
-    <div className="flex-1 flex flex-col overflow-hidden border-l border-border">
+    <div className="flex-1 flex flex-col overflow-hidden">
       {previewFile ? (
         <>
           <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/20 shrink-0">
@@ -356,18 +418,27 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
     <>
       {/* Embedded compact mode */}
       <div className="flex flex-col h-full">
-        {toolbar(true)}
-        {fileList(true)}
+        <div className="flex items-center gap-2 p-2">
+          <div className="flex-1" />
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={loadFiles} disabled={loading}>
+            <span className="material-symbols-outlined text-sm">refresh</span>
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setModalOpen(true)} title="弹出文件管理器">
+            <span className="material-symbols-outlined text-sm">open_in_new</span>
+          </Button>
+        </div>
+        {compactView()}
       </div>
 
-      {/* Popup modal */}
+      {/* Popup modal — Explorer style */}
       <Dialog open={modalOpen} onOpenChange={(open) => { setModalOpen(open); if (!open) setFullscreen(false); }}>
         <DialogContent className={`p-0 flex flex-col gap-0 ${fullscreen ? 'max-w-none w-screen h-screen rounded-none' : 'max-w-5xl w-[90vw] h-[80vh]'}`}>
           <div className="border-b border-border">
             {toolbar(false)}
           </div>
           <div className="flex flex-1 overflow-hidden">
-            <div className="w-[420px] shrink-0 flex flex-col overflow-hidden border-r border-border">
+            {folderTree()}
+            <div className="flex-1 flex flex-col overflow-hidden border-r border-border">
               {fileList(false)}
             </div>
             {previewPane()}
