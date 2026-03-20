@@ -102,6 +102,30 @@ export default function WorkbenchPage() {
   const [showDesignRequirements, setShowDesignRequirements] = useState(true);
   const [showRunRequirements, setShowRunRequirements] = useState(true);
   const [iterationFeedback, setIterationFeedback] = useState('');
+  const [pendingPlanQuestion, setPendingPlanQuestion] = useState<{ question: string; fromAgent: string; round: number } | null>(null);
+  const [supervisorFlow, setSupervisorFlow] = useState<{
+    type: 'question' | 'decision';
+    from: string;
+    to: string;
+    question?: string;
+    method?: string;
+    round: number;
+    timestamp: string;
+  }[]>([]);
+  const [agentFlow, setAgentFlow] = useState<{
+    id: string;
+    type: 'stream' | 'request' | 'response' | 'supervisor';
+    fromAgent: string;
+    toAgent: string;
+    message?: string;
+    stateName: string;
+    stepName: string;
+    round: number;
+    timestamp: string;
+  }[]>([]);
+  const [currentPlanRound, setCurrentPlanRound] = useState<number>(0);
+  const [planAnswer, setPlanAnswer] = useState('');
+  const [sendingPlanAnswer, setSendingPlanAnswer] = useState(false);
   const liveStreamFeedbackRef = useRef<HTMLInputElement>(null);
   const [sendingFeedback, setSendingFeedback] = useState(false);
   const [inlineFeedbacks, setInlineFeedbacks] = useState<{ message: string; timestamp: string; streamIndex: number }[]>([]);
@@ -176,6 +200,12 @@ export default function WorkbenchPage() {
         }
         if (status.phaseContexts) {
           dispatch({ type: 'SET_PHASE_CONTEXTS', payload: status.phaseContexts });
+        }
+        if ((status as any).supervisorFlow) {
+          setSupervisorFlow((status as any).supervisorFlow);
+        }
+        if ((status as any).agentFlow) {
+          setAgentFlow((status as any).agentFlow);
         }
 
         {
@@ -393,6 +423,12 @@ export default function WorkbenchPage() {
       if (detail.transitionCount !== undefined) {
         setSmTransitionCount(detail.transitionCount);
       }
+      if (detail.supervisorFlow) {
+        setSupervisorFlow(detail.supervisorFlow);
+      }
+      if (detail.agentFlow) {
+        setAgentFlow(detail.agentFlow);
+      }
 
       // Restore contexts
       if (detail.globalContext !== undefined) {
@@ -417,6 +453,31 @@ export default function WorkbenchPage() {
         setPendingCheckpointPhase(detail.pendingCheckpoint.phase || null);
       } else {
         setPendingCheckpointPhase(null);
+      }
+
+      // Restore state-machine human approval dialog when viewing a historical run
+      if (detail.mode === 'state-machine' && detail.currentState === '__human_approval__') {
+        const approvalTransition = (detail.stateHistory || []).findLast?.((item: any) => item.to === '__human_approval__');
+        const currentStateName = detail.currentState || '__human_approval__';
+        const workflowStates = (workflowConfig as any)?.workflow?.states?.map((state: any) => state.name) || [];
+        const restoredAvailableStates = detail.pendingCheckpoint?.availableStates
+          || workflowStates.filter((stateName: string) => stateName !== '__human_approval__');
+        const suggestedNextState = detail.pendingCheckpoint?.suggestedNextState
+          || restoredAvailableStates[0]
+          || '完成';
+        setHumanApprovalData({
+          currentState: currentStateName,
+          nextState: suggestedNextState,
+          result: {
+            verdict: approvalTransition?.issues?.length > 0 ? 'conditional_pass' : 'pass',
+            issues: approvalTransition?.issues || [],
+            summary: approvalTransition?.reason || '等待人工审查',
+            stepOutputs: [],
+          },
+          availableStates: restoredAvailableStates,
+        });
+      } else {
+        setHumanApprovalData(null);
       }
       addLog('system', 'info', `查看历史运行: ${runId}`);
     } catch (error: any) {
@@ -593,8 +654,45 @@ export default function WorkbenchPage() {
         }
         addLog('system', 'info', `上下文已更新: ${event.data.scope === 'global' ? '全局' : event.data.phase}`);
         break;
+      case 'plan-question':
+        setPendingPlanQuestion({
+          question: event.data.question,
+          fromAgent: event.data.fromAgent,
+          round: event.data.round
+        });
+        setSupervisorFlow(prev => [...prev, {
+          type: 'question',
+          from: event.data.fromAgent,
+          to: 'user',
+          question: event.data.question,
+          round: event.data.round,
+          timestamp: new Date().toISOString(),
+          stateName: currentPhase,
+        }]);
+        addLog('system', 'warning', `❓ 需要用户回答: ${event.data.question}`);
+        break;
+      case 'plan-round':
+        setCurrentPlanRound(event.data.round);
+        addLog('system', 'info', `🔄 Plan 循环第 ${event.data.round + 1} 轮 - 收集 ${event.data.infoRequests?.length || 0} 个请求`);
+        break;
+      case 'route-decision':
+        setSupervisorFlow(prev => [...prev, {
+          type: 'decision',
+          from: event.data.fromAgent || currentPhase || 'system',
+          to: event.data.route_to,
+          method: event.data.method,
+          question: event.data.question,
+          round: event.data.round,
+          timestamp: new Date().toISOString(),
+          stateName: currentPhase,
+        }]);
+        addLog('system', 'info', `🔀 Supervisor 路由: ${event.data.fromAgent || currentPhase || 'system'} → ${event.data.route_to} (${event.data.method})`);
+        break;
+      case 'agent-flow':
+        setAgentFlow(event.data.agentFlow || []);
+        break;
     }
-  }, [selectedAgent, addLog]);
+  }, [selectedAgent, addLog, currentPhase]);
 
   // Keep a ref to the latest handleEvent so SSE callback never goes stale
   const handleEventRef = useRef(handleEvent);
@@ -633,6 +731,9 @@ export default function WorkbenchPage() {
       setSmStateHistory([]);
       setSmIssueTracker([]);
       setSmTransitionCount(0);
+      setSupervisorFlow([]);
+      setAgentFlow([]);
+      setCurrentPlanRound(0);
       addLog('system', 'info', '正在启动工作流...');
       await workflowApi.start(configFile);
       addLog('system', 'success', '工作流启动成功，等待执行...');
@@ -665,10 +766,34 @@ export default function WorkbenchPage() {
   const executeForceTransition = async () => {
     if (!forceTransitionModal) return;
     try {
-      await workflowApi.forceTransition(forceTransitionModal.targetState, forceTransitionModal.instruction || undefined);
+      const rid = runId || selectedRun?.id;
+
+      // 先查后端内存里的实际状态，避免重复 resume
+      const liveStatus = await workflowApi.getStatus();
+      const alreadyRunningInMemory = liveStatus.status === 'running';
+
+      if (!alreadyRunningInMemory && rid) {
+        // 内存里没有运行中的 workflow，先 resume 再 force-transition
+        setViewingHistoryRun(false);
+        dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'running' });
+        dispatch({ type: 'SET_FAILED_STEPS', payload: [] });
+        await workflowApi.resume(
+          rid,
+          'force-transition',
+          undefined,
+          forceTransitionModal.targetState,
+          forceTransitionModal.instruction || undefined
+        );
+        dispatch({ type: 'SET_VIEW_MODE', payload: 'run' });
+        fetchCurrentStatus();
+      } else {
+        // 内存里已经有运行中的 workflow，直接 force-transition
+        await workflowApi.forceTransition(forceTransitionModal.targetState, forceTransitionModal.instruction || undefined);
+      }
       toast('success', `已请求跳转到: ${forceTransitionModal.targetState}`);
       setForceTransitionModal(null);
-      setHumanApprovalData(null); // 关闭人工审查弹框
+      setHumanApprovalData(null);
+      setPendingCheckpointPhase(null);
     } catch (e: any) {
       toast('error', e.message);
     }
@@ -706,11 +831,29 @@ export default function WorkbenchPage() {
 
   const approveCheckpoint = async () => {
     try {
-      if (isRunning) {
-        await workflowApi.approve();
-      } else {
-        // Workflow not running (restored from pendingCheckpoint) — resume with approve action
-        const rid = runId || selectedRun?.id;
+      const rid = runId || selectedRun?.id;
+
+      // 先查后端内存里的实际状态，避免重复 resume
+      const liveStatus = await workflowApi.getStatus();
+      const alreadyRunningInMemory = liveStatus.status === 'running';
+
+      if (!alreadyRunningInMemory) {
+        // 内存里没有运行中的 workflow，先弹确认再 resume
+        dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const confirmed = await confirm({
+          title: '恢复运行后继续批准？',
+          description: '检测到该工作流当前可能未在服务内存中运行。这通常发生在服务重启或打开历史运行记录时。是否先恢复该运行，再自动执行"批准"？',
+          confirmLabel: '恢复并批准',
+          cancelLabel: '取消',
+        });
+
+        if (!confirmed) {
+          dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
+          return;
+        }
+
         if (rid) {
           setViewingHistoryRun(false);
           dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'running' });
@@ -719,9 +862,13 @@ export default function WorkbenchPage() {
           dispatch({ type: 'SET_VIEW_MODE', payload: 'run' });
           fetchCurrentStatus();
         }
+      } else {
+        // 内存里已经有运行中的 workflow，直接 approve
+        await workflowApi.approve();
       }
+
       dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
-      setIterationFeedback(''); // 清空反馈
+      setIterationFeedback('');
       setPendingCheckpointPhase(null);
       addLog('system', 'success', '✓ 检查点已批准，继续执行');
     } catch (error: any) {
@@ -1660,13 +1807,17 @@ export default function WorkbenchPage() {
                           ? workflowConfig.workflow.states
                           : workflowConfig.workflow.phases
                         )?.map((phase: any, idx: number) => {
-                          const phaseAgents = phase.steps.map((s: any) => {
-                            const role = agentConfigs.find((r: any) => r.name === s.agent);
-                            return { name: s.agent, team: role?.team || 'blue', role: s.role };
-                          });
+                          const phaseAgents = phase.steps 
+                            ? phase.steps.map((s: any) => {
+                                const role = agentConfigs.find((r: any) => r.name === s.agent);
+                                return { name: s.agent, team: role?.team || 'blue', role: s.role };
+                              })
+                            : [{ name: phase.agent, team: 'blue', role: undefined }];
                           const iterState = iterationStates[phase.name];
                           const isActive = currentPhase === phase.name;
-                          const isDone = phase.steps.every((s: any) => completedSteps?.includes(s.name));
+                          const isDone = phase.steps 
+                            ? phase.steps.every((s: any) => completedSteps?.includes(s.name))
+                            : completedSteps?.includes(phase.name);
                           return (<div key={idx}
                             className={`bg-muted rounded-md p-2.5 cursor-pointer transition-colors hover:bg-accent border-l-[3px] ${
                               isActive ? 'border-l-primary bg-accent' : isDone ? 'border-l-green-500' : 'border-transparent'
@@ -1759,6 +1910,9 @@ export default function WorkbenchPage() {
                             focusedState={focusedState}
                             startTime={runStartTime}
                             endTime={runEndTime}
+                            supervisorFlow={supervisorFlow}
+                            agentFlow={agentFlow}
+                            currentPlanRound={currentPlanRound}
                             onStateClick={(s) => setFocusedState(s)}
                             onStepClick={(step) => selectStep(step)}
                             onForceTransition={handleForceTransition}
@@ -2035,7 +2189,7 @@ export default function WorkbenchPage() {
                     <span className="material-symbols-outlined text-xs">sync</span> 工作流运行中
                   </div>
                   <div className="text-xs text-muted-foreground mt-2">
-                    等待步骤开始执行...
+                    {currentPhase === '__human_approval__' ? '等待人工审查...' : '等待步骤开始执行...'}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
                     当前状态: {formatStateName(currentPhase || '') || '未知'}
@@ -2385,6 +2539,56 @@ export default function WorkbenchPage() {
           </div>
         </div>
       </div>)}
+      {pendingPlanQuestion && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-card rounded-lg w-[600px] max-w-[90%] border" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b"><h3 className="text-lg font-semibold"><span className="material-symbols-outlined text-lg mr-2 align-middle">help</span>需要用户回答</h3></div>
+            <div className="p-5">
+              <div className="bg-muted p-4 rounded-md border-l-[3px] border-l-blue-500 mb-4">
+                <p className="text-sm text-muted-foreground mb-2">来自 Agent: <strong className="text-foreground">{pendingPlanQuestion.fromAgent}</strong> (第 {pendingPlanQuestion.round + 1} 轮)</p>
+              </div>
+              <p className="text-base mb-4 whitespace-pre-wrap break-words leading-relaxed">{pendingPlanQuestion.question}</p>
+              <Textarea
+                value={planAnswer}
+                onChange={(e) => setPlanAnswer(e.target.value)}
+                placeholder="请输入您的回答..."
+                rows={4}
+                className="w-full"
+              />
+            </div>
+            <div className="p-5 border-t flex gap-3 justify-end">
+              <Button 
+                onClick={async () => {
+                  if (!planAnswer.trim()) return;
+                  setSendingPlanAnswer(true);
+                  try {
+                    const res = await fetch('/api/workflow/plan-answer', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ answer: planAnswer })
+                    });
+                    if (res.ok) {
+                      setPendingPlanQuestion(null);
+                      setPlanAnswer('');
+                      addLog('system', 'success', '✓ 回答已提交');
+                    } else {
+                      const data = await res.json();
+                      addLog('system', 'error', `提交失败: ${data.error}`);
+                    }
+                  } catch (err: any) {
+                    addLog('system', 'error', `提交失败: ${err.message}`);
+                  } finally {
+                    setSendingPlanAnswer(false);
+                  }
+                }}
+                disabled={!planAnswer.trim() || sendingPlanAnswer}
+              >
+                {sendingPlanAnswer ? '提交中...' : '提交回答'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {showLiveStream && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={stopLiveStream}>
           <div className={`bg-card rounded-lg border flex flex-col ${liveStreamFullscreen ? 'w-full h-full rounded-none' : 'w-[80%] max-w-[800px] max-h-[80vh]'}`} onClick={(e) => e.stopPropagation()}>
@@ -2752,6 +2956,25 @@ export default function WorkbenchPage() {
                   )}
                 </div>
               </div>
+
+              {/* Agent 输出内容 */}
+              {humanApprovalData.result?.stepOutputs?.length > 0 && (
+                <div className="mb-4">
+                  <div className="text-sm font-medium mb-2">Agent 输出</div>
+                  <div className="space-y-2">
+                    {humanApprovalData.result.stepOutputs.map((output: string, idx: number) => (
+                      <details key={idx} open={humanApprovalData.result.stepOutputs.length === 1}>
+                        <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground py-1">
+                          步骤 {idx + 1} 输出 ({output.length > 200 ? `${Math.ceil(output.length / 1024)}KB` : `${output.length} 字符`})
+                        </summary>
+                        <div className="mt-1 p-3 bg-muted/20 rounded border text-xs font-mono whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+                          {output}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* AI 建议的下一步 */}
               <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">

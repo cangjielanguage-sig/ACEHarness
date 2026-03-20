@@ -14,12 +14,19 @@ export const workflowStepSchema = z.object({
   name: z.string().min(1, '步骤名称不能为空'),
   agent: z.string().min(1, 'Agent 名称不能为空'),
   task: z.string().min(1, '任务描述不能为空'),
+  // 可选：在执行 Agent 之前，由系统自动执行的一组预命令（通常是编译 / 测试命令）
+  // 注意：这些命令在后端 Node 环境中串行执行，stdout/stderr 会被收集并注入上下文，
+  // 不会中断整个步骤（即使命令本身返回非 0 退出码）。
+  preCommands: z.array(z.string()).optional(),
   type: z.string().optional(),
   role: z.enum(['attacker', 'defender', 'judge']).optional(),
   constraints: z.array(z.string()).optional(),
   parallelGroup: z.string().optional(),
   enableReviewPanel: z.boolean().optional(), // 是否启用会审模式
   skills: z.array(z.string()).optional(), // 步骤级别的 skills
+  // ---- Supervisor-Lite 新增 ----
+  enablePlanLoop: z.boolean().optional(), // 是否启用 Plan 循环
+  maxPlanRounds: z.number().min(1).max(10).default(3).optional(), // 最大 Plan 轮次
 });
 
 // 检查点 Schema
@@ -51,6 +58,9 @@ export const roleConfigSchema = z.object({
   allowedTools: z.array(z.string()).optional(),
   category: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  // ---- Supervisor-Lite 新增（给 Supervisor 路由器用，不注入 Agent prompt）----
+  keywords: z.array(z.string()).optional(), // 路由关键词
+  description: z.string().optional(), // Agent 能力描述
   reviewPanel: z.object({
     enabled: z.boolean(),
     description: z.string().optional(),
@@ -70,6 +80,7 @@ export const contextConfigSchema = z.object({
   codebase: z.string().optional(),
   timeoutMinutes: z.number().min(1).optional(),
   skills: z.array(z.string()).optional(), // 启用的 skills 列表
+  routerModel: z.string().optional(), // Supervisor-Lite 路由模型（可选）
 });
 
 // 完整工作流配置 Schema

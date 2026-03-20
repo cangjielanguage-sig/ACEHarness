@@ -23,6 +23,14 @@ import type {
 import { formatTimestamp } from './utils';
 import { createEngine, getConfiguredEngine, type Engine, type EngineType } from './engines';
 import type { EngineStreamEvent } from './engines/engine-interface';
+import {
+  parseNeedInfo,
+  isPlanDone,
+  routeInfoRequest,
+  type AgentSummary,
+  type InfoRequest,
+  type RouteDecision,
+} from './supervisor-router';
 
 export interface TokenUsage {
   inputTokens: number;
@@ -75,6 +83,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private runStartTime: string | null = null;
   private runEndTime: string | null = null;
   private pendingForceTransition: string | null = null;
+  private pendingForceInstruction: string | null = null;
   /** Tracks human approval context for crash recovery */
   private pendingApprovalInfo: {
     suggestedNextState: string;
@@ -91,11 +100,32 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private currentStep: string | null = null;
   private completedSteps: string[] = [];
   private currentProcesses: PersistedProcessInfo[] = [];
+  private supervisorFlow: { type: string; from: string; to: string; question?: string; method?: string; round: number; timestamp: string; stateName?: string }[] = [];
+  /** Agent 工作流：追踪 Agent 之间的信息传递 */
+  private agentFlow: {
+    id: string;
+    type: 'stream' | 'request' | 'response' | 'supervisor';
+    fromAgent: string;
+    toAgent: string;
+    message?: string;
+    stateName: string;
+    stepName: string;
+    round: number;
+    timestamp: string;
+  }[] = [];
   private stepLogs: PersistedStepLog[] = [];
   /** Current engine instance (Kiro CLI, etc.) */
   private currentEngine: Engine | null = null;
   /** Current engine type */
   private engineType: EngineType = 'claude-code';
+  /** Lightweight router model, configurable from workflow context.routerModel */
+  private lightweightRouterModel: string = 'claude-sonnet-4-6';
+
+  // ========== Supervisor-Lite Plan 循环相关 ==========
+  /** 待解答的用户问题 Promise 解析器 */
+  private pendingUserQuestionResolver: ((answer: string) => void) | null = null;
+  /** 当前等待解答的问题 */
+  private pendingUserQuestion: { question: string; fromAgent: string; round: number } | null = null;
 
   constructor() {
     super();
@@ -324,6 +354,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       endTime: this.runEndTime,
       globalContext: this.globalContext,
       phaseContexts: Object.fromEntries(this.stateContexts),
+      supervisorFlow: this.supervisorFlow,
+      agentFlow: this.agentFlow,
       stepLogs: this.stepLogs,
     };
   }
@@ -340,15 +372,19 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.issueTracker = [];
       this.transitionCount = 0;
       this.completedSteps = [];
+      this.supervisorFlow = [];
+      this.agentFlow = [];
       this.stepLogs = [];
       this.runStartTime = new Date().toISOString();
       this.currentConfigFile = configFile;
-      this.currentRequirements = requirements || '';
-
       // Load config
       const configPath = resolve(process.cwd(), 'configs', configFile);
       const configContent = await readFile(configPath, 'utf-8');
       const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
+      this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
+
+      // Use passed requirements, fallback to config context.requirements
+      this.currentRequirements = requirements || workflowConfig.context?.requirements || '';
 
       // Validate mode
       if (workflowConfig.workflow.mode !== 'state-machine') {
@@ -409,7 +445,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       // Persist initial state
       await this.persistState();
 
-      await this.executeStateMachine(workflowConfig, requirements);
+      await this.executeStateMachine(workflowConfig, this.currentRequirements);
 
       if (!this.shouldStop) {
         this.status = 'completed';
@@ -464,13 +500,16 @@ export class StateMachineWorkflowManager extends EventEmitter {
     await this.finalizeRun('stopped');
   }
 
-  forceTransition(targetState: string): void {
+  forceTransition(targetState: string, instruction?: string): void {
     if (this.status !== 'running') {
       throw new Error('工作流未在运行中');
     }
-    console.log('[StateMachine] forceTransition called, targetState:', targetState, 'currentState:', this.currentState);
+    console.log('[StateMachine] forceTransition called, targetState:', targetState, 'instruction:', instruction, 'currentState:', this.currentState);
     this.pendingForceTransition = targetState;
-    this.emit('force-transition', { targetState, from: this.currentState });
+    if (instruction) {
+      this.pendingForceInstruction = instruction;
+    }
+    this.emit('force-transition', { targetState, from: this.currentState, instruction });
 
     // Kill the running process so the main loop can pick up the forced transition immediately
     const currentProcId = this.currentProcesses?.[0]?.id;
@@ -537,7 +576,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
       });
 
       await this.persistState(status);
-    } catch { /* non-critical */ }
+    } catch (err) {
+      console.error('[StateMachine] finalizeRun persistState failed:', err);
+    }
 
     this.status = 'idle';
   }
@@ -580,8 +621,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
         requirements: this.currentRequirements,
         globalContext: this.globalContext,
         phaseContexts: Object.fromEntries(this.stateContexts),
-        // Persist human approval checkpoint if waiting
-        ...(this.currentState === '__human_approval__' && this.pendingApprovalInfo ? {
+        supervisorFlow: this.supervisorFlow,
+        agentFlow: this.agentFlow as any,
+        // 只在真正等待人工审批时才写入 pendingCheckpoint；已完成/失败/停止时清除
+        ...(!finalStatus && this.currentState === '__human_approval__' && this.pendingApprovalInfo ? {
           pendingCheckpoint: {
             phase: '__human_approval__',
             checkpoint: 'human-approval',
@@ -592,7 +635,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
           },
         } : {}),
       });
-    } catch { /* non-critical */ }
+    } catch (err) {
+      console.error('[StateMachine] persistState failed:', err);
+    }
   }
 
   /**
@@ -800,6 +845,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const requiresApproval = stateConfig.requireHumanApproval && nextState !== this.currentState;
 
       if (requiresApproval) {
+        const fromStateName = this.currentState;
+
         // First transition: current state -> __human_approval__
         this.stateHistory.push({
           from: this.currentState,
@@ -852,10 +899,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
         this.pendingApprovalInfo = null;
 
         // Second transition: __human_approval__ -> selected state
+        const instruction = this.pendingForceInstruction || '';
+        this.pendingForceInstruction = null;
         this.stateHistory.push({
           from: '__human_approval__',
           to: humanSelectedState,
-          reason: `人工决策: 选择进入 ${humanSelectedState}`,
+          reason: instruction
+            ? `人工决策: 选择进入 ${humanSelectedState}，附加指令: ${instruction}`
+            : `人工决策: 选择进入 ${humanSelectedState}`,
           issues: [],
           timestamp: new Date().toISOString(),
         });
@@ -867,6 +918,30 @@ export class StateMachineWorkflowManager extends EventEmitter {
           transitionCount: this.transitionCount,
           issues: [],
         });
+
+        // 人工审批后仍然是状态流转，需要补充 Agent 级绿色流转线
+        const fromState = fromStateName
+          ? config.workflow.states.find(s => s.name === fromStateName)
+          : undefined;
+        const toState = config.workflow.states.find(s => s.name === humanSelectedState);
+        if (fromState && toState && fromState.steps.length > 0 && toState.steps.length > 0) {
+          const fromAgent = fromState.steps[fromState.steps.length - 1].agent;
+          const toAgent = toState.steps[0].agent;
+          if (fromAgent !== toAgent) {
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'stream',
+              fromAgent,
+              toAgent,
+              message: `状态流转: ${fromState.name} -> ${toState.name} (人工审查后)`,
+              stateName: fromState.name,
+              stepName: fromState.steps[fromState.steps.length - 1].name,
+              round: 0,
+              timestamp: new Date().toISOString(),
+            });
+            this.emit('agent-flow', { agentFlow: this.agentFlow });
+          }
+        }
 
         this.currentState = humanSelectedState;
       } else {
@@ -887,6 +962,28 @@ export class StateMachineWorkflowManager extends EventEmitter {
           transitionCount: this.transitionCount,
           issues: result.issues,
         });
+
+        // 添加状态切换的流转线
+        const fromState = config.workflow.states.find(s => s.name === this.currentState);
+        const toState = config.workflow.states.find(s => s.name === nextState);
+        if (fromState && toState && fromState.steps.length > 0 && toState.steps.length > 0) {
+          const fromAgent = fromState.steps[fromState.steps.length - 1].agent;
+          const toAgent = toState.steps[0].agent;
+          if (fromAgent !== toAgent) {
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'stream',
+              fromAgent: fromAgent,
+              toAgent: toAgent,
+              message: `状态流转: ${fromState.name} -> ${toState.name}`,
+              stateName: fromState.name,
+              stepName: fromState.steps[fromState.steps.length - 1].name,
+              round: 0,
+              timestamp: new Date().toISOString(),
+            });
+            this.emit('agent-flow', { agentFlow: this.agentFlow });
+          }
+        }
 
         this.currentState = nextState;
       }
@@ -920,7 +1017,13 @@ export class StateMachineWorkflowManager extends EventEmitter {
       }
 
       try {
-        const output = await this.executeStep(step, state, config, requirements);
+        // ========== Supervisor-Lite: 判断是否启用 Plan 循环 ==========
+        let output: string;
+        if (step.enablePlanLoop) {
+          output = await this.executeStepWithInfoGathering(step, state, config, requirements);
+        } else {
+          output = await this.executeStep(step, state, config, requirements);
+        }
         stepOutputs.push(output);
 
         // Parse issues from output
@@ -960,7 +1063,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
     step: WorkflowStep,
     state: StateMachineState,
     config: StateMachineWorkflowConfig,
-    requirements?: string
+    requirements?: string,
+    extraContext?: string
   ): Promise<string> {
     const agent = this.agents.find(a => a.name === step.agent);
     if (!agent) {
@@ -974,6 +1078,19 @@ export class StateMachineWorkflowManager extends EventEmitter {
     agent.currentTask = step.name;
     this.currentStep = stepKey;
     this.emit('agents', { agents: this.agents });
+    
+    this.agentFlow.push({
+      id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'stream',
+      fromAgent: step.agent,
+      toAgent: step.agent,
+      message: `开始执行步骤: ${step.name}`,
+      stateName: state.name,
+      stepName: step.name,
+      round: 0,
+      timestamp: new Date().toISOString(),
+    });
+    this.emit('agent-flow', { agentFlow: this.agentFlow });
     await this.persistState();
 
     this.emit('step-start', {
@@ -984,8 +1101,24 @@ export class StateMachineWorkflowManager extends EventEmitter {
     });
 
     try {
+      // 在执行 Agent 之前，先执行可选的预命令（例如编译 / 测试命令）
+      this.lastPreCommandOutput = null;
+      if (Array.isArray((step as any).preCommands) && (step as any).preCommands.length > 0) {
+        try {
+          const preOutput = await this.runPreCommands(
+            (step as any).preCommands as string[],
+            config
+          );
+          this.lastPreCommandOutput = preOutput || null;
+        } catch (e) {
+          // 预命令执行本身不应中断整个步骤，将错误文本注入上下文由 Agent 决策
+          const msg = e instanceof Error ? e.message : String(e);
+          this.lastPreCommandOutput = `预执行命令执行异常（不会中断步骤，请你据此判断是否 fail）：\n${msg}`;
+        }
+      }
+
       // Build context (now async)
-      const context = await this.buildStepContext(step, state, config, requirements);
+      const context = await this.buildStepContext(step, state, config, requirements, extraContext);
 
       // Execute step (reuse existing process manager logic)
       const stepResult = await this.runAgentStep(step, context, config, stepId);
@@ -1023,6 +1156,26 @@ export class StateMachineWorkflowManager extends EventEmitter {
         costUsd: stepResult.costUsd,
         durationMs: stepResult.durationMs,
       });
+
+      // 记录步骤完成的流转线
+      const currentStepIndex = state.steps.findIndex(s => s.name === step.name);
+      if (currentStepIndex >= 0 && currentStepIndex < state.steps.length - 1) {
+        const nextStep = state.steps[currentStepIndex + 1];
+        if (nextStep && nextStep.agent !== step.agent) {
+          this.agentFlow.push({
+            id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'stream',
+            fromAgent: step.agent,
+            toAgent: nextStep.agent,
+            message: `步骤流转: ${step.name} -> ${nextStep.name}`,
+            stateName: state.name,
+            stepName: step.name,
+            round: 0,
+            timestamp: new Date().toISOString(),
+          });
+          this.emit('agent-flow', { agentFlow: this.agentFlow });
+        }
+      }
 
       // Save output to file system
       if (this.currentRunId) {
@@ -1079,7 +1232,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
     step: WorkflowStep,
     state: StateMachineState,
     config: StateMachineWorkflowConfig,
-    requirements?: string
+    requirements?: string,
+    extraContext?: string
   ): Promise<string> {
     const parts: string[] = [];
 
@@ -1160,6 +1314,15 @@ export class StateMachineWorkflowManager extends EventEmitter {
       for (const record of recent) {
         parts.push(`- ${record.from} → ${record.to}: ${record.reason}`);
       }
+
+      // Extract human instruction from the most recent transition (if any)
+      const lastTransition = this.stateHistory[this.stateHistory.length - 1];
+      if (lastTransition?.reason?.includes('附加指令:')) {
+        const instructionMatch = lastTransition.reason.match(/附加指令:\s*(.+)$/);
+        if (instructionMatch) {
+          parts.push(`\n# ⚠️ 人工指令（必须遵守）\n${instructionMatch[1]}`);
+        }
+      }
     }
 
     // Add recent issues
@@ -1169,6 +1332,16 @@ export class StateMachineWorkflowManager extends EventEmitter {
       for (const issue of recent) {
         parts.push(`- [${issue.severity}] ${issue.type}: ${issue.description}`);
       }
+    }
+
+    // Add preCommands output (if any)
+    if (this.lastPreCommandOutput) {
+      const raw = this.lastPreCommandOutput;
+      const maxLen = 4000;
+      const display = raw.length > maxLen
+        ? '...(截断，保留结尾)...\n' + raw.slice(-maxLen)
+        : raw;
+      parts.push(`\n# 预执行命令结果（系统自动执行，必须据此做出裁决）\n${display}`);
     }
 
     // Add previous steps' conclusions from the last 2 completed states
@@ -1205,7 +1378,104 @@ export class StateMachineWorkflowManager extends EventEmitter {
       } catch { /* non-critical */ }
     }
 
-    return parts.join('\n');
+    // ========== Supervisor-Lite: 注入可选的下一状态 ==========
+    if (state.transitions && state.transitions.length > 0) {
+      parts.push(`\n# 可选的下一状态`);
+      for (const t of state.transitions) {
+        const targetState = config.workflow.states.find(s => s.name === t.to);
+        parts.push(`- ${t.to}: ${targetState?.description || '无描述'}`);
+      }
+    }
+
+    // ========== Supervisor-Lite: 注入信息请求协议 ==========
+    if (step.enablePlanLoop) {
+      parts.push(`\n# 信息请求协议`);
+      parts.push(`在执行任务前，请先评估你是否有足够的信息。`);
+      parts.push(`如果信息不足，先进行信息收集而不直接执行任务，请使用以下格式声明你需要的信息：`);
+      parts.push(`- 需要技术/专业信息补充信息时：[NEED_INFO] 问题描述`);
+      parts.push(`- 需要用户/人工补充信息时：[NEED_INFO:human] 问题描述`);
+      parts.push(`- 如果有多个问题需要确认，也只需要列出一个[NEED_INFO]/[NEED_INFO:human]，并在问题描述中列出所有需要确认的问题`);
+      parts.push(`- 如果有问题需要确认，则不执行任务，直接将问题以上述格式进行输出，结束本轮执行，不需要等待回复，supervisor会给你路由到对应的专家，信息收集可能存在多轮`);
+      parts.push(`- 如果信息已充分可以执行：输出[PLAN_DONE]，并执行具体任务`);
+      parts.push(`\n注意：你不需要指定由谁来回答技术问题，系统会自动路由到合适的专家。`);
+    }
+
+    // ========== Supervisor-Lite: 注入额外上下文（信息收集循环） ==========
+    if (extraContext) {
+      parts.push(`\n# 补充信息\n${extraContext}`);
+    }
+
+    // Replace template variables
+    let result = parts.join('\n');
+    if (this.currentRunId) {
+      result = result.replace(/\{runId\}/g, this.currentRunId);
+    }
+    return result;
+  }
+
+  /**
+   * 在后端直接执行 preCommands（如 build.sh / 测试命令），并收集 stdout/stderr。
+   * 命令串行执行，即使命令失败也不会抛出异常，而是把失败信息写入返回文本中。
+   */
+  private async runPreCommands(
+    commands: string[],
+    config: StateMachineWorkflowConfig
+  ): Promise<string> {
+    const { exec } = await import('child_process');
+    const cwd = config.context?.projectRoot
+      ? resolve(process.cwd(), config.context.projectRoot)
+      : process.cwd();
+
+    const results: string[] = [];
+
+    for (let i = 0; i < commands.length; i++) {
+      const cmd = commands[i];
+      results.push(`\n[${i + 1}] $ ${cmd}\n工作目录: ${cwd}\n`);
+      // eslint-disable-next-line no-await-in-loop
+      const { stdout, stderr, exitCode, errorText } = await new Promise<{
+        stdout: string;
+        stderr: string;
+        exitCode: number | null;
+        errorText: string | null;
+      }>((resolveInner) => {
+        const child = exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, so, se) => {
+          const code = (error as any)?.code ?? 0;
+          resolveInner({
+            stdout: so ?? '',
+            stderr: se ?? '',
+            exitCode: Number.isInteger(code) ? (code as number) : 0,
+            errorText: error ? String(error) : null,
+          });
+        });
+        // 避免悬挂：如果 exec 抛出同步异常
+        child.on('error', (err) => {
+          resolveInner({
+            stdout: '',
+            stderr: '',
+            exitCode: null,
+            errorText: String(err),
+          });
+        });
+      });
+
+      const truncate = (text: string, max: number) => {
+        if (!text) return '';
+        return text.length > max ? text.slice(0, max) + '\n...(截断)...' : text;
+      };
+
+      results.push(`exitCode: ${exitCode ?? 'unknown'}\n`);
+      if (errorText) {
+        results.push(`exec error: ${truncate(errorText, 1000)}\n`);
+      }
+      if (stdout) {
+        results.push(`--- stdout ---\n${truncate(stdout, 4000)}\n`);
+      }
+      if (stderr) {
+        results.push(`--- stderr ---\n${truncate(stderr, 4000)}\n`);
+      }
+    }
+
+    return results.join('\n');
   }
 
   private async runAgentStep(
@@ -1660,6 +1930,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const configPath = resolve(process.cwd(), 'configs', runState.configFile);
     const configContent = await readFile(configPath, 'utf-8');
     const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
+    this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
 
     // Load agent configs and initialize agents
     await this.loadAgentConfigs();
@@ -1764,6 +2035,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private feedbackInterrupt = false; // true = non-urgent feedback interrupt (softer prompt tone)
   private queuedApprovalAction: 'approve' | 'iterate' | null = null;
   private iterationFeedback: string = '';
+  /** 最近一次预执行命令（preCommands）的输出，会注入到对应步骤上下文中 */
+  private lastPreCommandOutput: string | null = null;
 
   setQueuedApprovalAction(action: 'approve' | 'iterate'): void {
     this.queuedApprovalAction = action;
@@ -1944,6 +2217,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const configPath = resolve(process.cwd(), 'configs', runState.configFile);
     const configContent = await readFile(configPath, 'utf-8');
     const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
+    this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
 
     // Load agent configs and initialize agents
     await this.loadAgentConfigs();
@@ -1979,6 +2253,319 @@ export class StateMachineWorkflowManager extends EventEmitter {
       }
       throw error;
     }
+  }
+
+  // ========== Supervisor-Lite Plan 循环实现 ==========
+
+  private async executeStepWithInfoGathering(
+    step: WorkflowStep,
+    state: StateMachineState,
+    config: StateMachineWorkflowConfig,
+    requirements?: string
+  ): Promise<string> {
+    const maxRounds = step.maxPlanRounds || 3;
+    let round = 0;
+    let extraContext = '';
+
+    while (round < maxRounds) {
+      const output = await this.executeStep(step, state, config, requirements, extraContext);
+
+      console.log(`[StateMachineWorkflowManager] Step ${step.name} 原始输出:`, output.slice(0, 500));
+      const infoRequests = parseNeedInfo(step,output);
+      console.log(`[StateMachineWorkflowManager] Step ${step.name} 解析到 ${infoRequests.length} 个信息请求:`, infoRequests);
+      
+      if (infoRequests.length === 0) {
+        console.log(`[StateMachineWorkflowManager] Step ${step.name} 没有信息请求，结束`);
+        return output;
+      }
+
+      if (isPlanDone(output)) {
+        console.log(`[StateMachineWorkflowManager] Step ${step.name} 已 PLAN_DONE，继续执行任务`);
+        return output;
+      }
+
+      for (const req of infoRequests) {
+        if (req.isHuman) {
+          this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
+          this.supervisorFlow.push({
+            type: 'question',
+            from: step.agent,
+            to: 'user',
+            question: req.question,
+            round,
+            timestamp: new Date().toISOString(),
+            stateName: state.name,
+          });
+          // 添加两条线：请求线（蓝色）+ 路由线（橙色）
+          // Agent -> Supervisor（请求）
+          this.agentFlow.push({
+            id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'request',
+            fromAgent: step.agent,
+            toAgent: 'supervisor',
+            message: req.question,
+            stateName: state.name,
+            stepName: step.name,
+            round,
+            timestamp: new Date().toISOString(),
+          });
+          // Supervisor -> 用户（路由）
+          this.agentFlow.push({
+            id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'supervisor',
+            fromAgent: 'supervisor',
+            toAgent: 'user',
+            message: req.question,
+            stateName: state.name,
+            stepName: step.name,
+            round,
+            timestamp: new Date().toISOString(),
+          });
+          this.emit('agent-flow', { agentFlow: this.agentFlow });
+          const answer = await this.waitForUserAnswer(req.question, step.agent, round);
+          extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
+          console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
+        } else {
+          const agentSummaries = this.buildAgentSummaries();
+          const decision = await routeInfoRequest(
+            req,
+            agentSummaries,
+            step.name,
+            this.callLightweightLLM.bind(this)
+          );
+
+          if (!decision) {
+            console.log(`[StateMachineWorkflowManager] 无法路由，fallback 到用户回答`);
+            this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
+            this.supervisorFlow.push({
+              type: 'question',
+              from: step.agent,
+              to: 'user',
+              question: req.question,
+              round,
+              timestamp: new Date().toISOString(),
+              stateName: state.name,
+            });
+            // 添加两条线：请求线（蓝色）+ 路由线（橙色）
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'request',
+              fromAgent: step.agent,
+              toAgent: 'supervisor',
+              message: req.question,
+              stateName: state.name,
+              stepName: step.name,
+              round,
+              timestamp: new Date().toISOString(),
+            });
+            // Supervisor -> 用户（路由）
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'supervisor',
+              fromAgent: 'supervisor',
+              toAgent: 'user',
+              message: req.question,
+              stateName: state.name,
+              stepName: step.name,
+              round,
+              timestamp: new Date().toISOString(),
+            });
+            this.emit('agent-flow', { agentFlow: this.agentFlow });
+            const answer = await this.waitForUserAnswer(req.question, step.agent, round);
+            console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
+            extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
+          } else {
+            this.emit('route-decision', { ...decision, round, fromAgent: step.agent });
+            this.supervisorFlow.push({
+              type: 'decision',
+              from: step.agent,
+              to: decision.route_to,
+              question: decision.question,
+              method: decision.method,
+              round,
+              timestamp: new Date().toISOString(),
+              stateName: state.name,
+            });
+            
+            // 添加两条线：请求线（蓝色）+ 路由线（橙色）
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'request',
+              fromAgent: step.agent,
+              toAgent: 'supervisor',
+              message: `Supervisor路由: ${decision.question}`,
+              stateName: state.name,
+              stepName: step.name,
+              round,
+              timestamp: new Date().toISOString(),
+            });
+            this.agentFlow.push({
+              id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: 'supervisor',
+              fromAgent: 'supervisor',
+              toAgent: decision.route_to,
+              message: `Supervisor路由: ${decision.question}`,
+              stateName: state.name,
+              stepName: step.name,
+              round,
+              timestamp: new Date().toISOString(),
+            });
+            this.emit('agent-flow', { agentFlow: this.agentFlow });
+            
+            const answer = await this.queryAgent(decision.route_to, decision.question, config);
+            console.log(`[StateMachineWorkflowManager] ${decision.route_to} 回答: ${answer}`);
+            extraContext += `\n\n[${decision.route_to} 回答] ${decision.question}\n${answer}`;
+            
+            this.addAgentResponseFlow(decision.route_to, step.agent, answer, state.name, step.name, round);
+          }
+        }
+      }
+
+      this.emit('plan-round', { step: step.name, round: round + 1, maxRounds, infoRequests });
+      round++;
+    }
+
+    extraContext += '\n\n[系统] 信息收集完成，请基于现有信息执行任务。';
+    return this.executeStep(step, state, config, requirements, extraContext);
+  }
+
+  private buildAgentSummaries(): AgentSummary[] {
+    return this.agentConfigs
+      .filter(c => c.name)
+      .map(c => ({
+        name: c.name,
+        description: c.description || '',
+        keywords: c.keywords || [],
+      }));
+  }
+
+  private async queryAgent(
+    agentName: string,
+    question: string,
+    config: StateMachineWorkflowConfig
+  ): Promise<string> {
+    const roleConfig = this.agentConfigs.find(r => r.name === agentName)
+      || config.roles?.find(r => r.name === agentName);
+
+    if (!roleConfig) {
+      return `[错误] 找不到 Agent 配置: ${agentName}`;
+    }
+
+    const prompt = `# 问题\n${question}\n\n请直接回答这个问题，不需要执行其他任务。`;
+    const model = roleConfig.model || 'claude-opus-4-6';
+    const systemPrompt = roleConfig.systemPrompt || `你是一个 AI 助手。`;
+
+    const processId = `query-${agentName}-${Date.now()}`;
+
+    try {
+      const result = await this.executeWithEngine(
+        processId,
+        agentName,
+        'query',
+        prompt,
+        systemPrompt,
+        model,
+        {
+          workingDirectory: config.context?.projectRoot
+            ? resolve(process.cwd(), config.context.projectRoot)
+            : process.cwd(),
+          timeoutMs: 60000,
+        }
+      );
+      const answer = result.result || '[无输出]';
+      
+      this.agentFlow.push({
+        id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        type: 'response',
+        fromAgent: agentName,
+        toAgent: 'supervisor',
+        message: answer,
+        stateName: this.currentState || '',
+        stepName: '',
+        round: 0,
+        timestamp: new Date().toISOString(),
+      });
+      this.emit('agent-flow', { agentFlow: this.agentFlow });
+      
+      return answer;
+    } catch (error) {
+      return `[错误] 查询 Agent 失败: ${error}`;
+    }
+  }
+
+  private addAgentResponseFlow(fromAgent: string, toAgent: string, message: string, stateName: string, stepName: string, round: number): void {
+    // 记录响应
+    this.agentFlow.push({
+      id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'response',
+      fromAgent,
+      toAgent,
+      message,
+      stateName,
+      stepName,
+      round,
+      timestamp: new Date().toISOString(),
+    });
+
+    this.emit('agent-flow', { agentFlow: this.agentFlow });
+  }
+
+  private async callLightweightLLM(prompt: string): Promise<string> {
+    const processId = `router-llm-${Date.now()}`;
+
+    try {
+      const result = await this.executeWithEngine(
+        processId,
+        'router',
+        'route',
+        prompt,
+        '你是一个路由器，根据问题选择最合适的 Agent。',
+        this.lightweightRouterModel,
+        {
+          workingDirectory: process.cwd(),
+          timeoutMs: 120000, // 增加超时时间到 2 分钟
+        }
+      );
+      return result.result || '';
+    } catch (error) {
+      console.error('[SupervisorRouter] LLM 调用失败:', error);
+      return '';
+    }
+  }
+
+  private async waitForUserAnswer(question: string, fromAgent: string, round: number): Promise<string> {
+    this.pendingUserQuestion = { question, fromAgent, round };
+
+    return new Promise((resolve) => {
+      this.pendingUserQuestionResolver = resolve;
+
+      const checkInterval = setInterval(() => {
+        if (!this.pendingUserQuestionResolver) {
+          clearInterval(checkInterval);
+        }
+      }, 500);
+
+      setTimeout(() => {
+        if (this.pendingUserQuestionResolver) {
+          this.pendingUserQuestionResolver('[超时] 用户未回答');
+          this.pendingUserQuestionResolver = null;
+          this.pendingUserQuestion = null;
+          clearInterval(checkInterval);
+        }
+      }, 300000);
+    });
+  }
+
+  submitUserAnswer(answer: string): void {
+    if (this.pendingUserQuestionResolver) {
+      this.pendingUserQuestionResolver(answer);
+      this.pendingUserQuestionResolver = null;
+      this.pendingUserQuestion = null;
+    }
+  }
+
+  getPendingUserQuestion(): { question: string; fromAgent: string; round: number } | null {
+    return this.pendingUserQuestion;
   }
 }
 

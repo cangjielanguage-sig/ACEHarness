@@ -48,6 +48,27 @@ interface WorkflowStatusResponse {
   transitionCount?: number;
   startTime?: string | null;
   endTime?: string | null;
+  supervisorFlow?: Array<{
+    type: string;
+    from: string;
+    to: string;
+    question?: string;
+    method?: string;
+    round: number;
+    timestamp: string;
+    stateName?: string;
+  }>;
+  agentFlow?: Array<{
+    id: string;
+    type: string;
+    fromAgent: string;
+    toAgent: string;
+    message?: string;
+    stateName: string;
+    stepName: string;
+    round: number;
+    timestamp: string;
+  }>;
 }
 
 interface RunRecord {
@@ -282,11 +303,11 @@ export const workflowApi = {
     return response.json();
   },
 
-  async resume(runId: string, action?: 'approve' | 'iterate', feedback?: string): Promise<ApiResponse> {
+  async resume(runId: string, action?: 'approve' | 'iterate' | 'force-transition', feedback?: string, targetState?: string, instruction?: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runId, action, feedback }),
+      body: JSON.stringify({ runId, action, feedback, targetState, instruction }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));

@@ -145,16 +145,21 @@ function RoleEditForm({
       model: 'claude-opus-4-6',
       capabilities: [],
       systemPrompt: '',
+      keywords: [],
+      description: '',
     },
   });
 
   const [capInput, setCapInput] = useState(role?.capabilities.join(', ') || '');
   const [constraintsInput, setConstraintsInput] = useState(role?.constraints?.join('\n') || '');
+  const [keywordsInput, setKeywordsInput] = useState(role?.keywords?.join(', ') || '');
 
   const onSubmit = (data: any) => {
     data.capabilities = capInput.split(',').map((s: string) => s.trim()).filter(Boolean);
     const constraints = constraintsInput.split('\n').map((s: string) => s.trim()).filter(Boolean);
     if (constraints.length > 0) data.constraints = constraints;
+    const keywords = keywordsInput.split(',').map((s: string) => s.trim()).filter(Boolean);
+    if (keywords.length > 0) data.keywords = keywords;
     onSave(data);
   };
 
@@ -208,6 +213,18 @@ function RoleEditForm({
           className="font-mono text-xs"
           placeholder={"例如：\n必须提供至少两个备选方案\n每个方案需包含优劣分析"}
         />
+      </div>
+      <div className="space-y-1">
+        <Label>路由关键词（逗号分隔，Supervisor-Lite 架构用）</Label>
+        <Input 
+          value={keywordsInput} 
+          onChange={(e) => setKeywordsInput(e.target.value)} 
+          placeholder="如：架构, 接口, 模块, API" 
+        />
+      </div>
+      <div className="space-y-1">
+        <Label>Agent 描述（Supervisor-Lite 架构用，不注入 prompt）</Label>
+        <Input {...register('description')} placeholder="如：负责系统架构设计" />
       </div>
       <div className="flex items-center gap-2 pt-2">
         {onDelete && (

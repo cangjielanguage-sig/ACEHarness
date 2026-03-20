@@ -6,7 +6,7 @@ import { loadRunState } from '@/lib/run-state-persistence';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { runId, action, feedback } = body;
+    const { runId, action, feedback, targetState, instruction } = body;
 
     if (!runId) {
       return NextResponse.json(
@@ -42,6 +42,16 @@ export async function POST(request: NextRequest) {
       if (action === 'iterate' && feedback) {
         manager.setIterationFeedback(feedback);
       }
+    }
+
+    // For force-transition: queue the transition so it fires right after resume restores state
+    if (action === 'force-transition' && isStateMachine && targetState) {
+      (manager as typeof stateMachineWorkflowManager).setQueuedApprovalAction('approve');
+      // Schedule force-transition after a short delay to let resume restore state first
+      const smManager = manager as typeof stateMachineWorkflowManager;
+      setTimeout(() => {
+        smManager.forceTransition(targetState, instruction);
+      }, 500);
     }
 
     // Fire-and-forget: kick off resume without awaiting completion.
