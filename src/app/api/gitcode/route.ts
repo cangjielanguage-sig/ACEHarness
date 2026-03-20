@@ -8,7 +8,7 @@ const ALLOWED_COMMANDS = new Set([
   'create_pr', 'get_pr', 'get_pr_commits', 'get_pr_changed_files', 'get_pr_comments',
   'post_pr_comment', 'add_pr_labels', 'remove_pr_labels', 'assign_pr_testers',
   'check_pr_mergeable', 'merge_pr',
-  'create_issue', 'get_issue', 'add_issue_labels',
+  'create_issue', 'get_issue', 'add_issue_labels', 'post_issue_comment',
   'get_issues_by_pr', 'get_prs_by_issue',
   'list_issue_templates', 'get_issue_template', 'get_pr_template', 'parse_issue_template',
   'get_commit_title',
