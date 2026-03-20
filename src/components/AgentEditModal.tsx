@@ -34,7 +34,7 @@ interface AgentConfig {
   capabilities?: string[];
   constraints?: string[];
   reviewPanel?: ReviewPanel;
-  // B-Lite 新增
+  // Supervisor-Lite 新增
   keywords?: string[];
   description?: string;
 }
@@ -291,12 +291,12 @@ export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentE
             </div>
           </div>
 
-          {/* Keywords (B-Lite) */}
+          {/* Keywords (Supervisor-Lite) */}
           <div>
             <Label>
               路由关键词
               <span className="text-xs text-muted-foreground ml-2">
-                （B-Lite 架构用，逗号分隔）
+                （Supervisor-Lite 架构用，逗号分隔）
               </span>
             </Label>
             <Input
@@ -309,12 +309,12 @@ export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentE
             />
           </div>
 
-          {/* Description (B-Lite) */}
+          {/* Description (Supervisor-Lite) */}
           <div>
             <Label>
               Agent 描述
               <span className="text-xs text-muted-foreground ml-2">
-                （B-Lite 架构用，不注入 prompt）
+                （Supervisor-Lite 架构用，不注入 prompt）
               </span>
             </Label>
             <Input

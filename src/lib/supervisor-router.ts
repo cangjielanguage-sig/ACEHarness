@@ -1,5 +1,5 @@
 /**
- * B-Lite Supervisor 路由器模块
+ * Supervisor-Lite Supervisor 路由器模块
  * 负责解析 Agent 的信息请求并路由到合适的回答者（另一个 Agent 或用户）
  */
 

@@ -113,7 +113,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   /** Current engine type */
   private engineType: EngineType = 'claude-code';
 
-  // ========== B-Lite Plan 循环相关 ==========
+  // ========== Supervisor-Lite Plan 循环相关 ==========
   /** 待解答的用户问题 Promise 解析器 */
   private pendingUserQuestionResolver: ((answer: string) => void) | null = null;
   /** 当前等待解答的问题 */
@@ -815,7 +815,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         await new Promise(r => setTimeout(r, 30000));
       }
 
-      // ========== B-Lite: 判断是否启用 Plan 循环 ==========
+      // ========== Supervisor-Lite: 判断是否启用 Plan 循环 ==========
       let output: string;
       if (step.enablePlanLoop) {
         output = await this.executeStepWithInfoGathering(step, state, config, requirements);
@@ -1111,7 +1111,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       } catch { /* non-critical */ }
     }
 
-    // ========== B-Lite: 注入可选的下一状态 ==========
+    // ========== Supervisor-Lite: 注入可选的下一状态 ==========
     if (state.transitions && state.transitions.length > 0) {
       parts.push(`\n# 可选的下一状态`);
       for (const t of state.transitions) {
@@ -1120,7 +1120,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       }
     }
 
-    // ========== B-Lite: 注入信息请求协议 ==========
+    // ========== Supervisor-Lite: 注入信息请求协议 ==========
     if (step.enablePlanLoop) {
       parts.push(`\n# 信息请求协议`);
       parts.push(`在执行任务前，请先评估你是否有足够的信息。`);
@@ -1133,7 +1133,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       parts.push(`\n注意：你不需要指定由谁来回答技术问题，系统会自动路由到合适的专家。`);
     }
 
-    // ========== B-Lite: 注入额外上下文（信息收集循环） ==========
+    // ========== Supervisor-Lite: 注入额外上下文（信息收集循环） ==========
     if (extraContext) {
       parts.push(`\n# 补充信息\n${extraContext}`);
     }
@@ -1836,7 +1836,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     await this.executeStateMachine(workflowConfig, runState.requirements);
   }
 
-  // ========== B-Lite Plan 循环实现 ==========
+  // ========== Supervisor-Lite Plan 循环实现 ==========
 
   private async executeStepWithInfoGathering(
     step: WorkflowStep,

@@ -215,7 +215,7 @@ function RoleEditForm({
         />
       </div>
       <div className="space-y-1">
-        <Label>路由关键词（逗号分隔，B-Lite 架构用）</Label>
+        <Label>路由关键词（逗号分隔，Supervisor-Lite 架构用）</Label>
         <Input 
           value={keywordsInput} 
           onChange={(e) => setKeywordsInput(e.target.value)} 
@@ -223,7 +223,7 @@ function RoleEditForm({
         />
       </div>
       <div className="space-y-1">
-        <Label>Agent 描述（B-Lite 架构用，不注入 prompt）</Label>
+        <Label>Agent 描述（Supervisor-Lite 架构用，不注入 prompt）</Label>
         <Input {...register('description')} placeholder="如：负责系统架构设计" />
       </div>
       <div className="flex items-center gap-2 pt-2">

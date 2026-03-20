@@ -24,7 +24,7 @@ export const workflowStepSchema = z.object({
   parallelGroup: z.string().optional(),
   enableReviewPanel: z.boolean().optional(), // 是否启用会审模式
   skills: z.array(z.string()).optional(), // 步骤级别的 skills
-  // ---- B-Lite 新增 ----
+  // ---- Supervisor-Lite 新增 ----
   enablePlanLoop: z.boolean().optional(), // 是否启用 Plan 循环
   maxPlanRounds: z.number().min(1).max(10).default(3).optional(), // 最大 Plan 轮次
 });
@@ -58,7 +58,7 @@ export const roleConfigSchema = z.object({
   allowedTools: z.array(z.string()).optional(),
   category: z.string().optional(),
   tags: z.array(z.string()).optional(),
-  // ---- B-Lite 新增（给 Supervisor 路由器用，不注入 Agent prompt）----
+  // ---- Supervisor-Lite 新增（给 Supervisor 路由器用，不注入 Agent prompt）----
   keywords: z.array(z.string()).optional(), // 路由关键词
   description: z.string().optional(), // Agent 能力描述
   reviewPanel: z.object({

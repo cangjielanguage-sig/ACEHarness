@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
         'feedback-injected': (data: any) => sendEvent({ type: 'feedback-injected', data }),
         'feedback-recalled': (data: any) => sendEvent({ type: 'feedback-recalled', data }),
         'context-updated': (data: any) => sendEvent({ type: 'context-updated', data }),
-        // B-Lite Plan 循环事件
+        // Supervisor-Lite Plan 循环事件
         'plan-question': (data: any) => sendEvent({ type: 'plan-question', data }),
         'plan-round': (data: any) => sendEvent({ type: 'plan-round', data }),
         'route-decision': (data: any) => sendEvent({ type: 'route-decision', data }),
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
         'token-usage': (data: any) => sendEvent({ type: 'token-usage', data }),
         'feedback-injected': (data: any) => sendEvent({ type: 'feedback-injected', data }),
         'feedback-recalled': (data: any) => sendEvent({ type: 'feedback-recalled', data }),
-        // B-Lite Plan 循环事件
+        // Supervisor-Lite Plan 循环事件
         'plan-question': (data: any) => sendEvent({ type: 'plan-question', data }),
         'plan-round': (data: any) => sendEvent({ type: 'plan-round', data }),
         'route-decision': (data: any) => sendEvent({ type: 'route-decision', data }),

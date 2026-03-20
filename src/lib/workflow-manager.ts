@@ -106,7 +106,7 @@ class WorkflowManager extends EventEmitter {
   /** Current engine type */
   private engineType: EngineType = 'claude-code';
 
-  // ========== B-Lite Plan 循环相关 ==========
+  // ========== Supervisor-Lite Plan 循环相关 ==========
   /** 待解答的用户问题 Promise 解析器 */
   private pendingUserQuestionResolver: ((answer: string) => void) | null = null;
   /** 当前等待解答的问题 */
@@ -1034,7 +1034,7 @@ class WorkflowManager extends EventEmitter {
     await this.persistState();
 
     try {
-      // ========== B-Lite: 判断是否启用 Plan 循环 ==========
+      // ========== Supervisor-Lite: 判断是否启用 Plan 循环 ==========
       let resultText: string;
       let jsonResult: ClaudeJsonResult;
       if (step.enablePlanLoop) {
@@ -1649,7 +1649,7 @@ class WorkflowManager extends EventEmitter {
       prompt += `最终方案文档是你最重要的交付物，请确保它的质量和完整性。\n\n`;
     }
 
-    // ========== B-Lite: 注入信息请求协议 ==========
+    // ========== Supervisor-Lite: 注入信息请求协议 ==========
     if (step.enablePlanLoop) {
       prompt += `## 信息请求协议\n`;
       prompt += `在执行任务前，请先评估你是否有足够的信息。\n`;
@@ -1660,7 +1660,7 @@ class WorkflowManager extends EventEmitter {
       prompt += `\n注意：你不需要指定由谁来回答技术问题，系统会自动路由到合适的专家。\n\n`;
     }
 
-    // ========== B-Lite: 注入额外上下文（信息收集循环） ==========
+    // ========== Supervisor-Lite: 注入额外上下文（信息收集循环） ==========
     if (extraContext) {
       prompt += `## 补充信息\n${extraContext}\n\n`;
     }
@@ -2357,7 +2357,7 @@ class WorkflowManager extends EventEmitter {
     return this.iterationStates;
   }
 
-  // ========== B-Lite Plan 循环实现 ==========
+  // ========== Supervisor-Lite Plan 循环实现 ==========
 
   private async executeStepWithInfoGathering(
     step: WorkflowStep,
