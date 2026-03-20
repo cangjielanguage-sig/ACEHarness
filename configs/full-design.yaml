@@ -1,0 +1,12 @@
+workflow:
+  name: 全量设计功能设计
+  description: ""
+  phases:
+    - name: 阶段 1
+      steps:
+        - name: 步骤 1
+          agent: agent-1
+          task: 请描述任务内容
+context:
+  projectRoot: ""
+  requirements: ""

@@ -15,7 +15,12 @@
       "viewHistory": "View History",
       "settings": "Settings",
       "models": "Model Management",
-      "workflows": "Workflows"
+      "workflows": "Workflows",
+      "skills": "Skills",
+      "engines": "Engines",
+      "schedules": "Schedules",
+      "apiDocs": "API Docs",
+      "chatMode": "Chat Mode"
     },
     "charts": {
       "performanceTrends": "Performance Trends",
@@ -34,7 +39,9 @@
       "running": "Running",
       "stopped": "Stopped",
       "crashed": "Crashed"
-    }
+    },
+    "weekdays": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    "starting": "Starting"
   },
   "agents": {
     "title": "Agent Management",
@@ -78,6 +85,117 @@
       "fillAllFields": "Please fill in all fields",
       "confirmDelete": "Are you sure you want to delete this model?",
       "deleteTitle": "Confirm Delete"
+    }
+  },
+  "schedules": {
+    "title": "Scheduled Tasks",
+    "new": "New Schedule",
+    "empty": "No scheduled tasks yet",
+    "createFirst": "Create First Schedule",
+    "columns": {
+      "name": "Name",
+      "config": "Config File",
+      "schedule": "Schedule Rule",
+      "status": "Status",
+      "lastRun": "Last Run",
+      "nextRun": "Next Run",
+      "actions": "Actions"
+    },
+    "dialog": {
+      "editTitle": "Edit Schedule",
+      "createTitle": "New Schedule",
+      "name": "Task Name",
+      "namePlaceholder": "e.g., Daily Code Audit",
+      "configFile": "Config File",
+      "selectConfig": "Select config file",
+      "scheduleMode": "Schedule Mode",
+      "simpleMode": "Simple Mode",
+      "cronMode": "Cron Mode",
+      "intervalType": "Interval Type",
+      "everyNHours": "Every N Hours",
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "interval": "Interval",
+      "weekday": "Weekday",
+      "hour": "Hour",
+      "minute": "Min",
+      "cronExpression": "Cron Expression",
+      "cronHelp": "Format: min hour day month weekday (e.g., 0 2 * * * = daily at 2am)",
+      "enableOnCreate": "Enable after creation",
+      "cancel": "Cancel",
+      "save": "Save",
+      "create": "Create"
+    },
+    "messages": {
+      "fillRequired": "Please fill in name and config file",
+      "updated": "Schedule updated",
+      "created": "Schedule created",
+      "loadFailed": "Failed to load schedules",
+      "toggleFailed": "Toggle failed",
+      "triggered": "Triggered",
+      "triggerFailed": "Trigger failed",
+      "deleted": "Deleted",
+      "deleteFailed": "Delete failed",
+      "deleteTitle": "Delete Schedule",
+      "deleteConfirm": "Are you sure you want to delete"
+    },
+    "units": {
+      "hour": "hours",
+      "day": "days",
+      "week": "weeks",
+      "every": "Every"
+    },
+    "weekdays": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    "actions": {
+      "edit": "Edit",
+      "run": "Run Now",
+      "delete": "Delete"
+    },
+    "quickCreate": "Quick Create",
+    "currentConfig": "Current config",
+    "quickCreateHint": "Click \"Quick Create\" to add daily auto-run, or customize on the schedules page",
+    "notConfigured": "Not configured",
+    "manageAll": "Manage All Schedules"
+  },
+  "documents": {
+    "folders": "Folders",
+    "allFiles": "All Files",
+    "searchFiles": "Search files...",
+    "byName": "By Name",
+    "byTime": "By Time",
+    "bySize": "By Size",
+    "ascending": "Ascending",
+    "descending": "Descending",
+    "delete": "Delete",
+    "openManager": "Open File Manager",
+    "fullscreen": "Fullscreen",
+    "exitFullscreen": "Exit Fullscreen",
+    "loading": "Loading...",
+    "noDocuments": "No documents",
+    "fileName": "Filename",
+    "size": "Size",
+    "time": "Time",
+    "rename": "Rename",
+    "download": "Download",
+    "confirmDelete": "Confirm Delete",
+    "confirmDeleteOne": "Are you sure you want to delete",
+    "confirmDeleteMulti": "Are you sure you want to delete the selected",
+    "files": "files?",
+    "previewHint": "Click a file to preview",
+    "loadFailed": "Failed to load",
+    "startWorkflow": "Start a workflow to view documents",
+    "attacker": "Attacker",
+    "defender": "Defender",
+    "judge": "Judge",
+    "other": "Other"
+  },
+  "workbench": {
+    "tabs": {
+      "workflow": "Workflow",
+      "agents": "Agents",
+      "config": "Config",
+      "documents": "Documents",
+      "schedules": "Schedules"
     }
   },
   "common": {

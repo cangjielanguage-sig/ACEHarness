@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Zap, Cpu, Database, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, History, Play, Package, Cog } from 'lucide-react';
+import { Activity, Zap, Cpu, Database, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, Play, Package, Cog, FileText, History } from 'lucide-react';
 import { configApi, runsApi, agentApi } from '@/lib/api';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
@@ -131,7 +131,7 @@ export default function DashboardPage() {
       setPerformanceData(perfData);
 
       // Generate weekly activity data (last 7 days)
-      const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+      const weekDays = [0,1,2,3,4,5,6].map(i => t(`dashboard.weekdays.${i}`));
       const actData = [];
 
       for (let i = 6; i >= 0; i--) {
@@ -248,9 +248,9 @@ export default function DashboardPage() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <Button size="sm" variant="outline" onClick={() => router.push('/')} title="切换到对话模式">
+                <Button size="sm" variant="outline" onClick={() => router.push('/')} title={t('dashboard.quickActions.chatMode')}>
                   <span className="material-symbols-outlined text-sm mr-1">chat</span>
-                  对话模式
+                  {t('dashboard.quickActions.chatMode')}
                 </Button>
                 <LanguageToggle />
                 <ThemeToggle />
@@ -326,9 +326,9 @@ export default function DashboardPage() {
                   color="from-purple-600 to-purple-700"
                 />
                 <QuickAction
-                  icon={History}
-                  label={t('dashboard.quickActions.viewHistory')}
-                  onClick={() => router.push('/workbench/workflow.yaml?mode=history')}
+                  icon={FileText}
+                  label={t('dashboard.quickActions.apiDocs')}
+                  onClick={() => router.push('/api-docs')}
                   color="from-green-600 to-green-700"
                 />
               </div>
@@ -341,15 +341,21 @@ export default function DashboardPage() {
                 />
                 <QuickAction
                   icon={Package}
-                  label="Skills 管理"
+                  label={t('dashboard.quickActions.skills')}
                   onClick={() => router.push('/skills')}
                   color="from-pink-600 to-pink-700"
                 />
                 <QuickAction
                   icon={Cog}
-                  label="引擎管理"
+                  label={t('dashboard.quickActions.engines')}
                   onClick={() => router.push('/engines')}
                   color="from-indigo-600 to-indigo-700"
+                />
+                <QuickAction
+                  icon={Clock}
+                  label={t('dashboard.quickActions.schedules')}
+                  onClick={() => router.push('/schedules')}
+                  color="from-teal-600 to-teal-700"
                 />
               </div>
             </div>
@@ -510,7 +516,7 @@ export default function DashboardPage() {
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{run.configName || run.configFile}</div>
                         <div className="text-xs text-muted-foreground">
-                          {run.currentPhase || '启动中'} · {new Date(run.startTime).toLocaleString()}
+                          {run.currentPhase || t('dashboard.starting')} · {new Date(run.startTime).toLocaleString()}
                         </div>
                       </div>
                     </div>

@@ -16,6 +16,8 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { LanguageToggle } from '@/components/language-toggle';
+import { useTranslations } from '@/hooks/useTranslations';
 
 interface ScheduleJob {
   id: string;
@@ -34,28 +36,28 @@ interface ScheduleJob {
   runHistory: { runId: string; time: string; status: string }[];
 }
 
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-function describeSchedule(job: ScheduleJob): string {
+function describeSchedule(job: ScheduleJob, t: (key: string) => string): string {
+  const weekdays = [0,1,2,3,4,5,6].map(i => t(`schedules.weekdays.${i}`));
   if (job.mode === 'cron') return `Cron: ${job.cronExpression}`;
   if (job.interval) {
     const { value, unit } = job.interval;
-    const unitLabel = { hour: '小时', day: '天', week: '周' }[unit];
-    let desc = `每 ${value} ${unitLabel}`;
+    const unitLabel = t(`schedules.units.${unit}`);
+    let desc = `${t('schedules.units.every')} ${value} ${unitLabel}`;
     if (job.fixedTime && (unit === 'day' || unit === 'week')) {
       desc += ` ${String(job.fixedTime.hour).padStart(2, '0')}:${String(job.fixedTime.minute).padStart(2, '0')}`;
     }
     if (job.fixedTime?.weekday !== undefined && unit === 'week') {
-      desc += ` ${WEEKDAYS[job.fixedTime.weekday]}`;
+      desc += ` ${weekdays[job.fixedTime.weekday]}`;
     }
     return desc;
   }
   if (job.fixedTime) {
-    const t = `${String(job.fixedTime.hour).padStart(2, '0')}:${String(job.fixedTime.minute).padStart(2, '0')}`;
-    if (job.fixedTime.weekday !== undefined) return `每${WEEKDAYS[job.fixedTime.weekday]} ${t}`;
-    return `每天 ${t}`;
+    const time = `${String(job.fixedTime.hour).padStart(2, '0')}:${String(job.fixedTime.minute).padStart(2, '0')}`;
+    if (job.fixedTime.weekday !== undefined) return `${weekdays[job.fixedTime.weekday]} ${time}`;
+    return `${t('schedules.dialog.daily')} ${time}`;
   }
-  return job.cronExpression || '未配置';
+  return job.cronExpression || '-';
 }
 
 function formatTime(iso?: string) {
@@ -66,7 +68,9 @@ function formatTime(iso?: string) {
 export default function SchedulesPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { t } = useTranslations();
   const { confirm, dialogProps } = useConfirmDialog();
+  const WEEKDAYS = [0,1,2,3,4,5,6].map(i => t(`schedules.weekdays.${i}`));
   const [jobs, setJobs] = useState<ScheduleJob[]>([]);
   const [configs, setConfigs] = useState<{ filename: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +95,7 @@ export default function SchedulesPage() {
       const [schedData, cfgData] = await Promise.all([scheduleApi.list(), configApi.listConfigs()]);
       setJobs(schedData.jobs || []);
       setConfigs((cfgData.configs || []).map((c: any) => ({ filename: c.filename, name: c.name })));
-    } catch { toast('error', '加载定时任务失败'); }
+    } catch { toast('error', t('schedules.messages.loadFailed')); }
     setLoading(false);
   }, []);
 
@@ -127,7 +131,7 @@ export default function SchedulesPage() {
   const openEdit = (job: ScheduleJob) => { setEditingJob(job); resetForm(job); setDialogOpen(true); };
 
   const handleSave = async () => {
-    if (!formName.trim() || !formConfig) { toast('error', '请填写名称和配置文件'); return; }
+    if (!formName.trim() || !formConfig) { toast('error', t('schedules.messages.fillRequired')); return; }
     const payload: any = {
       name: formName.trim(),
       configFile: formConfig,
@@ -146,10 +150,10 @@ export default function SchedulesPage() {
     try {
       if (editingJob) {
         await scheduleApi.update(editingJob.id, payload);
-        toast('success', '定时任务已更新');
+        toast('success', t('schedules.messages.updated'));
       } else {
         await scheduleApi.create(payload);
-        toast('success', '定时任务已创建');
+        toast('success', t('schedules.messages.created'));
       }
       setDialogOpen(false);
       loadJobs();
@@ -160,25 +164,25 @@ export default function SchedulesPage() {
     try {
       await scheduleApi.toggle(job.id);
       loadJobs();
-    } catch { toast('error', '切换失败'); }
+    } catch { toast('error', t('schedules.messages.toggleFailed')); }
   };
 
   const handleTrigger = async (job: ScheduleJob) => {
     try {
       await scheduleApi.trigger(job.id);
-      toast('success', `已触发 "${job.name}"`);
+      toast('success', `${t('schedules.messages.triggered')} "${job.name}"`);
       loadJobs();
-    } catch { toast('error', '触发失败'); }
+    } catch { toast('error', t('schedules.messages.triggerFailed')); }
   };
 
   const handleDelete = async (job: ScheduleJob) => {
-    const ok = await confirm({ title: '删除定时任务', description: `确定要删除 "${job.name}" 吗？`, confirmLabel: '删除', variant: 'destructive' });
+    const ok = await confirm({ title: t('schedules.messages.deleteTitle'), description: `${t('schedules.messages.deleteConfirm')} "${job.name}"?`, confirmLabel: t('common.delete'), variant: 'destructive' });
     if (!ok) return;
     try {
       await scheduleApi.delete(job.id);
-      toast('success', '已删除');
+      toast('success', t('schedules.messages.deleted'));
       loadJobs();
-    } catch { toast('error', '删除失败'); }
+    } catch { toast('error', t('schedules.messages.deleteFailed')); }
   };
 
   const statusBadge = (s?: string) => {
@@ -195,39 +199,40 @@ export default function SchedulesPage() {
             <Link href="/dashboard" className="text-muted-foreground hover:text-foreground">
               <span className="material-symbols-outlined text-xl">arrow_back</span>
             </Link>
-            <h1 className="text-lg font-semibold">定时任务</h1>
+            <h1 className="text-lg font-semibold">{t('schedules.title')}</h1>
             <Badge variant="secondary">{jobs.length}</Badge>
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" onClick={openCreate}>
-              <span className="material-symbols-outlined text-sm mr-1">add</span>新建定时任务
+              <span className="material-symbols-outlined text-sm mr-1">add</span>{t('schedules.new')}
             </Button>
             <ThemeToggle />
+            <LanguageToggle />
           </div>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-6">
         {loading ? (
-          <div className="text-center py-20 text-muted-foreground">加载中...</div>
+          <div className="text-center py-20 text-muted-foreground">{t('common.loading')}</div>
         ) : jobs.length === 0 ? (
           <div className="text-center py-20">
             <span className="material-symbols-outlined text-5xl text-muted-foreground/40 mb-4 block">schedule</span>
-            <p className="text-muted-foreground mb-4">还没有定时任务</p>
-            <Button onClick={openCreate}>创建第一个定时任务</Button>
+            <p className="text-muted-foreground mb-4">{t('schedules.empty')}</p>
+            <Button onClick={openCreate}>{t('schedules.createFirst')}</Button>
           </div>
         ) : (
           <div className="border border-border rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
-                  <th className="text-left px-4 py-3 font-medium">名称</th>
-                  <th className="text-left px-4 py-3 font-medium">配置文件</th>
-                  <th className="text-left px-4 py-3 font-medium">调度规则</th>
-                  <th className="text-center px-4 py-3 font-medium">状态</th>
-                  <th className="text-left px-4 py-3 font-medium">上次执行</th>
-                  <th className="text-left px-4 py-3 font-medium">下次执行</th>
-                  <th className="text-right px-4 py-3 font-medium">操作</th>
+                  <th className="text-left px-4 py-3 font-medium">{t('schedules.columns.name')}</th>
+                  <th className="text-left px-4 py-3 font-medium">{t('schedules.columns.config')}</th>
+                  <th className="text-left px-4 py-3 font-medium">{t('schedules.columns.schedule')}</th>
+                  <th className="text-center px-4 py-3 font-medium">{t('schedules.columns.status')}</th>
+                  <th className="text-left px-4 py-3 font-medium">{t('schedules.columns.lastRun')}</th>
+                  <th className="text-left px-4 py-3 font-medium">{t('schedules.columns.nextRun')}</th>
+                  <th className="text-right px-4 py-3 font-medium">{t('schedules.columns.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -235,7 +240,7 @@ export default function SchedulesPage() {
                   <tr key={job.id} className="hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 font-medium">{job.name}</td>
                     <td className="px-4 py-3 text-muted-foreground">{job.configFile}</td>
-                    <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{describeSchedule(job)}</td>
+                    <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{describeSchedule(job, t)}</td>
                     <td className="px-4 py-3 text-center">
                       <Switch checked={job.enabled} onCheckedChange={() => handleToggle(job)} />
                     </td>
@@ -248,13 +253,13 @@ export default function SchedulesPage() {
                     <td className="px-4 py-3 text-xs text-muted-foreground">{job.enabled ? formatTime(job.nextRunTime) : '-'}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(job)} title="编辑">
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(job)} title={t('schedules.actions.edit')}>
                           <span className="material-symbols-outlined text-sm">edit</span>
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleTrigger(job)} title="立即执行">
+                        <Button variant="ghost" size="sm" onClick={() => handleTrigger(job)} title={t('schedules.actions.run')}>
                           <span className="material-symbols-outlined text-sm">play_arrow</span>
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleDelete(job)} title="删除" className="text-destructive hover:text-destructive">
+                        <Button variant="ghost" size="sm" onClick={() => handleDelete(job)} title={t('schedules.actions.delete')} className="text-destructive hover:text-destructive">
                           <span className="material-symbols-outlined text-sm">delete</span>
                         </Button>
                       </div>
@@ -270,44 +275,44 @@ export default function SchedulesPage() {
       {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
-          <h2 className="text-lg font-semibold mb-4">{editingJob ? '编辑定时任务' : '新建定时任务'}</h2>
+          <h2 className="text-lg font-semibold mb-4">{editingJob ? t('schedules.dialog.editTitle') : t('schedules.dialog.createTitle')}</h2>
           <div className="space-y-4">
             <div>
-              <Label>任务名称</Label>
-              <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="例：每日代码审计" />
+              <Label>{t('schedules.dialog.name')}</Label>
+              <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder={t('schedules.dialog.namePlaceholder')} />
             </div>
             <div>
-              <Label>配置文件</Label>
+              <Label>{t('schedules.dialog.configFile')}</Label>
               <Select value={formConfig} onValueChange={setFormConfig}>
-                <SelectTrigger><SelectValue placeholder="选择配置文件" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder={t('schedules.dialog.selectConfig')} /></SelectTrigger>
                 <SelectContent>
                   {configs.map(c => <SelectItem key={c.filename} value={c.filename}>{c.name} ({c.filename})</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>调度模式</Label>
+              <Label>{t('schedules.dialog.scheduleMode')}</Label>
               <Tabs value={formMode} onValueChange={v => setFormMode(v as 'simple' | 'cron')}>
                 <TabsList className="w-full">
-                  <TabsTrigger value="simple" className="flex-1">简单模式</TabsTrigger>
-                  <TabsTrigger value="cron" className="flex-1">Cron 模式</TabsTrigger>
+                  <TabsTrigger value="simple" className="flex-1">{t('schedules.dialog.simpleMode')}</TabsTrigger>
+                  <TabsTrigger value="cron" className="flex-1">{t('schedules.dialog.cronMode')}</TabsTrigger>
                 </TabsList>
                 <TabsContent value="simple" className="space-y-3 mt-3">
                   <div className="flex gap-2 items-end">
                     <div className="flex-1">
-                      <Label>间隔类型</Label>
+                      <Label>{t('schedules.dialog.intervalType')}</Label>
                       <Select value={formIntervalUnit} onValueChange={v => setFormIntervalUnit(v as any)}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="hour">每隔N小时</SelectItem>
-                          <SelectItem value="day">每天</SelectItem>
-                          <SelectItem value="week">每周</SelectItem>
+                          <SelectItem value="hour">{t('schedules.dialog.everyNHours')}</SelectItem>
+                          <SelectItem value="day">{t('schedules.dialog.daily')}</SelectItem>
+                          <SelectItem value="week">{t('schedules.dialog.weekly')}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     {formIntervalUnit === 'hour' && (
                       <div className="w-24">
-                        <Label>间隔</Label>
+                        <Label>{t('schedules.dialog.interval')}</Label>
                         <Input type="number" min={1} max={23} value={formIntervalValue} onChange={e => setFormIntervalValue(Number(e.target.value))} />
                       </div>
                     )}
@@ -316,7 +321,7 @@ export default function SchedulesPage() {
                     <div className="flex gap-2 items-end">
                       {formIntervalUnit === 'week' && (
                         <div className="flex-1">
-                          <Label>星期</Label>
+                          <Label>{t('schedules.dialog.weekday')}</Label>
                           <Select value={String(formWeekday)} onValueChange={v => setFormWeekday(Number(v))}>
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent>
@@ -326,11 +331,11 @@ export default function SchedulesPage() {
                         </div>
                       )}
                       <div className="w-20">
-                        <Label>时</Label>
+                        <Label>{t('schedules.dialog.hour')}</Label>
                         <Input type="number" min={0} max={23} value={formHour} onChange={e => setFormHour(Number(e.target.value))} />
                       </div>
                       <div className="w-20">
-                        <Label>分</Label>
+                        <Label>{t('schedules.dialog.minute')}</Label>
                         <Input type="number" min={0} max={59} value={formMinute} onChange={e => setFormMinute(Number(e.target.value))} />
                       </div>
                     </div>
@@ -338,20 +343,20 @@ export default function SchedulesPage() {
                 </TabsContent>
                 <TabsContent value="cron" className="space-y-3 mt-3">
                   <div>
-                    <Label>Cron 表达式</Label>
+                    <Label>{t('schedules.dialog.cronExpression')}</Label>
                     <Input value={formCron} onChange={e => setFormCron(e.target.value)} placeholder="0 0 * * *" className="font-mono" />
-                    <p className="text-xs text-muted-foreground mt-1">格式: 分 时 日 月 周 (例: 0 2 * * * = 每天凌晨2点)</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t('schedules.dialog.cronHelp')}</p>
                   </div>
                 </TabsContent>
               </Tabs>
             </div>
             <div className="flex items-center gap-2">
               <Switch checked={formEnabled} onCheckedChange={setFormEnabled} />
-              <Label>创建后立即启用</Label>
+              <Label>{t('schedules.dialog.enableOnCreate')}</Label>
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="secondary" onClick={() => setDialogOpen(false)}>取消</Button>
-              <Button onClick={handleSave}>{editingJob ? '保存' : '创建'}</Button>
+              <Button variant="secondary" onClick={() => setDialogOpen(false)}>{t('schedules.dialog.cancel')}</Button>
+              <Button onClick={handleSave}>{editingJob ? t('schedules.dialog.save') : t('schedules.dialog.create')}</Button>
             </div>
           </div>
         </DialogContent>

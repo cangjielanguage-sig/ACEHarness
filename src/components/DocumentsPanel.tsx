@@ -11,6 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Checkbox } from '@/components/ui/checkbox';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import Markdown from '@/components/Markdown';
+import { useTranslations } from '@/hooks/useTranslations';
 import styles from '@/app/workbench/[config]/page.module.css';
 
 interface DocFile {
@@ -43,9 +44,11 @@ const roleLabel: Record<string, string> = { attacker: '攻击方', defender: '�
 /** Extract group name from filename: "根因定位-定位空指针路径.md" → "根因定位" */
 function getFileGroup(filename: string): string {
   const base = filename.replace(/\.md$/i, '');
-  const idx = base.indexOf('-');
-  if (idx > 0) return base.substring(0, idx);
-  return '其他';
+  // Strip ISO timestamp prefix like "2026-03-20T14-30-00-" from conclusion files
+  const stripped = base.replace(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/, '');
+  const idx = stripped.indexOf('-');
+  if (idx > 0) return stripped.substring(0, idx);
+  return stripped || '其他';
 }
 
 export default function DocumentsPanel({ runId }: DocumentsPanelProps) {

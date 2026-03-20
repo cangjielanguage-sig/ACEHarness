@@ -774,6 +774,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       // Check if final state
       if (stateConfig.isFinal) {
+        // Execute final state steps (e.g. regression tests) before completing
+        if (stateConfig.steps.length > 0) {
+          await this.executeState(stateConfig, config, requirements);
+        }
         this.emit('state-change', {
           state: this.currentState,
           message: `到达终止状态: ${this.currentState}`,
@@ -915,20 +919,28 @@ export class StateMachineWorkflowManager extends EventEmitter {
         await new Promise(r => setTimeout(r, 30000));
       }
 
-      const output = await this.executeStep(step, state, config, requirements);
-      stepOutputs.push(output);
+      try {
+        const output = await this.executeStep(step, state, config, requirements);
+        stepOutputs.push(output);
 
-      // Parse issues from output
-      const stepIssues = this.parseIssuesFromOutput(output, step, state.name);
-      issues.push(...stepIssues);
+        // Parse issues from output
+        const stepIssues = this.parseIssuesFromOutput(output, step, state.name);
+        issues.push(...stepIssues);
 
-      // Update verdict based on step role
-      if (step.role === 'judge') {
-        const stepVerdict = this.parseVerdict(output);
-        if (stepVerdict === 'fail') verdict = 'fail';
-        else if (stepVerdict === 'conditional_pass' && verdict === 'pass') {
-          verdict = 'conditional_pass';
+        // Update verdict based on step role
+        if (step.role === 'judge') {
+          const stepVerdict = this.parseVerdict(output);
+          if (stepVerdict === 'fail') verdict = 'fail';
+          else if (stepVerdict === 'conditional_pass' && verdict === 'pass') {
+            verdict = 'conditional_pass';
+          }
         }
+      } catch (stepError: any) {
+        const errorMsg = stepError.message || String(stepError);
+        console.error(`[StateMachineWorkflowManager] Step "${step.name}" in state "${state.name}" failed: ${errorMsg}`);
+        stepOutputs.push(`ERROR: ${errorMsg}`);
+        verdict = 'fail';
+        // Continue to next step instead of aborting the entire state
       }
     }
 
@@ -1715,7 +1727,35 @@ export class StateMachineWorkflowManager extends EventEmitter {
     }
 
     // Continue execution from current state
-    await this.executeStateMachine(workflowConfig, runState.requirements);
+    try {
+      await this.executeStateMachine(workflowConfig, runState.requirements);
+
+      if (!this.shouldStop) {
+        this.status = 'completed';
+        this.emit('status', {
+          status: 'completed',
+          message: '工作流执行完成',
+          startTime: this.runStartTime,
+          endTime: this.runEndTime,
+          currentConfigFile: this.currentConfigFile
+        });
+        await this.finalizeRun('completed');
+      }
+    } catch (error: any) {
+      if (!this.shouldStop) {
+        this.status = 'failed';
+        this.statusReason = error.message || String(error);
+        this.emit('status', {
+          status: 'failed',
+          message: error.message,
+          startTime: this.runStartTime,
+          endTime: this.runEndTime,
+          currentConfigFile: this.currentConfigFile
+        });
+        await this.finalizeRun('failed');
+      }
+      throw error;
+    }
   }
 
   // ========== Live feedback functionality ==========
@@ -1910,7 +1950,35 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.initializeAgents(workflowConfig);
 
     // Continue execution from this state
-    await this.executeStateMachine(workflowConfig, runState.requirements);
+    try {
+      await this.executeStateMachine(workflowConfig, runState.requirements);
+
+      if (!this.shouldStop) {
+        this.status = 'completed';
+        this.emit('status', {
+          status: 'completed',
+          message: '工作流执行完成',
+          startTime: this.runStartTime,
+          endTime: this.runEndTime,
+          currentConfigFile: this.currentConfigFile
+        });
+        await this.finalizeRun('completed');
+      }
+    } catch (error: any) {
+      if (!this.shouldStop) {
+        this.status = 'failed';
+        this.statusReason = error.message || String(error);
+        this.emit('status', {
+          status: 'failed',
+          message: error.message,
+          startTime: this.runStartTime,
+          endTime: this.runEndTime,
+          currentConfigFile: this.currentConfigFile
+        });
+        await this.finalizeRun('failed');
+      }
+      throw error;
+    }
   }
 }
 
