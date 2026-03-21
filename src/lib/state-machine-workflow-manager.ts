@@ -382,6 +382,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.stepLogs = [];
       this.runStartTime = new Date().toISOString();
       this.currentConfigFile = configFile;
+
+      // Clear stale in-memory flags from previous run
+      this.pendingForceTransition = null;
+      this.pendingForceInstruction = null;
+      this.pendingApprovalInfo = null;
+      this.interruptFlag = false;
+      this.feedbackInterrupt = false;
+      this.liveFeedback = [];
       // Load config
       const configPath = resolve(process.cwd(), 'configs', configFile);
       const configContent = await readFile(configPath, 'utf-8');
@@ -1922,6 +1930,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.status = 'running';
     this.shouldStop = false;
 
+    // Clear stale in-memory flags from previous run to prevent ghost transitions
+    this.pendingForceTransition = null;
+    this.pendingForceInstruction = null;
+    this.pendingApprovalInfo = null;
+    this.interruptFlag = false;
+    this.feedbackInterrupt = false;
+    this.liveFeedback = [];
+
     this.emit('status', {
       status: 'running',
       message: '恢复运行中...',
@@ -2208,6 +2224,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.stateContexts = new Map(Object.entries(runState.phaseContexts || {}));
     this.status = 'running';
     this.shouldStop = false;
+
+    // Clear stale in-memory flags from previous run to prevent ghost transitions
+    this.pendingForceTransition = null;
+    this.pendingForceInstruction = null;
+    this.pendingApprovalInfo = null;
+    this.interruptFlag = false;
+    this.feedbackInterrupt = false;
+    this.liveFeedback = [];
 
     this.emit('status', {
       status: 'running',

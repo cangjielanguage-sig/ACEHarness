@@ -263,7 +263,8 @@ export default function WorkbenchPage() {
 
   const loadContexts = async () => {
     try {
-      const contexts = await workflowApi.getContexts();
+      const rid = runId || initialRunId || selectedRun?.id;
+      const contexts = await workflowApi.getContexts(rid || undefined);
       if (contexts.globalContext !== undefined) {
         dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: contexts.globalContext });
       }
@@ -1267,7 +1268,8 @@ export default function WorkbenchPage() {
 
   const saveContext = async () => {
     try {
-      await workflowApi.setContext(editingContextScope, editingContextValue, editingContextPhase || undefined);
+      const rid = runId || initialRunId || selectedRun?.id;
+      await workflowApi.setContext(editingContextScope, editingContextValue, editingContextPhase || undefined, rid || undefined);
       if (editingContextScope === 'global') {
         dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: editingContextValue });
       } else if (editingContextPhase) {

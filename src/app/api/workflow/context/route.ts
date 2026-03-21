@@ -22,26 +22,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check both managers to find which one is running
+    // Update in-memory state for running managers
     const phaseStatus = workflowManager.getStatus();
     const smStatus = stateMachineWorkflowManager.getStatus();
 
-    let manager;
     let currentRunId = runId;
     if (phaseStatus.status === 'running') {
-      manager = workflowManager;
+      workflowManager.setContext(scope, context || '', phase);
       currentRunId = currentRunId || phaseStatus.runId;
     } else if (smStatus.status === 'running') {
-      manager = stateMachineWorkflowManager;
+      stateMachineWorkflowManager.setContext(scope, context || '', phase);
       currentRunId = currentRunId || smStatus.runId;
-    } else {
-      // When neither is running, use state machine manager by default
-      manager = stateMachineWorkflowManager;
     }
 
-    manager.setContext(scope, context || '', phase);
-
-    // Persist context to state.yaml if we have a runId
+    // Always persist to state.yaml
     if (currentRunId) {
       const runState = await loadRunState(currentRunId);
       if (runState) {
@@ -67,23 +61,39 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    // Check both managers
+    const runId = request.nextUrl.searchParams.get('runId');
+
+    // Always read from state.yaml as source of truth
+    if (runId) {
+      const runState = await loadRunState(runId);
+      if (runState) {
+        return NextResponse.json({
+          globalContext: runState.globalContext || '',
+          phaseContexts: runState.phaseContexts || {},
+        });
+      }
+    }
+
+    // Fallback: read from in-memory manager
     const phaseStatus = workflowManager.getStatus();
     const smStatus = stateMachineWorkflowManager.getStatus();
 
-    let contexts;
+    let globalContext = '';
+    let phaseContexts: Record<string, string> = {};
+
     if (phaseStatus.status === 'running') {
-      contexts = workflowManager.getContexts();
-    } else if (smStatus.status === 'running') {
-      contexts = stateMachineWorkflowManager.getContexts();
+      const c = workflowManager.getContexts();
+      globalContext = c.globalContext || '';
+      phaseContexts = c.phaseContexts || {};
     } else {
-      // When neither is running, use state machine manager by default
-      contexts = stateMachineWorkflowManager.getContexts();
+      const c = stateMachineWorkflowManager.getContexts();
+      globalContext = c.global || '';
+      phaseContexts = c.phases || {};
     }
 
-    return NextResponse.json(contexts);
+    return NextResponse.json({ globalContext, phaseContexts });
   } catch (error: any) {
     return NextResponse.json(
       { error: '获取上下文失败', message: error.message },

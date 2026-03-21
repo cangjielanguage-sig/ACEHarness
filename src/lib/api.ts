@@ -396,11 +396,11 @@ export const workflowApi = {
     return response.json();
   },
 
-  async setContext(scope: 'global' | 'phase', context: string, phase?: string): Promise<ApiResponse> {
+  async setContext(scope: 'global' | 'phase', context: string, phase?: string, runId?: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/context`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope, phase, context }),
+      body: JSON.stringify({ scope, phase, context, runId }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -409,8 +409,9 @@ export const workflowApi = {
     return response.json();
   },
 
-  async getContexts(): Promise<{ globalContext: string; phaseContexts: Record<string, string> }> {
-    const response = await fetch(`${API_BASE}/workflow/context`);
+  async getContexts(runId?: string): Promise<{ globalContext: string; phaseContexts: Record<string, string> }> {
+    const params = runId ? `?runId=${encodeURIComponent(runId)}` : '';
+    const response = await fetch(`${API_BASE}/workflow/context${params}`);
     if (!response.ok) throw new Error('获取上下文失败');
     return response.json();
   },

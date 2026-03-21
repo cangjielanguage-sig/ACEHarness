@@ -5,7 +5,7 @@ tags:
   - 审查
   - 裁判
   - 代码评估
-model: claude-sonnet-4-6
+model: claude-opus-4-6
 temperature: 0.5
 allowedTools:
   - Read

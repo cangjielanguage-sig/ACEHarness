@@ -12,6 +12,7 @@ const SKILLS_REPO_DIR = path.join(process.cwd(), 'skills');
 const SKILLS_CONFIG_FILE = path.join(SKILLS_REPO_DIR, 'skills.yaml');
 const SKILLS_REPO_URL = 'https://gitcode.com/cjc-compiler-frontend/cangjie_ace_skills.git';
 const ANTHROPICS_SKILLS_REPO_URL = 'https://github.com/anthropics/skills.git';
+const CLAUDE_SKILLS_SUBDIR = ['.claude', 'skills'].join('/');
 
 // 检查 skills 目录是否有内容（skills.yaml 存在即视为已初始化）
 async function isSkillsInitialized(): Promise<boolean> {
@@ -95,7 +96,7 @@ export async function GET() {
     // 读取每个 skill 的详细描述
     const skillsWithDetails = await Promise.all(
       (config.skills || []).map(async (skill) => {
-        const skillPath = path.join(SKILLS_REPO_DIR, '.claude', 'skills', skill.path, 'SKILL.md');
+        const skillPath = path.join(SKILLS_REPO_DIR, CLAUDE_SKILLS_SUBDIR, skill.path, 'SKILL.md');
         let detailedDescription = '';
         try {
           detailedDescription = await fs.readFile(skillPath, 'utf-8');
@@ -138,7 +139,7 @@ export async function POST() {
 export async function PUT() {
   try {
     const tmpDir = path.join(process.cwd(), '.tmp_anthropics_skills');
-    const targetDir = path.join(SKILLS_REPO_DIR, '.claude', 'skills');
+    const targetDir = path.join(SKILLS_REPO_DIR, CLAUDE_SKILLS_SUBDIR);
 
     // 清理临时目录
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
