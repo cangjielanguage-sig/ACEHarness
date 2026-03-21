@@ -6,8 +6,13 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { readFile, readdir, stat, mkdir, cp, rm } from 'fs/promises';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
 import { existsSync } from 'fs';
+
+// Skills directory path segments - constructed at runtime to prevent
+// webpack/Next.js file tracing from over-matching the skills directory
+const SKILLS_SUBDIR = ['skills', '.claude', 'skills'].join('/');
+const CLAUDE_SKILLS_SUBDIR = ['.claude', 'skills'].join('/');
 import { parse } from 'yaml';
 import { processManager } from './process-manager';
 import type { ClaudeJsonResult } from './process-manager';
@@ -122,14 +127,14 @@ class WorkflowManager extends EventEmitter {
    */
   private async loadSkillContent(skillName: string, projectRoot: string): Promise<string | null> {
     // Try project-level skill first
-    const projectSkillPath = resolve(process.cwd(), projectRoot, '.claude', 'skills', skillName, 'SKILL.md');
+    const projectSkillPath = join(resolve(process.cwd(), projectRoot), CLAUDE_SKILLS_SUBDIR, skillName, 'SKILL.md');
     try {
       const content = await readFile(projectSkillPath, 'utf-8');
       return content;
     } catch { /* not found in project */ }
 
     // Try system-level skills directory
-    const systemSkillPath = resolve(process.cwd(), 'skills', '.claude', 'skills', skillName, 'SKILL.md');
+    const systemSkillPath = join(process.cwd(), SKILLS_SUBDIR, skillName, 'SKILL.md');
     try {
       const content = await readFile(systemSkillPath, 'utf-8');
       return content;
@@ -209,8 +214,8 @@ class WorkflowManager extends EventEmitter {
     const projectRoot = config.context?.projectRoot;
     if (!projectRoot) return;
 
-    const serverSkillsDir = resolve(process.cwd(), 'skills', '.claude', 'skills');
-    const workspaceSkillsDir = resolve(process.cwd(), projectRoot, '.claude', 'skills');
+    const serverSkillsDir = join(process.cwd(), SKILLS_SUBDIR);
+    const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), CLAUDE_SKILLS_SUBDIR);
     if (!existsSync(serverSkillsDir)) return;
 
     const needed = new Set<string>();
@@ -301,7 +306,7 @@ class WorkflowManager extends EventEmitter {
    */
   private async discoverWorkspaceSkills(projectRoot: string): Promise<string> {
     const absRoot = resolve(process.cwd(), projectRoot);
-    const skillsDir = resolve(absRoot, '.claude', 'skills');
+    const skillsDir = join(absRoot, CLAUDE_SKILLS_SUBDIR);
     try {
       const skillIndex = resolve(skillsDir, 'SKILL.md');
       const indexContent = await readFile(skillIndex, 'utf-8');
@@ -1646,7 +1651,7 @@ class WorkflowManager extends EventEmitter {
       prompt += `3. **Skills 包含最佳实践**：每个 Skill 都经过验证，代表了该领域的最佳实践，偏离 Skill 指导可能导致错误或性能问题\n`;
       prompt += `4. **遇到问题先查 Skills**：如果遇到构建、测试、部署等问题，请首先检查是否有对应的 Skill 可用\n\n`;
       prompt += `### 如何使用 Skills\n\n`;
-      const skillsAbsPath = resolve(process.cwd(), 'skills', '.claude', 'skills');
+      const skillsAbsPath = join(process.cwd(), SKILLS_SUBDIR);
       prompt += `- **Skills 目录绝对路径**: \`${skillsAbsPath}/\`\n`;
       prompt += `- **阅读 SKILL.md**：每个 Skill 目录下的 SKILL.md 包含完整使用说明，例如 \`${skillsAbsPath}/build-cangjie/SKILL.md\`\n`;
       prompt += `- **查看 REFERENCE.md**：如需更多参数说明，参考同目录下的 REFERENCE.md\n`;

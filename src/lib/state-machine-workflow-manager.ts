@@ -6,8 +6,13 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { readFile, readdir, stat, mkdir, cp, rm } from 'fs/promises';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
 import { existsSync } from 'fs';
+
+// Skills directory path segments - constructed at runtime to prevent
+// webpack/Next.js file tracing from over-matching the skills directory
+const SKILLS_SUBDIR = ['skills', '.claude', 'skills'].join('/');
+const CLAUDE_SKILLS_SUBDIR = ['.claude', 'skills'].join('/');
 import { parse } from 'yaml';
 import { processManager } from './process-manager';
 import type { ClaudeJsonResult } from './process-manager';
@@ -164,8 +169,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     // Try project-level first, then server-level skills directory
     const candidates = [
-      resolve(process.cwd(), projectRoot, '.claude', 'skills'),
-      resolve(process.cwd(), 'skills', '.claude', 'skills'),
+      join(resolve(process.cwd(), projectRoot), CLAUDE_SKILLS_SUBDIR),
+      join(process.cwd(), SKILLS_SUBDIR),
     ];
 
     for (const skillsDir of candidates) {
@@ -202,12 +207,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
    * Load a single skill's content from project or system skills directory
    */
   private async loadSkillContent(skillName: string, projectRoot: string): Promise<string | null> {
-    const projectSkillPath = resolve(process.cwd(), projectRoot, '.claude', 'skills', skillName, 'SKILL.md');
+    const projectSkillPath = join(resolve(process.cwd(), projectRoot), CLAUDE_SKILLS_SUBDIR, skillName, 'SKILL.md');
     try {
       return await readFile(projectSkillPath, 'utf-8');
     } catch { /* not found in project */ }
 
-    const systemSkillPath = resolve(process.cwd(), 'skills', '.claude', 'skills', skillName, 'SKILL.md');
+    const systemSkillPath = join(process.cwd(), SKILLS_SUBDIR, skillName, 'SKILL.md');
     try {
       return await readFile(systemSkillPath, 'utf-8');
     } catch { /* not found in system */ }
@@ -244,8 +249,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const projectRoot = config.context?.projectRoot;
     if (!projectRoot) return;
 
-    const serverSkillsDir = resolve(process.cwd(), 'skills', '.claude', 'skills');
-    const workspaceSkillsDir = resolve(process.cwd(), projectRoot, '.claude', 'skills');
+    const serverSkillsDir = join(process.cwd(), SKILLS_SUBDIR);
+    const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), CLAUDE_SKILLS_SUBDIR);
 
     if (!existsSync(serverSkillsDir)) return;
 
@@ -1285,7 +1290,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     if (config.context?.projectRoot) {
       const skills = await this.loadWorkspaceSkills(config.context.projectRoot);
       if (skills) {
-        const skillsAbsPath = resolve(process.cwd(), 'skills', '.claude', 'skills');
+        const skillsAbsPath = join(process.cwd(), SKILLS_SUBDIR);
         parts.push(`\n# 可用 Skills\n\nSkills 目录绝对路径: \`${skillsAbsPath}/\`\n\n如需使用某个 Skill，请先用 Read 工具读取对应的 SKILL.md 文件获取详细说明。例如：\`${skillsAbsPath}/build-cangjie/SKILL.md\`\n\n${skills}`);
       }
     }

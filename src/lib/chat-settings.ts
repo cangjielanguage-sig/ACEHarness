@@ -4,11 +4,11 @@
  */
 
 import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, join } from 'path';
 import { parse, stringify } from 'yaml';
 
 const SETTINGS_PATH = resolve(process.cwd(), 'data', 'chat-settings.yaml');
-const SKILLS_DIR = resolve(process.cwd(), 'skills', '.claude', 'skills');
+const SKILLS_DIR = join(process.cwd(), ['skills', '.claude', 'skills'].join('/'));
 const SKILLS_YAML_PATH = resolve(process.cwd(), 'skills', 'skills.yaml');
 
 export interface SkillInfo {

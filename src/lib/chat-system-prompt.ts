@@ -4,7 +4,7 @@
  */
 
 import { readFile } from 'fs/promises';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
 import { generateActionTypesDocs } from './chat-actions';
 
 const BASE_SYSTEM_PROMPT = `你是 AceFlow 助手，帮助用户通过对话管理 AI 协同工作调度系统。
@@ -125,7 +125,7 @@ Skills 是 AceFlow 的能力扩展模块，每个 skill 存放在 skills/.claude
 
 这条规则的优先级最高，违反此规则会导致用户误以为操作已完成而实际未执行。`;
 
-const SKILLS_DIR = resolve(process.cwd(), 'skills', '.claude', 'skills');
+const SKILLS_DIR = join(process.cwd(), ['skills', '.claude', 'skills'].join('/'));
 
 /** 加载指定 skill 的 PROMPT.md 内容 */
 async function loadSkillPrompt(skillName: string): Promise<string> {
