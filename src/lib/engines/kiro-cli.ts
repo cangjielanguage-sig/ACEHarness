@@ -97,7 +97,11 @@ export class KiroCliEngine extends EventEmitter {
     this.process = spawn('kiro-cli', args, {
       cwd: this.options.workingDirectory,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PATH: `${process.env.PATH}:/root/.local/bin:/usr/local/bin` },
+      env: {
+        ...process.env,
+        PATH: `${process.env.PATH}:/root/.local/bin:/usr/local/bin`,
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS || '128000',
+      },
     });
 
     if (!this.process.stdin || !this.process.stdout || !this.process.stderr) {
