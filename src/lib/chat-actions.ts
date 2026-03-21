@@ -33,68 +33,117 @@ export type ActionType =
 // 风险等级
 export type RiskLevel = 'safe' | 'mutating' | 'destructive';
 
-export const RISK_MAP: Record<ActionType, RiskLevel> = {
-  'config.list': 'safe',
-  'config.get': 'safe',
-  'config.create': 'mutating',
-  'config.update': 'mutating',
-  'config.delete': 'destructive',
-  'agent.list': 'safe',
-  'agent.get': 'safe',
-  'agent.create': 'mutating',
-  'agent.update': 'mutating',
-  'agent.delete': 'destructive',
-  'model.list': 'safe',
-  'workflow.start': 'mutating',
-  'workflow.stop': 'mutating',
-  'workflow.status': 'safe',
-  'runs.list': 'safe',
-  'runs.detail': 'safe',
-  'navigate': 'safe',
-  'skill.list': 'safe',
-  'prompt.analyze': 'safe',
-  'prompt.optimize': 'safe',
-  'wizard.workflow': 'safe',
-  'wizard.agent': 'safe',
-  'wizard.skill': 'safe',
-  // Schedule
-  'schedule.list': 'safe',
-  'schedule.get': 'safe',
-  'schedule.create': 'mutating',
-  'schedule.update': 'mutating',
-  'schedule.delete': 'destructive',
-  'schedule.trigger': 'mutating',
-  'schedule.toggle': 'mutating',
+// Action 元数据：描述 + 参数说明 + 分组
+export interface ActionMeta {
+  description: string;
+  params: string;
+  group: string;
+  groupLabel: string;
+  risk: RiskLevel;
+}
+
+/** Action 元数据注册表，用于动态生成提示词中的 action 列表 */
+export const ACTION_REGISTRY: Record<ActionType, ActionMeta> = {
+  // 配置管理
+  'config.list':   { group: 'config', groupLabel: '配置管理（操作 configs/ 目录下的 YAML 文件）', risk: 'safe',        description: '列出所有工作流配置文件', params: '{}' },
+  'config.get':    { group: 'config', groupLabel: '', risk: 'safe',        description: '读取某个配置文件的内容', params: '{ "filename": "xxx.yaml" }' },
+  'config.create': { group: 'config', groupLabel: '', risk: 'mutating',    description: '创建新的配置文件', params: '{ "filename": "xxx.yaml", "config": {完整配置对象} }' },
+  'config.update': { group: 'config', groupLabel: '', risk: 'mutating',    description: '更新已有配置文件', params: '{ "filename": "xxx.yaml", "config": {完整配置对象} }' },
+  'config.delete': { group: 'config', groupLabel: '', risk: 'destructive', description: '删除配置文件', params: '{ "filename": "xxx.yaml" }' },
+
+  // Agent 管理
+  'agent.list':   { group: 'agent', groupLabel: 'Agent 管理（操作 configs/agents/ 目录下的 YAML 文件）', risk: 'safe',        description: '列出所有 Agent 配置文件', params: '{}' },
+  'agent.get':    { group: 'agent', groupLabel: '', risk: 'safe',        description: '读取某个 Agent 的配置', params: '{ "name": "agent-name" }' },
+  'agent.create': { group: 'agent', groupLabel: '', risk: 'mutating',    description: '创建新的 Agent 配置文件', params: '{ "name": "agent-name", "agent": {完整Agent配置} }' },
+  'agent.update': { group: 'agent', groupLabel: '', risk: 'mutating',    description: '更新已有 Agent 配置文件', params: '{ "name": "agent-name", "agent": {完整Agent配置} }' },
+  'agent.delete': { group: 'agent', groupLabel: '', risk: 'destructive', description: '删除 Agent 配置文件', params: '{ "name": "agent-name" }' },
+
+  // 模型
+  'model.list': { group: 'model', groupLabel: '模型（读取 configs/models/models.yaml）', risk: 'safe', description: '列出可用模型', params: '{}' },
+
+  // 工作流控制
+  'workflow.start':  { group: 'workflow', groupLabel: '工作流控制（启动/停止基于配置文件的工作流运行）', risk: 'mutating', description: '启动工作流', params: '{ "configFile": "xxx.yaml" }' },
+  'workflow.stop':   { group: 'workflow', groupLabel: '', risk: 'mutating', description: '停止当前工作流', params: '{}' },
+  'workflow.status': { group: 'workflow', groupLabel: '', risk: 'safe',     description: '查看工作流运行状态', params: '{}' },
+
+  // 运行记录
+  'runs.list':   { group: 'runs', groupLabel: '运行记录（读取 runs/ 目录下的运行数据）', risk: 'safe', description: '查看运行记录', params: '{ "configFile": "xxx.yaml" }（可选，不传则列出所有配置的运行记录）' },
+  'runs.detail': { group: 'runs', groupLabel: '', risk: 'safe', description: '查看运行详情', params: '{ "runId": "xxx" }' },
+
+  // 导航
+  'navigate': { group: 'navigate', groupLabel: '导航', risk: 'safe', description: '跳转页面', params: '{ "url": "/path" }\n  可用路径: /, /dashboard, /agents, /models, /workflows, /workbench/{configFile}, /schedules' },
+
+  // 定时任务管理
+  'schedule.list':    { group: 'schedule', groupLabel: '定时任务管理', risk: 'safe',        description: '列出所有定时任务', params: '{}' },
+  'schedule.get':     { group: 'schedule', groupLabel: '', risk: 'safe',        description: '获取定时任务详情', params: '{ "id": "任务ID" }' },
+  'schedule.create':  { group: 'schedule', groupLabel: '', risk: 'mutating',    description: '创建定时任务', params: '{ "name": "任务名称", "configFile": "xxx.yaml", "enabled": true, "mode": "simple|cron", "interval": {"value": 2, "unit": "hour|day|week"}, "fixedTime": {"hour": 0, "minute": 0, "weekday": 1}, "cronExpression": "0 */2 * * *" }' },
+  'schedule.update':  { group: 'schedule', groupLabel: '', risk: 'mutating',    description: '更新定时任务', params: '{ "id": "任务ID", ...要更新的字段 }' },
+  'schedule.delete':  { group: 'schedule', groupLabel: '', risk: 'destructive', description: '删除定时任务', params: '{ "id": "任务ID" }' },
+  'schedule.trigger': { group: 'schedule', groupLabel: '', risk: 'mutating',    description: '立即触发一次定时任务', params: '{ "id": "任务ID" }' },
+  'schedule.toggle':  { group: 'schedule', groupLabel: '', risk: 'mutating',    description: '启用/禁用定时任务', params: '{ "id": "任务ID" }' },
+
+  // Skills 管理
+  'skill.list': { group: 'skill', groupLabel: 'Skills 管理', risk: 'safe', description: '列出可用 Skills', params: '{}' },
+
+  // 提示词优化
+  'prompt.analyze':  { group: 'prompt', groupLabel: '提示词优化', risk: 'safe', description: '分析提示词效果', params: '{ "prompt": "提示词内容", "output": "输出内容(可选)" }' },
+  'prompt.optimize': { group: 'prompt', groupLabel: '', risk: 'safe', description: '优化提示词', params: '{ "prompt": "原始提示词" }' },
+
+  // 引导式创建向导
+  'wizard.workflow': { group: 'wizard', groupLabel: '引导式创建向导', risk: 'safe', description: '工作流创建向导步骤', params: '{ "step": 步骤号, "title": "当前步骤标题", "hints": ["提示1","提示2"], "data": {已收集的数据} }' },
+  'wizard.agent':    { group: 'wizard', groupLabel: '', risk: 'safe', description: 'Agent 创建向导步骤', params: '{ "step": 步骤号, "title": "当前步骤标题", "hints": ["提示1","提示2"], "data": {已收集的数据} }' },
+  'wizard.skill':    { group: 'wizard', groupLabel: '', risk: 'safe', description: 'Skill 创建向导步骤', params: '{ "step": 步骤号, "title": "当前步骤标题", "hints": ["提示1","提示2"], "data": {已收集的数据} }' },
+
   // GitCode - safe (read-only)
-  'gitcode.get_pr': 'safe',
-  'gitcode.get_issue': 'safe',
-  'gitcode.get_pr_commits': 'safe',
-  'gitcode.get_pr_changed_files': 'safe',
-  'gitcode.get_pr_comments': 'safe',
-  'gitcode.get_issues_by_pr': 'safe',
-  'gitcode.get_prs_by_issue': 'safe',
-  'gitcode.check_pr_mergeable': 'safe',
-  'gitcode.check_repo_public': 'safe',
-  'gitcode.list_issue_templates': 'safe',
-  'gitcode.get_issue_template': 'safe',
-  'gitcode.get_pr_template': 'safe',
-  'gitcode.get_commit_title': 'safe',
-  'gitcode.parse_issue_template': 'safe',
+  'gitcode.get_pr':              { group: 'gitcode', groupLabel: 'GitCode（代码托管平台集成）', risk: 'safe', description: '获取 PR 详情', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号 }' },
+  'gitcode.get_issue':           { group: 'gitcode', groupLabel: '', risk: 'safe', description: '获取 Issue 详情', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": Issue编号 }' },
+  'gitcode.get_pr_commits':      { group: 'gitcode', groupLabel: '', risk: 'safe', description: '获取 PR 的提交列表', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号 }' },
+  'gitcode.get_pr_changed_files':{ group: 'gitcode', groupLabel: '', risk: 'safe', description: '获取 PR 变更文件列表', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号 }' },
+  'gitcode.get_pr_comments':     { group: 'gitcode', groupLabel: '', risk: 'safe', description: '获取 PR 评论', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号 }' },
+  'gitcode.get_issues_by_pr':    { group: 'gitcode', groupLabel: '', risk: 'safe', description: '获取 PR 关联的 Issues', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号 }' },
+  'gitcode.get_prs_by_issue':    { group: 'gitcode', groupLabel: '', risk: 'safe', description: '获取 Issue 关联的 PRs', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": Issue编号 }' },
+  'gitcode.check_pr_mergeable':  { group: 'gitcode', groupLabel: '', risk: 'safe', description: '检查 PR 是否可合并', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号 }' },
+  'gitcode.check_repo_public':   { group: 'gitcode', groupLabel: '', risk: 'safe', description: '检查仓库是否公开', params: '{ "owner": "仓库所有者", "repo": "仓库名" }' },
+  'gitcode.list_issue_templates':{ group: 'gitcode', groupLabel: '', risk: 'safe', description: '列出 Issue 模板', params: '{ "owner": "仓库所有者", "repo": "仓库名" }' },
+  'gitcode.get_issue_template':  { group: 'gitcode', groupLabel: '', risk: 'safe', description: '获取 Issue 模板内容', params: '{ "owner": "仓库所有者", "repo": "仓库名", "name": "模板名" }' },
+  'gitcode.get_pr_template':     { group: 'gitcode', groupLabel: '', risk: 'safe', description: '获取 PR 模板内容', params: '{ "owner": "仓库所有者", "repo": "仓库名" }' },
+  'gitcode.get_commit_title':    { group: 'gitcode', groupLabel: '', risk: 'safe', description: '获取提交标题', params: '{ "owner": "仓库所有者", "repo": "仓库名", "sha": "提交SHA" }' },
+  'gitcode.parse_issue_template':{ group: 'gitcode', groupLabel: '', risk: 'safe', description: '解析 Issue 模板', params: '{ "owner": "仓库所有者", "repo": "仓库名", "name": "模板名" }' },
   // GitCode - mutating
-  'gitcode.create_pr': 'mutating',
-  'gitcode.create_issue': 'mutating',
-  'gitcode.post_pr_comment': 'mutating',
-  'gitcode.add_pr_labels': 'mutating',
-  'gitcode.remove_pr_labels': 'mutating',
-  'gitcode.add_issue_labels': 'mutating',
-  'gitcode.assign_pr_testers': 'mutating',
-  'gitcode.create_label': 'mutating',
-  'gitcode.fork_repo': 'mutating',
-  'gitcode.create_release': 'mutating',
-  'gitcode.post_issue_comment': 'mutating',
+  'gitcode.create_pr':           { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '创建 PR', params: '{ "owner": "仓库所有者", "repo": "仓库名", "title": "标题", "body": "描述", "head": "源分支", "base": "目标分支" }' },
+  'gitcode.create_issue':        { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '创建 Issue', params: '{ "owner": "仓库所有者", "repo": "仓库名", "title": "标题", "body": "描述" }' },
+  'gitcode.post_pr_comment':     { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '发表 PR 评论', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号, "body": "评论内容" }' },
+  'gitcode.add_pr_labels':       { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '为 PR 添加标签', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号, "labels": ["标签1"] }' },
+  'gitcode.remove_pr_labels':    { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '移除 PR 标签', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号, "labels": ["标签1"] }' },
+  'gitcode.add_issue_labels':    { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '为 Issue 添加标签', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": Issue编号, "labels": ["标签1"] }' },
+  'gitcode.assign_pr_testers':   { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '指派 PR 测试人员', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号, "testers": ["用户名"] }' },
+  'gitcode.create_label':        { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '创建标签', params: '{ "owner": "仓库所有者", "repo": "仓库名", "name": "标签名", "color": "颜色" }' },
+  'gitcode.fork_repo':           { group: 'gitcode', groupLabel: '', risk: 'mutating', description: 'Fork 仓库', params: '{ "owner": "仓库所有者", "repo": "仓库名" }' },
+  'gitcode.create_release':      { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '创建 Release', params: '{ "owner": "仓库所有者", "repo": "仓库名", "tag_name": "标签", "name": "名称", "body": "描述" }' },
+  'gitcode.post_issue_comment':  { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '发表 Issue 评论', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": Issue编号, "body": "评论内容" }' },
   // GitCode - destructive
-  'gitcode.merge_pr': 'destructive',
+  'gitcode.merge_pr':            { group: 'gitcode', groupLabel: '', risk: 'destructive', description: '合并 PR', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号 }' },
 };
+
+// 从 ACTION_REGISTRY 派生 RISK_MAP，避免重复维护
+export const RISK_MAP: Record<ActionType, RiskLevel> = Object.fromEntries(
+  Object.entries(ACTION_REGISTRY).map(([type, meta]) => [type, meta.risk])
+) as Record<ActionType, RiskLevel>;
+
+/** 从 ACTION_REGISTRY 动态生成提示词中的 action 类型列表 */
+export function generateActionTypesDocs(): string {
+  const lines: string[] = [];
+  let currentGroup = '';
+  for (const [type, meta] of Object.entries(ACTION_REGISTRY)) {
+    if (meta.group !== currentGroup) {
+      currentGroup = meta.group;
+      const label = meta.groupLabel || currentGroup;
+      lines.push(`\n### ${label}`);
+    }
+    lines.push(`- \`${type}\` - ${meta.description}。params: ${meta.params}`);
+  }
+  return lines.join('\n');
+}
 
 // Action Block 接口
 export interface ActionBlock {

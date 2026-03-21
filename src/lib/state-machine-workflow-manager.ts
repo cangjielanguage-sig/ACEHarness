@@ -834,6 +834,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const result = await this.executeState(stateConfig, config, requirements);
 
       // Evaluate transitions
+      // Remember whether this transition was forced by the user so we can skip human approval
+      const wasForced = !!this.pendingForceTransition;
       const nextState = await this.evaluateTransitions(
         stateConfig.transitions,
         result,
@@ -841,8 +843,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       );
 
       // Check if human approval is required
-      // Skip human approval if transitioning to self (iteration)
-      const requiresApproval = stateConfig.requireHumanApproval && nextState !== this.currentState;
+      // Skip human approval if transitioning to self (iteration) or if forced by user
+      const requiresApproval = stateConfig.requireHumanApproval && nextState !== this.currentState && !wasForced;
 
       if (requiresApproval) {
         const fromStateName = this.currentState;

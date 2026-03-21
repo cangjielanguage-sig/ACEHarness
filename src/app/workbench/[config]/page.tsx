@@ -441,7 +441,7 @@ export default function WorkbenchPage() {
       // Switch to run view
       setViewingHistoryRun(true);
       dispatch({ type: 'SET_VIEW_MODE', payload: 'run' });
-      updateUrl({ run: runId, mode: null });
+      updateUrl({ run: runId, mode: 'history' });
       if (agents.length > 0) {
         dispatch({ type: 'SET_SELECTED_AGENT', payload: agents[0] });
       }
@@ -1325,6 +1325,23 @@ export default function WorkbenchPage() {
   // Find the latest iteration result key for a step (e.g. "代码审计" → UUID or "代码审计-迭代3" if that's the latest)
   const getLatestStepKey = (baseName: string): string => {
     if (!baseName) return baseName;
+
+    // 0. If this step is currently running, prioritize the live key so the UI
+    //    shows the running state instead of a stale historical result.
+    //    Check whether the stepIdMap already points to a NEW id (no result yet)
+    //    which means a re-execution is in progress.
+    if (currentStep && (currentStep === baseName || currentStep.endsWith('-' + baseName))) {
+      // If stepIdMap has an entry for currentStep whose id has no result yet,
+      // this is a fresh re-execution — return currentStep so the live stream shows.
+      const mappedId = stepIdMap[currentStep];
+      if (mappedId && !stepResults[mappedId]) {
+        return currentStep;
+      }
+      // Also check if currentStep itself has no result (no UUID mapping)
+      if (!mappedId && !stepResults[currentStep]) {
+        return currentStep;
+      }
+    }
 
     // 1. Exact match in stepIdMap (e.g. "问题复现-构造最小复现用例")
     if (stepIdMap[baseName] && stepResults[stepIdMap[baseName]]) {
