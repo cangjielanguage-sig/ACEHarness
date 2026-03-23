@@ -254,9 +254,9 @@ export default function StateFlowVisualizer({
                 <div className="flex items-center gap-3">
                   <RotateCcw className="w-4 h-4 text-orange-500" />
                   <span className="text-sm">
-                    <span className="font-medium">{transition.from}</span>
+                    <span className="font-medium">{formatStateName(transition.from)}</span>
                     <ArrowRight className="w-4 h-4 inline mx-2 text-gray-400" />
-                    <span className="font-medium text-orange-600">{transition.to}</span>
+                    <span className="font-medium text-orange-600">{formatStateName(transition.to)}</span>
                   </span>
                 </div>
                 <Badge variant="outline" className="text-xs">
