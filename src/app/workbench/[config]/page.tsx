@@ -327,11 +327,22 @@ export default function WorkbenchPage() {
     }
   }, [runId]);
 
-  // Poll status every 3s while running, as fallback for missed SSE events
+  // Smart polling: start at 5s, increase to 10s if stable
   useEffect(() => {
     if (viewMode !== 'run' || !isRunning) return;
-    const interval = setInterval(fetchCurrentStatus, 3000);
-    return () => clearInterval(interval);
+    let interval = 5000;
+    let stableCount = 0;
+    const poll = async () => {
+      await fetchCurrentStatus();
+      stableCount++;
+      if (stableCount > 3 && interval < 10000) {
+        clearInterval(timer);
+        interval = 10000;
+        timer = setInterval(poll, interval);
+      }
+    };
+    let timer = setInterval(poll, interval);
+    return () => clearInterval(timer);
   }, [viewMode, isRunning]);
 
   useEffect(() => {
@@ -1177,47 +1188,42 @@ export default function WorkbenchPage() {
     liveStreamRef.current = setInterval(async () => {
       try {
         const { processes } = await processApi.list();
-        // Prefer persisted stream file (contains accumulated content across feedback rounds)
-        let content: string | null = null;
         const rid = runId || selectedRun?.id;
-        // Use running process step name to track step changes across iterations
         const runningProc = processes.find((p: any) => p.status === 'running');
         const activeStep = runningProc?.step || currentStep || selectedStep?.name;
+
+        if (activeStep !== liveStreamStepRef.current) {
+          liveStreamStepRef.current = activeStep;
+          liveStreamLenRef.current = 0;
+          setLiveStream([]);
+        }
+
+        let content: string | null = null;
         if (rid && activeStep) {
-          // Detect step change — reset stream state when a new step starts
-          if (activeStep !== liveStreamStepRef.current) {
-            liveStreamStepRef.current = activeStep;
-            liveStreamLenRef.current = 0;
-            setLiveStream([]);
-          }
           content = await streamApi.getStreamContent(rid, activeStep);
         }
         if (!content) {
-          // Fallback: try in-memory process
           const running = processes.find((p: any) => p.status === 'running');
-          if (running?.streamContent) {
-            content = running.streamContent;
-          } else {
-            const latest = processes.sort((a: any, b: any) =>
-              new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
-            )[0];
-            if (latest?.streamContent) {
-              content = latest.streamContent;
-            }
+          content = running?.streamContent || processes.sort((a: any, b: any) =>
+            new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
+          )[0]?.streamContent;
+        }
+
+        // 增量更新：只处理新增内容
+        if (content && content.length > liveStreamLenRef.current) {
+          const newContent = content.slice(liveStreamLenRef.current);
+          liveStreamLenRef.current = content.length;
+          const newChunks = newContent.split(CHUNK_SEP).filter(Boolean);
+          if (newChunks.length > 0) {
+            setLiveStream(prev => [...prev, ...newChunks]);
           }
         }
-        if (content && content.length > liveStreamLenRef.current) {
-          liveStreamLenRef.current = content.length;
-          // Always split full content by chunk separator so boundaries render as visual dividers
-          const chunks = content.split(CHUNK_SEP).filter(Boolean);
-          setLiveStream(chunks);
-        }
-        // Stop polling if nothing is running
+
         if (!processes.some((p: any) => p.status === 'running') && !isRunning) {
           stopLiveStream();
         }
       } catch (e) { console.error('[LiveStream] polling error:', e); }
-    }, 1000);
+    }, 2000);
   };
 
   const stopLiveStream = () => {
