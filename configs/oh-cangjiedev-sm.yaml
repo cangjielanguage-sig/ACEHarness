@@ -17,7 +17,9 @@ workflow:
           agent: oh-cangjie-analyst
           role: defender
           task: >
-            依据 context.requirements 中给定的 ArkTS API 需求， 使用
+            在任务执行之前，你的信息不足，你需要向用户确认以下信息，来确保有足够的信息，以确保任务的正确执行（必须遵守）： -
+            必须向用户具体确认优先级的定义规则。 - 必须向用户确认开发的API接口是否只包含同步方法，还是同时包含异步方法。 -
+            必须严格遵守信息请求协议中询问用户的格式。 依据 context.requirements 中给定的 ArkTS API 需求， 使用
             ohos-cangjie-analyst-skill 执行 Gap 分析与源码定位， 输出结构化分析报告和分批建议，并将报告写入
             .ace-outputs/{runId}/Gap_分析.md。
           skills:
@@ -51,9 +53,8 @@ workflow:
             在「Gap分析」产出的分析报告和分批建议基础上，使用 ohos-cangjie-architect-skill 为当前批次 API
             输出架构文档。
 
-            重要工作方式要求：
-            1. 不要重复读取源码文件，直接基于前置步骤结论中的 Gap 分析报告进行架构设计。
-            2. 使用 Bash 工具将文档写入文件，不要使用 Write 工具（因为文档内容太大会导致 Write 参数被截断）。
+            重要工作方式要求： 1. 不要重复读取源码文件，直接基于前置步骤结论中的 Gap 分析报告进行架构设计。 2. 使用 Bash
+            工具将文档写入文件，不要使用 Write 工具（因为文档内容太大会导致 Write 参数被截断）。
                示例：cat << 'ARCH_EOF' > /path/to/file.md
                文档内容...
                ARCH_EOF
@@ -107,7 +108,6 @@ workflow:
               "summary": "编译验证结论"
             } ``` pass 表示编译通过，fail 表示编译失败（附错误信息）。
           preCommands:
-            # 在 projectRoot (/home/wujizhou/worksapce) 下自动执行实际构建命令和错误日志读取
             - ./build.sh --product-name rk3568 --build-target cj_file_fs_ffi
             - ./build.sh --product-name rk3568 --build-target file_api
             - cat out/rk3568/error.log 2>/dev/null | head -80
@@ -143,14 +143,14 @@ workflow:
           agent: oh-cangjie-reviewer
           role: attacker
           task: >
-            对上一步「编码实现」产出的 CJ/FFI 代码，使用 ohos-cangjie-reviewer-skill
-            按审查清单逐项检查（FFI 命名、NAPI 对齐、文件组织、仓颉约束、构建配置等），列出问题与修复建议，不修改代码，
-            将审查报告写入 .ace-outputs/{runId}/代码审查_红军.md。
+            对上一步「编码实现」产出的 CJ/FFI 代码，使用 ohos-cangjie-reviewer-skill 按审查清单逐项检查（FFI
+            命名、NAPI 对齐、文件组织、仓颉约束、构建配置等），列出问题与修复建议，不修改代码， 将审查报告写入
+            .ace-outputs/{runId}/代码审查_红军.md。
 
-            ⚠️ 编译验证为必须步骤，不可跳过：
-            1. 在 projectRoot 目录下执行 C++ FFI 编译：./build.sh --product-name rk3568 --build-target <cj_xxx_ffi_target>
-            2. 执行仓颉 Wrapper 编译：./build.sh --product-name rk3568 --build-target <wrapper_dir_name>
-            3. 用 llvm-nm -D 验证 FFI 符号导出
+            ⚠️ 编译验证为必须步骤，不可跳过： 1. 在 projectRoot 目录下执行 C++ FFI 编译：./build.sh
+            --product-name rk3568 --build-target <cj_xxx_ffi_target> 2. 执行仓颉
+            Wrapper 编译：./build.sh --product-name rk3568 --build-target
+            <wrapper_dir_name> 3. 用 llvm-nm -D 验证 FFI 符号导出
             构建工具链已就绪，必须实际执行上述命令并记录真实结果，禁止以"无构建环境"为由跳过。
           skills:
             - ohos-cangjie-reviewer-skill
@@ -208,12 +208,50 @@ workflow:
             根据「审查与编译」的最终报告，裁决是否可结束本次工作流。 在回复末尾输出以下 JSON 块（用 ```json 包裹）： ```json
             {
               "verdict": "pass|conditional_pass|fail",
-              "next_state": "完成|实现编码",
+              "next_state": "生成仓颉API文档|实现编码",
               "issues": [],
               "summary": "一句话结论"
-            } ``` pass 时 next_state 填「完成」，fail 时填「实现编码」。
+            } ``` pass 时 next_state 填「生成仓颉API文档」，fail 时填「实现编码」。
           skills:
             - ohos-cangjie-reviewer-skill
+          enablePlanLoop: true
+          maxPlanRounds: 2
+      transitions:
+        - to: 生成仓颉API文档
+          condition:
+            verdict: pass
+          priority: 1
+          label: 验收通过，进入文档生成
+        - to: 生成仓颉API文档
+          condition:
+            verdict: conditional_pass
+          priority: 2
+          label: 有条件通过，进入文档生成
+        - to: 实现编码
+          condition:
+            verdict: fail
+          priority: 3
+          label: 回退修复后重验
+    - name: 生成仓颉API文档
+      description: 使用 ohos-cangjie-md-skill 生成 md-sys API 文档
+      requireHumanApproval: true
+      isInitial: false
+      isFinal: false
+      position:
+        x: 1100
+        y: 200
+      steps:
+        - name: 生成API文档
+          agent: oh-cangjie-md-writer
+          role: defender
+          task: >
+            基于当前批次已完成的仓颉接口实现，使用 ohos-cangjie-md-skill 生成仓颉 API 的 md-sys 文档。
+            文档生成输出目录默认为 .ace-outputs/{runId}/仓颉API文档。 必须通过 cjcom
+            命令执行文档生成，并将结果报告写入 .ace-outputs/{runId}/仓颉API文档生成.md。
+            报告需包含：实际执行命令、输出目录、关键产物路径、失败原因（如有）。 同时必须将本次生成出的全部 Markdown 文档正文完整汇总写入
+            .ace-outputs/{runId}/仓颉API文档完整输出.md（按原始文件路径分节展示，禁止仅写摘要）。
+          skills:
+            - ohos-cangjie-md-skill
           enablePlanLoop: true
           maxPlanRounds: 2
       transitions:
@@ -221,23 +259,23 @@ workflow:
           condition:
             verdict: pass
           priority: 1
-          label: 验收通过
+          label: 文档生成完成
         - to: 完成
           condition:
             verdict: conditional_pass
           priority: 2
-          label: 有条件完成
-        - to: 实现编码
+          label: 文档生成有条件完成
+        - to: 生成仓颉API文档
           condition:
             verdict: fail
           priority: 3
-          label: 回退修复后重验
+          label: 文档生成失败，重试
     - name: 完成
       description: 工作流结束
       isInitial: false
       isFinal: true
       position:
-        x: 1100
+        x: 1300
         y: 200
       steps:
         - name: 产出汇总
@@ -249,7 +287,7 @@ workflow:
       transitions: []
 context:
   projectRoot: /home/wujizhou/worksapce
-  requirements: 请帮我分析ohos.file.fs这个对应ArkTS的鸿蒙API接口，然后开发对应的仓颉接口，并按照优先级排序，选取5个方法进行开发
+  requirements: 请帮我分析ohos.file.fs这个对应ArkTS的鸿蒙API接口，然后开发对应的仓颉接口，并按照"优先级"排序，选取3个方法进行开发
   timeoutMinutes: 300
   routerModel: claude-sonnet-4-6
   skills: []
