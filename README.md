@@ -149,43 +149,51 @@ block-beta
 columns 1
   FE["前端层"]
   block:Pages
-    columns 5
-    P1["对话页<br/>70+ 动作"]
+    columns 4
+    P1["对话页"]
     P2["仪表盘"]
     P3["工作台"]
-    P4["定时任务"]
-    P5["API 文档"]
+    P4["工作流管理"]
+    P5["定时任务"]
+    P6["Skills 管理"]
+    P7["模型管理"]
+    P8["API 文档"]
   end
-  arr1<["&nbsp;&nbsp;&nbsp;"]>(down)
+  arr1<["   "]>(down)
 columns 1
-  RT["API 路由层<br/>Next.js API Routes"]
+  RT["API 路由层"]
   block:Routes
-      columns 5
-      R1["workflow"]
-      R2["processes"]
-      R3["configs"]
-      R4["agents"]
-      R5["runs"]
-      R6["schedules"]
-      R7["chat"]
-      R8["skills"]
-      R9["models"]
-      R10["gitcode"]
-end
-  arr2<["&nbsp;&nbsp;&nbsp;"]>(down)
-  block:Engines
+    columns 5
+    R1["workflow"]
+    R2["processes"]
+    R3["configs"]
+    R4["agents"]
+    R5["runs"]
+    R6["schedules"]
+    R7["chat"]
+    R8["skills"]
+    R9["models"]
+    R10["gitcode"]
+  end
+  arr2<["   "]>(down)
+columns 1
+  Workflows["工作流"]
+columns 1
+  block:Flows
     columns 3
     WM["Workflow Manager<br/>阶段式引擎"]
     SM["StateMachine Workflow Mgr<br/>状态机引擎"]
     SC["Scheduler<br/>node-cron"]
   end
+columns 1
   block:ProcessManager
     columns 3
     S1["Supervisor-Lite 路由"]
     S2["上下文持久化"]
     S3["崩溃恢复"]
   end
-  arr3<["&nbsp;&nbsp;&nbsp;"]>(down)
+columns 1
+  arr3<["   "]>(down)
     PMHdr["ProcessManager"]
     block:PMFeatures
       columns 4
@@ -194,22 +202,12 @@ end
       PM3["流式输出"]
       PM4["进程生命周期"]
   end
-  arr4<["&nbsp;&nbsp;&nbsp;"]>(down)
-  EX["执行引擎 (CLI)<br/>Kiro CLI / Claude Code CLI + Skills"]
-  arr5<["&nbsp;&nbsp;&nbsp;"]>(down)
-  LLM["AI 服务 (LLM API)<br/>Claude Opus/Sonnet/Haiku · OpenAI GPT (可选)"]
-  WM --> ProcessManager
-  SM --> ProcessManager
-  SC --> ProcessManager
-  style Routes fill:#e8f4fc,stroke:#0369a1,stroke-width:2px
-  style ProcessManager fill:#fff7ed,stroke:#ea580c,stroke-width:2px
-  style LLM fill:#f5f3ff,stroke:#7c3aed,stroke-width:2px
+columns 1
+  arr4<["   "]>(down)
+  EX["执行引擎 (CLI)<br/>Claude Code CLI / Codex / Kiro CLI / ... + Skills"]
+  arr5<["   "]>(down)
+  LLM["AI 服务 (LLM API)<br/>Claude Opus/Claude Sonnet/GLM/GPT/minimax/kimi/..."]
 ```
-
-- **实时通信**：SSE（Server-Sent Events）将执行状态推送到前端。
-- **数据持久化**：`runs/{runId}/` 目录存储状态、输出与流式内容。
-
----
 
 ## 功能模块
 
