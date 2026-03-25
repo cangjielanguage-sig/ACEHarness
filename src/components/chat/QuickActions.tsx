@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Switch } from '@/components/ui/switch';
 
 interface QuickActionsProps {
   onAction: (text: string) => void;
@@ -113,7 +114,26 @@ export default function QuickActions({ onAction, skillSettings }: QuickActionsPr
 /** Compact horizontal bar version — shown above input when messages exist */
 export function QuickActionsBar({ onAction, skillSettings }: QuickActionsProps) {
   const [expanded, setExpanded] = useState(false);
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugPrompt, setDebugPrompt] = useState<string | null>(null);
+  const [debugLoading, setDebugLoading] = useState(false);
   const actions = skillSettings?.['power-gitcode'] ? ALL_ACTIONS_WITH_GITCODE : ALL_ACTIONS;
+
+  const handleDebugToggle = async (checked: boolean) => {
+    setDebugMode(checked);
+    if (checked && !debugPrompt) {
+      setDebugLoading(true);
+      try {
+        const res = await fetch('/api/chat/debug-prompt');
+        const data = await res.json();
+        setDebugPrompt(data.prompt || '获取失败');
+      } catch {
+        setDebugPrompt('加载失败');
+      } finally {
+        setDebugLoading(false);
+      }
+    }
+  };
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -143,13 +163,50 @@ export function QuickActionsBar({ onAction, skillSettings }: QuickActionsProps) 
           </motion.div>
         )}
       </AnimatePresence>
-      <button
-        onClick={() => setExpanded(e => !e)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors mb-1.5"
-      >
-        <span className="material-symbols-outlined text-sm">{expanded ? 'expand_more' : 'expand_less'}</span>
-        {expanded ? '收起快捷操作' : '快捷操作'}
-      </button>
+
+      {/* Debug 弹窗 */}
+      <AnimatePresence>
+        {debugMode && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.15 }}
+            className="mb-3 p-3 bg-black/90 border border-white/10 rounded-xl max-h-[300px] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-mono text-green-400 font-semibold">System Prompt（实时）</span>
+              <button onClick={() => setDebugMode(false)} className="text-white/40 hover:text-white">
+                <span className="material-symbols-outlined text-sm">close</span>
+              </button>
+            </div>
+            <pre className="text-xs text-green-300/80 font-mono whitespace-pre-wrap break-words leading-relaxed">
+              {debugLoading ? '加载中...' : (debugPrompt || '')}
+            </pre>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="flex items-center justify-between mb-1.5">
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <span className="material-symbols-outlined text-sm">{expanded ? 'expand_more' : 'expand_less'}</span>
+          {expanded ? '收起快捷操作' : '快捷操作'}
+        </button>
+
+        {/* 调试模式开关 */}
+        <button
+          onClick={() => handleDebugToggle(!debugMode)}
+          className={`flex items-center gap-1.5 text-[11px] transition-colors ${debugMode ? 'text-green-400' : 'text-muted-foreground hover:text-foreground'}`}
+          title="调试模式：查看发送给 AI 的系统提示词"
+        >
+          <span className="material-symbols-outlined text-sm">bug_report</span>
+          调试
+          <Switch checked={debugMode} onCheckedChange={handleDebugToggle} className="scale-75" />
+        </button>
+      </div>
     </div>
   );
 }

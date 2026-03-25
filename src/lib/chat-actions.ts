@@ -28,6 +28,7 @@ export type ActionType =
   | 'gitcode.add_pr_labels' | 'gitcode.remove_pr_labels' | 'gitcode.add_issue_labels'
   | 'gitcode.assign_pr_testers' | 'gitcode.create_label' | 'gitcode.fork_repo'
   | 'gitcode.create_release' | 'gitcode.post_issue_comment'
+  | 'gitcode.update_issue' | 'gitcode.update_pr' | 'gitcode.create_commit'
   | 'gitcode.merge_pr';
 
 // 风险等级
@@ -121,6 +122,9 @@ export const ACTION_REGISTRY: Record<ActionType, ActionMeta> = {
   'gitcode.fork_repo':           { group: 'gitcode', groupLabel: '', risk: 'mutating', description: 'Fork 仓库', params: '{ "owner": "仓库所有者", "repo": "仓库名" }' },
   'gitcode.create_release':      { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '创建 Release', params: '{ "owner": "仓库所有者", "repo": "仓库名", "tag_name": "标签", "name": "名称", "body": "描述" }' },
   'gitcode.post_issue_comment':  { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '发表 Issue 评论', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": Issue编号, "body": "评论内容" }' },
+  'gitcode.update_issue':      { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '更新 Issue（标题/内容/状态/标签/负责人）', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": Issue编号, "title": "标题", "body": "内容", "state": "reopen|close", "labels": ["标签"] }' },
+  'gitcode.update_pr':         { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '更新 PR（标题/内容/状态/标签/里程碑/草稿）', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号, "title": "标题", "body": "内容", "state": "open|closed", "labels": ["标签"], "draft": true }' },
+  'gitcode.create_commit':     { group: 'gitcode', groupLabel: '', risk: 'mutating', description: '创建提交（必须英文 commitlint 格式）', params: '{ "owner": "仓库所有者", "repo": "仓库名", "branch": "目标分支", "message": "提交信息（英文，type(scope): subject）", "files": [{"path": "文件路径", "content": "文件内容（base64）"}] }' },
   // GitCode - destructive
   'gitcode.merge_pr':            { group: 'gitcode', groupLabel: '', risk: 'destructive', description: '合并 PR', params: '{ "owner": "仓库所有者", "repo": "仓库名", "number": PR编号 }' },
 };
@@ -130,17 +134,32 @@ export const RISK_MAP: Record<ActionType, RiskLevel> = Object.fromEntries(
   Object.entries(ACTION_REGISTRY).map(([type, meta]) => [type, meta.risk])
 ) as Record<ActionType, RiskLevel>;
 
-/** 从 ACTION_REGISTRY 动态生成提示词中的 action 类型列表 */
+/** 从 ACTION_REGISTRY 动态生成精简的 action 类型列表（无 params 详情） */
 export function generateActionTypesDocs(): string {
-  const lines: string[] = [];
-  let currentGroup = '';
+  const groups: Record<string, string[]> = {};
+  const groupLabels: Record<string, string> = {
+    config: '配置管理',
+    agent: 'Agent 管理',
+    model: '模型',
+    workflow: '工作流控制',
+    runs: '运行记录',
+    navigate: '导航',
+    schedule: '定时任务',
+    skill: 'Skills 管理',
+    prompt: '提示词优化',
+    wizard: '创建向导',
+    gitcode: 'GitCode（详见 power-gitcode SKILL.md）',
+  };
+
   for (const [type, meta] of Object.entries(ACTION_REGISTRY)) {
-    if (meta.group !== currentGroup) {
-      currentGroup = meta.group;
-      const label = meta.groupLabel || currentGroup;
-      lines.push(`\n### ${label}`);
-    }
-    lines.push(`- \`${type}\` - ${meta.description}。params: ${meta.params}`);
+    if (!groups[meta.group]) groups[meta.group] = [];
+    groups[meta.group].push(`\`${type}\``);
+  }
+
+  const lines: string[] = [];
+  for (const [group, actions] of Object.entries(groups)) {
+    const label = groupLabels[group] || group;
+    lines.push(`**${label}**: ${actions.join(' | ')}`);
   }
   return lines.join('\n');
 }

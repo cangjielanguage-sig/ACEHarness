@@ -9,9 +9,10 @@ const ALLOWED_COMMANDS = new Set([
   'post_pr_comment', 'add_pr_labels', 'remove_pr_labels', 'assign_pr_testers',
   'check_pr_mergeable', 'merge_pr',
   'create_issue', 'get_issue', 'add_issue_labels', 'post_issue_comment',
+  'update_issue', 'update_pr',
   'get_issues_by_pr', 'get_prs_by_issue',
   'list_issue_templates', 'get_issue_template', 'get_pr_template', 'parse_issue_template',
-  'get_commit_title',
+  'get_commit_title', 'create_commit',
   'fork_repo', 'create_release', 'create_label', 'check_repo_public',
 ]);
 

@@ -150,11 +150,47 @@ const API_DATA: ApiCategory[] = [
     ],
   },
   {
+    name: 'GitCode', icon: 'code',
+    endpoints: [
+      // Read-only
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.get_pr — 获取 PR 详情', requestBody: '{ command: "get_pr", args: { owner, repo, number } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.get_issue — 获取 Issue 详情', requestBody: '{ command: "get_issue", args: { owner, repo, number } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.get_pr_commits — 获取 PR 提交列表', requestBody: '{ command: "get_pr_commits", args: { owner, repo, number } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.get_pr_changed_files — 获取 PR 变更文件', requestBody: '{ command: "get_pr_changed_files", args: { owner, repo, number } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.get_pr_comments — 获取 PR 评论', requestBody: '{ command: "get_pr_comments", args: { owner, repo, number } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.get_issues_by_pr — 获取 PR 关联的 Issues', requestBody: '{ command: "get_issues_by_pr", args: { owner, repo, number } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.get_prs_by_issue — 获取 Issue 关联的 PRs', requestBody: '{ command: "get_prs_by_issue", args: { owner, repo, number } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.check_pr_mergeable — 检查 PR 可合并性', requestBody: '{ command: "check_pr_mergeable", args: { owner, repo, number } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.check_repo_public — 检查仓库是否公开', requestBody: '{ command: "check_repo_public", args: { owner, repo } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.list_issue_templates — 列出 Issue 模板', requestBody: '{ command: "list_issue_templates", args: { owner, repo } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.get_issue_template — 获取 Issue 模板内容', requestBody: '{ command: "get_issue_template", args: { owner, repo } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.get_pr_template — 获取 PR 模板内容', requestBody: '{ command: "get_pr_template", args: { owner, repo } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.get_commit_title — 获取提交标题', requestBody: '{ command: "get_commit_title", args: { owner, repo, sha? } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.parse_issue_template — 解析 Issue 模板', requestBody: '{ command: "parse_issue_template", args: { owner, repo, "template-path": "路径" } }', response: '{ success, data }' },
+      // Mutating
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.create_pr — 创建 PR', requestBody: '{ command: "create_pr", args: { owner, repo, title, head, base, body? } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.create_issue — 创建 Issue', requestBody: '{ command: "create_issue", args: { owner, repo, title, body?, labels? } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.post_pr_comment — 发表 PR 评论', requestBody: '{ command: "post_pr_comment", args: { owner, repo, number, body, path?, position? } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.add_pr_labels — 给 PR 添加标签', requestBody: '{ command: "add_pr_labels", args: { owner, repo, number, labels: ["标签"] } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.remove_pr_labels — 移除 PR 标签', requestBody: '{ command: "remove_pr_labels", args: { owner, repo, number, label: "标签名" } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.add_issue_labels — 给 Issue 添加标签', requestBody: '{ command: "add_issue_labels", args: { owner, repo, number, labels: ["标签"] } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.post_issue_comment — 发表 Issue 评论', requestBody: '{ command: "post_issue_comment", args: { owner, repo, number, body } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.update_issue — 更新 Issue（标题/内容/状态/标签）', requestBody: '{ command: "update_issue", args: { owner, repo, number, title?, body?, state?, labels? } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.update_pr — 更新 PR（标题/内容/状态/标签/草稿）', requestBody: '{ command: "update_pr", args: { owner, repo, number, title?, body?, state?, labels?, draft? } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.assign_pr_testers — 指派 PR 测试人员', requestBody: '{ command: "assign_pr_testers", args: { owner, repo, number, testers: ["用户名"] } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.create_label — 创建标签', requestBody: '{ command: "create_label", args: { owner, repo, name, color?, description? } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.fork_repo — Fork 仓库', requestBody: '{ command: "fork_repo", args: { owner, repo, fork_name? } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.create_release — 创建 Release', requestBody: '{ command: "create_release", args: { owner, repo, tag_name, name?, body? } }', response: '{ success, data }' },
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.create_commit — 创建提交（需英文 commitlint 格式）', requestBody: '{ command: "create_commit", args: { owner, repo, branch, message, files: [{path, content}], base_branch? } }', response: '{ success, data }' },
+      // Destructive
+      { method: 'POST', path: '/api/gitcode', description: 'gitcode.merge_pr — 合并 PR', requestBody: '{ command: "merge_pr", args: { owner, repo, number, method? } }', response: '{ success, data }' },
+    ],
+  },
+  {
     name: 'Other', icon: 'more_horiz',
     endpoints: [
       { method: 'POST', path: '/api/prompt-analysis', description: '分析单个 Prompt 效果', requestBody: '{ prompt, output?, context?, agentName? }', response: '{ success, analysis }' },
       { method: 'GET', path: '/api/prompt-analysis?runId=id', description: '分析运行中所有 Prompt', response: '{ steps, summary: { totalSteps, avgScore } }' },
-      { method: 'POST', path: '/api/gitcode', description: '执行 GitCode 命令（PR/Issue 管理）', requestBody: '{ command, args }', response: '{ success, data }' },
     ],
   },
 ];
