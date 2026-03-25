@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import dynamic from 'next/dynamic';
 import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
 import { ModelSelect } from '@/components/ModelSelect';
@@ -10,8 +11,16 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import ChatSidebar from '@/components/chat/ChatSidebar';
 import ChatMessage from '@/components/chat/ChatMessage';
 import QuickActions, { QuickActionsBar } from '@/components/chat/QuickActions';
-import RichTextEditor, { RichTextEditorHandle } from '@/components/ui/RichTextEditor';
 import AuthGuard from '@/components/AuthGuard';
+
+// 动态导入 RichTextEditor - TipTap 是重量级库，延迟加载
+import type { RichTextEditorHandle } from '@/components/ui/RichTextEditor';
+const RichTextEditor = dynamic(() => import('@/components/ui/RichTextEditor'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex-1 h-[42px] rounded-xl border border-input bg-background animate-pulse" />
+  ),
+});
 
 const SIDEBAR_STORAGE_KEY = 'chat-sidebar-width';
 const DEFAULT_WIDTH = 264;
@@ -43,8 +52,9 @@ function ChatPageContent() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
+  const [editorLoaded, setEditorLoaded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const editorRef = useRef<RichTextEditorHandle>(null);
+  const editorRef = useRef<RichTextEditorHandle | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 

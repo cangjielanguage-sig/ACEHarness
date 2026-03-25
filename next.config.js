@@ -25,6 +25,18 @@ const nextConfig = {
       fullUrl: false,
     },
   },
+
+  // 预连接关键资源
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-DNS-Prefetch-Control', value: 'on' },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;

@@ -685,7 +685,12 @@ export default function FlowDiagram({
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
-        fitView fitViewOptions={{ padding: 0.2 }}
+        fitView={false}
+        defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+        minZoom={0.1}
+        maxZoom={2}
+        disableKeyboardA11y
+        proOptions={{ hideAttribution: true }}
         attributionPosition="bottom-left"
       >
         <Background color="hsl(var(--flow-node-border))" gap={16} />

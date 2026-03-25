@@ -428,16 +428,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                   cards: newCards.length > 0 ? newCards : undefined,
                 } : m),
               }));
+
+              // Handle loading state and recursive actions
+              const finishLoading = () => {
+                setLoading(false);
+                setStreamingMessageId(null);
+              };
+
               if (newActionStates.length > 0) {
-                autoExecuteSafeActions(followUpMsgId, newActionStates);
+                autoExecuteSafeActions(followUpMsgId, newActionStates).finally(finishLoading);
+                resolve();
+              } else {
+                finishLoading();
+                // If no cards and content is substantial, trigger a card-format retry
+                if (newCards.length === 0 && cleanText.length > 200 && retryCount < 1) {
+                  const retryPrompt = `你刚才的回复没有使用 \`\`\`card 代码块来展示结构化内容。请将上面的分析结果重新用 \`\`\`card 代码块格式输出为可视化卡片（不要用 \`\`\`json）。card 格式示例：{"header":{"icon":"图标","title":"标题","gradient":"from-blue-500 to-cyan-500"},"blocks":[...],"actions":[{"label":"按钮","prompt":"消息"}]}`;
+                  sendMessageRef.current?.(retryPrompt);
+                }
+                resolve();
               }
-              // If no cards and content is substantial, trigger a card-format retry
-              if (newCards.length === 0 && cleanText.length > 200 && retryCount < 1) {
-                resolve(); // resolve first, then retry below
-                const retryPrompt = `你刚才的回复没有使用 \`\`\`card 代码块来展示结构化内容。请将上面的分析结果重新用 \`\`\`card 代码块格式输出为可视化卡片（不要用 \`\`\`json）。card 格式示例：{"header":{"icon":"图标","title":"标题","gradient":"from-blue-500 to-cyan-500"},"blocks":[...],"actions":[{"label":"按钮","prompt":"消息"}]}`;
-                sendMessageRef.current?.(retryPrompt);
-              }
-              resolve();
             });
 
             es.addEventListener('error', () => {
@@ -582,9 +591,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               } : m),
             }));
             if (actionStates.length > 0) {
+              // autoExecuteSafeActions will handle its own loading state
               autoExecuteSafeActions(assistantMsgId, actionStates);
+              resolve();
+            } else {
+              setLoading(false);
+              setStreamingMessageId(null);
+              resolve();
             }
-            resolve();
           });
 
           es.addEventListener('error', () => {
@@ -616,6 +630,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                       }));
                       if (newActionStates.length > 0) {
                         autoExecuteSafeActions(assistantMsgId, newActionStates);
+                        resolve();
+                      } else {
+                        setLoading(false);
+                        setStreamingMessageId(null);
+                        resolve();
                       }
                     } else {
                       updateActiveSession(s => ({
@@ -623,6 +642,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                           ? { ...m, role: 'error' as const, content: '流式连接中断' }
                           : m),
                       }));
+                      setLoading(false);
+                      setStreamingMessageId(null);
+                      resolve();
                     }
                   })
                   .catch(() => {
@@ -631,10 +653,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                         ? { ...m, role: 'error' as const, content: '流式连接中断' }
                         : m),
                     }));
+                    setLoading(false);
+                    setStreamingMessageId(null);
+                    resolve();
                   });
+              } else {
+                setLoading(false);
+                setStreamingMessageId(null);
+                resolve();
               }
-              activeChatIdRef.current = null;
-              resolve();
             }
           });
         };
@@ -649,9 +676,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ? { ...m, role: 'error' as const, content: err.message || '请求失败' }
           : m),
       }));
+      setLoading(false);
+      setStreamingMessageId(null);
     }
-    setLoading(false);
-    setStreamingMessageId(null);
+    // Note: setLoading(false) is called inside the Promise's done/error handlers
+    // to properly handle autoExecuteSafeActions
   }, [activeSessionId, createSession, model, updateActiveSession, autoExecuteSafeActions]);
   sendMessageRef.current = sendMessage;
   const confirmAction = useCallback(async (messageId: string, actionId: string) => {
