@@ -393,9 +393,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             es.addEventListener('delta', (e) => {
               const { content } = JSON.parse(e.data);
               accumulated += content;
-              updateActiveSession(s => ({
-                ...s, messages: s.messages.map(m => m.id === followUpMsgId ? { ...m, content: accumulated } : m),
-              }));
+              // Extract cards in real-time so they render immediately without waiting for stream to finish
+              const { text: cleanText, cards: newCards } = parseActions(accumulated);
+              updateActiveSession(s => {
+                const existingMsg = s.messages.find(m => m.id === followUpMsgId);
+                const existingCards: any[] = existingMsg?.cards || [];
+                const existingKeys = new Set(existingCards.map((c: any) => c.header?.title));
+                const uniqueNewCards = newCards.filter((c: any) => !existingKeys.has(c.header?.title));
+                return {
+                  ...s, messages: s.messages.map(m => m.id === followUpMsgId ? { ...m, content: cleanText, cards: [...existingCards, ...uniqueNewCards] } : m),
+                };
+              });
             });
 
             es.addEventListener('done', (e) => {
@@ -535,9 +543,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             resetInactivityTimer();
             const { content } = JSON.parse(e.data);
             accumulated += content;
-            updateActiveSession(s => ({
-              ...s, messages: s.messages.map(m => m.id === assistantMsgId ? { ...m, content: accumulated } : m),
-            }));
+            // Extract cards in real-time so they render immediately without waiting for stream to finish
+            const { text: cleanText, cards: newCards } = parseActions(accumulated);
+            updateActiveSession(s => {
+              const existingMsg = s.messages.find(m => m.id === assistantMsgId);
+              const existingCards: any[] = existingMsg?.cards || [];
+              // Merge cards by header.title to avoid duplicates
+              const existingKeys = new Set(existingCards.map((c: any) => c.header?.title));
+              const uniqueNewCards = newCards.filter((c: any) => !existingKeys.has(c.header?.title));
+              return {
+                ...s, messages: s.messages.map(m => m.id === assistantMsgId ? { ...m, content: cleanText, cards: [...existingCards, ...uniqueNewCards] } : m),
+              };
+            });
           });
 
           es.addEventListener('done', (e) => {

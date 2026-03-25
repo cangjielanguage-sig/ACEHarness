@@ -194,6 +194,87 @@ function isCardLike(obj: any): boolean {
   );
 }
 
+/** Valid Material Symbol icon names used in this app (whitelist) */
+const VALID_ICONS = new Set([
+  // Git/代码相关
+  'merge_type', 'fork_right', 'branch', 'commit', 'tag', 'source', 'link', 'content_copy',
+  'diff', 'analytics', 'rule', 'fact_check', 'review', 'approval', 'merge', 'playlist_add_check', 'done_all',
+  // 文件相关
+  'description', 'insert_drive_file', 'note', 'article', 'folder', 'file_copy', 'receipt',
+  // 代码/编译
+  'code', 'terminal', 'console', 'memory', 'cpu', 'developer_mode', 'engineering',
+  'precision_manufacturing', 'bug_report', 'error', 'warning', 'outbound', 'plain',
+  'dns', 'router', 'cloud', 'storage', 'backup', 'restore', 'sync',
+  // 状态/进度
+  'running_errors', 'pending', 'hourglass_empty', 'schedule', 'timelapse', 'progress_activity',
+  'visibility', 'check_circle', 'cancel', 'stop', 'play_arrow', 'pause', 'refresh',
+  'next_plan', 'assistant', 'psychology', 'recommend',
+  // 操作相关
+  'search', 'filter_list', 'sort', 'download', 'upload', 'settings', 'launch',
+  'arrow_forward', 'arrow_back', 'close', 'add', 'remove', 'edit', 'delete',
+  // 信息相关
+  'info', 'help', 'smart_toy', 'rocket_launch', 'bolt', 'flash_on', 'energy', 'power',
+  'battery_charging_full', 'device_thermostat', 'speed', 'neural_pulse',
+  // 导航/界面
+  'chat', 'mail', 'phone', 'flag', 'bookmark', 'star', 'favorite', 'thumb_up',
+  'thumb_down', 'share', 'flag_star',
+]);
+
+const FALLBACK_ICON = 'help';
+
+function validateIconName(name: string): string {
+  if (!name || typeof name !== 'string') return FALLBACK_ICON;
+  const clean = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  return VALID_ICONS.has(clean) ? clean : FALLBACK_ICON;
+}
+
+function validateCard(card: any): any {
+  if (!card) return card;
+  try {
+    const validated = JSON.parse(JSON.stringify(card));
+    if (validated.header?.icon) {
+      validated.header.icon = validateIconName(validated.header.icon);
+    }
+    const validateBlocks = (blocks: any[]) => {
+      if (!Array.isArray(blocks)) return;
+      for (const block of blocks) {
+        if (block.type === 'info' && Array.isArray(block.rows)) {
+          for (const row of block.rows) {
+            if (row.icon) row.icon = validateIconName(row.icon);
+          }
+        }
+        if (block.type === 'list' && Array.isArray(block.items)) {
+          for (const item of block.items) {
+            if (item.icon) item.icon = validateIconName(item.icon);
+          }
+        }
+        if (block.type === 'tabs' && Array.isArray(block.tabs)) {
+          for (const tab of block.tabs) {
+            validateBlocks(tab.blocks);
+          }
+        }
+        if (block.type === 'collapse' && Array.isArray(block.blocks)) {
+          validateBlocks(block.blocks);
+        }
+        if (block.type === 'actions' && Array.isArray(block.items)) {
+          for (const item of block.items) {
+            if (item.icon) item.icon = validateIconName(item.icon);
+          }
+        }
+      }
+    };
+    if (validated.blocks) validateBlocks(validated.blocks);
+    if (validated.actions?.items) {
+      for (const item of validated.actions.items) {
+        if (item.icon) item.icon = validateIconName(item.icon);
+      }
+    }
+    return validated;
+  } catch {
+    return card;
+  }
+}
+
 /**
  * Extract a balanced JSON object starting at position `start` in `str`.
  * Returns the JSON substring or null if not found.
@@ -261,7 +342,7 @@ export function parseActions(markdown: string): { text: string; actions: ActionB
       }
 
       if (isCardLike(parsed)) {
-        cards.push(parsed);
+        cards.push(validateCard(parsed));
         removals.push([match.index, blockEnd]);
         codeBlockRegex.lastIndex = blockEnd;
         continue;
