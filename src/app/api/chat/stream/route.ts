@@ -186,6 +186,7 @@ export async function POST(request: NextRequest) {
       {
         resumeSessionId: validResumeSid,
         appendSystemPrompt: !!validResumeSid && !!systemPrompt,
+        frontendSessionId,
       }
     );
     const entry = { promise: execPromise, settled: false, chatId };

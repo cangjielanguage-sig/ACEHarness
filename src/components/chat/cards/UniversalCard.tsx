@@ -143,7 +143,8 @@ function BlockRenderer({ block, onAction }: { block: Block; onAction?: (prompt: 
 
 // --- Block Components ---
 
-function InfoBlock({ rows }: { rows: { label: string; value: string; icon?: string }[] }) {
+function InfoBlock({ rows }: { rows?: { label: string; value: string; icon?: string }[] }) {
+  if (!rows?.length) return null;
   return (
     <div className="space-y-1">
       {rows.map((row, i) => (
@@ -157,7 +158,8 @@ function InfoBlock({ rows }: { rows: { label: string; value: string; icon?: stri
   );
 }
 
-function BadgesBlock({ items }: { items: BadgeDef[] }) {
+function BadgesBlock({ items }: { items?: BadgeDef[] }) {
+  if (!items?.length) return null;
   return (
     <div className="flex flex-wrap gap-1">
       {items.map((b, i) => (
@@ -294,7 +296,8 @@ function CollapseBlock({ title, icon, subtitle, blocks, defaultOpen, onAction }:
   );
 }
 
-function ListBlock({ items }: { items: { icon?: string; color?: string; text: string }[] }) {
+function ListBlock({ items }: { items?: { icon?: string; color?: string; text: string }[] }) {
+  if (!items?.length) return null;
   return (
     <div className="space-y-1">
       {items.map((item, i) => (

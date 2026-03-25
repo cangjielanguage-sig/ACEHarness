@@ -53,6 +53,7 @@ interface DashboardChatContextType {
   stopStreaming: () => void;
   deleteMessage: (messageId: string) => void;
   retryFromMessage: (messageId: string) => void;
+  continueFromMessage: (messageId: string) => Promise<void>;
   loading: boolean;
   streamingMessageId: string | null;
   model: string;
@@ -72,7 +73,7 @@ const DashboardChatContext = createContext<DashboardChatContextType>({
   createSession: () => '', deleteSession: () => {}, renameSession: () => {},
   setActiveSessionId: () => {},
   sendMessage: async () => {}, stopStreaming: () => {},
-  deleteMessage: () => {}, retryFromMessage: () => {},
+  deleteMessage: () => {}, retryFromMessage: () => {}, continueFromMessage: async () => {},
   loading: false, streamingMessageId: null,
   model: 'claude-sonnet-4-6', setModel: () => {},
   confirmAction: async () => {}, rejectAction: () => {},
@@ -519,7 +520,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         let accumulated = '';
         let reconnectAttempts = 0;
         const MAX_RECONNECTS = 3;
-        const INACTIVITY_TIMEOUT = 120_000; // 2 minutes without any data
+        const INACTIVITY_TIMEOUT = 600_000; // 10 minutes without any data
         let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 
         const resetInactivityTimer = () => {
@@ -736,12 +737,79 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     sendMessage(targetMsg.content);
   }, [loading, updateActiveSession, sendMessage]);
 
+  // --- Continue from timeout ---
+  const continueFromMessage = useCallback(async (messageId: string) => {
+    const session = activeSessionRef.current;
+    if (!session) return;
+    const msg = session.messages.find(m => m.id === messageId);
+    if (!msg || msg.role !== 'error') return;
+
+    // Check if this is a timeout error
+    if (!msg.content.includes('超时') && !msg.content.includes('timeout')) return;
+
+    const backendSid = session.backendSessionId;
+    if (!backendSid) return;
+
+    setLoading(true);
+    try {
+      // Try to recover content from the backend
+      const recRes = await fetch(`/api/chat/stream/recover?sessionId=${encodeURIComponent(backendSid)}`);
+      const recData = await recRes.json();
+
+      if (recData.content) {
+        const { text: cleanText, actions: newActions, cards: newCards } = parseActions(recData.content);
+        const newActionStates: ActionState[] = newActions.map(a => ({
+          id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
+        }));
+
+        // Update the error message with recovered content
+        updateActiveSession(s => ({
+          ...s, updatedAt: Date.now(),
+          messages: s.messages.map(m => m.id === messageId ? {
+            ...m,
+            role: 'assistant' as const,
+            content: cleanText,
+            actions: newActionStates.length > 0 ? newActionStates : undefined,
+            cards: newCards.length > 0 ? newCards : undefined,
+          } : m),
+        }));
+
+        if (newActionStates.length > 0) {
+          autoExecuteSafeActions(messageId, newActionStates);
+        }
+      } else {
+        // No content recovered - could be that the process was killed
+        // Try to check if there's an active stream
+        const activeRes = await fetch(`/api/chat/stream/active?frontendSessionId=${encodeURIComponent(session.id)}`);
+        const activeData = await activeRes.json();
+
+        if (activeData.active && activeData.chatId) {
+          // There's still an active stream - reconnect to it
+          // This shouldn't normally happen for timeouts, but handle it anyway
+          updateActiveSession(s => ({
+            ...s, updatedAt: Date.now(),
+            messages: s.messages.map(m => m.id === messageId ? {
+              ...m,
+              role: 'assistant' as const,
+              content: '[重新连接中...]',
+            } : m),
+          }));
+          // The reconnection logic would be handled by the SSE connection below
+        }
+      }
+    } catch (err) {
+      console.error('Continue from timeout failed:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [updateActiveSession, autoExecuteSafeActions]);
+
   return (
     <DashboardChatContext.Provider value={{
       isOpen, openChat, closeChat, toggleChat,
       sessions, activeSessionId, activeSession,
       createSession, deleteSession, renameSession, setActiveSessionId,
-      sendMessage, stopStreaming, deleteMessage, retryFromMessage,
+      sendMessage, stopStreaming, deleteMessage, retryFromMessage, continueFromMessage,
       loading, streamingMessageId, model, setModel: handleSetModel,
       confirmAction, rejectAction, undoActionById, retryAction,
       skillSettings, discoveredSkills, toggleSkill,

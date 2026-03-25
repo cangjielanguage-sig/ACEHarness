@@ -4,6 +4,7 @@ import { ActionState } from '@/lib/chat-actions';
 import Markdown from '@/components/Markdown';
 import ActionCard from './ActionCard';
 import UniversalCard from './cards/UniversalCard';
+import { memo } from 'react';
 
 interface ChatMessageProps {
   message: {
@@ -24,6 +25,7 @@ interface ChatMessageProps {
   onAction?: (prompt: string) => void;
   onDelete?: (messageId: string) => void;
   onRetryFromMessage?: (messageId: string) => void;
+  onContinue?: (messageId: string) => void; // For timeout recovery
 }
 
 function ThinkingBot() {
@@ -61,7 +63,7 @@ function ThinkingBot() {
   );
 }
 
-export default function ChatMessage({ message, isStreaming, onConfirmAction, onRejectAction, onUndoAction, onRetryAction, onAction, onDelete, onRetryFromMessage }: ChatMessageProps) {
+export default memo(function ChatMessage({ message, isStreaming, onConfirmAction, onRejectAction, onUndoAction, onRetryAction, onAction, onDelete, onRetryFromMessage, onContinue }: ChatMessageProps) {
   if (message.role === 'user') {
     return (
       <div className="group flex justify-end mb-4 items-start gap-1">
@@ -85,11 +87,20 @@ export default function ChatMessage({ message, isStreaming, onConfirmAction, onR
   }
 
   if (message.role === 'error') {
+    const isTimeout = message.content.includes('超时') || message.content.includes('timeout');
     return (
       <div className="group flex mb-4 items-start gap-1">
         <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2.5 bg-destructive/10 text-destructive text-sm">
-          <span className="material-symbols-outlined text-sm mr-1 align-middle">error</span>
+          <span className="material-symbols-outlined text-sm mr-1 align-middle">{isTimeout ? 'schedule' : 'error'}</span>
           {message.content}
+          {isTimeout && onContinue && (
+            <button
+              onClick={() => onContinue(message.id)}
+              className="ml-2 px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-600 hover:bg-yellow-500/30 text-xs"
+            >
+              继续
+            </button>
+          )}
         </div>
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 pt-1">
           {onDelete && (
@@ -144,4 +155,4 @@ export default function ChatMessage({ message, isStreaming, onConfirmAction, onR
       )}
     </div>
   );
-}
+});

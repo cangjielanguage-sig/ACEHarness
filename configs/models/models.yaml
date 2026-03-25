@@ -41,8 +41,8 @@ models:
     endpoints:
       - anthropic
       - openai
-  - value: minimax-m2.5
-    label: Minimax M2.5
+  - value: MiniMax-M2.7
+    label: Minimax M2.7
     costMultiplier: 0.02
     endpoints:
       - anthropic

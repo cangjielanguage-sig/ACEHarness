@@ -197,15 +197,17 @@ export function QuickActionsBar({ onAction, skillSettings }: QuickActionsProps) 
         </button>
 
         {/* 调试模式开关 */}
-        <button
-          onClick={() => handleDebugToggle(!debugMode)}
-          className={`flex items-center gap-1.5 text-[11px] transition-colors ${debugMode ? 'text-green-400' : 'text-muted-foreground hover:text-foreground'}`}
-          title="调试模式：查看发送给 AI 的系统提示词"
-        >
-          <span className="material-symbols-outlined text-sm">bug_report</span>
-          调试
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => handleDebugToggle(!debugMode)}
+            className={`flex items-center gap-1 text-[11px] transition-colors ${debugMode ? 'text-green-400' : 'text-muted-foreground hover:text-foreground'}`}
+            title="调试模式：查看发送给 AI 的系统提示词"
+          >
+            <span className="material-symbols-outlined text-sm">bug_report</span>
+            调试
+          </button>
           <Switch checked={debugMode} onCheckedChange={handleDebugToggle} className="scale-75" />
-        </button>
+        </div>
       </div>
     </div>
   );

@@ -176,6 +176,7 @@ export interface ProcessInfo {
   status: 'running' | 'completed' | 'failed' | 'killed' | 'timeout' | 'queued';
   pid?: number;
   sessionId?: string;
+  frontendSessionId?: string; // Maps to frontend session for recovery
   startTime: Date;
   endTime?: Date;
   queuedAt?: Date;
@@ -201,6 +202,7 @@ interface ExecuteOptions {
   runId?: string;
   stepId?: string;
   agents?: Record<string, any>; // For review panel mode
+  frontendSessionId?: string; // For tracking active streams per frontend session
 }
 
 class ProcessManager extends EventEmitter {
@@ -208,6 +210,8 @@ class ProcessManager extends EventEmitter {
   private queue: string[] = [];
   private maxConcurrent = 3;
   private running = 0;
+  // Maps frontendSessionId -> chatId for active streams (enables recovery after page refresh)
+  private activeStreams: Map<string, string> = new Map();
 
   private async flushLog(proc: ProcessInfo, cliArgs: string[]): Promise<void> {
     try {
@@ -278,8 +282,14 @@ class ProcessManager extends EventEmitter {
       runId: options.runId,
       prompt,
       systemPrompt,
+      frontendSessionId: options.frontendSessionId,
     };
     this.processes.set(id, proc);
+
+    // Register active stream for frontend session recovery
+    if (options.frontendSessionId) {
+      this.activeStreams.set(options.frontendSessionId, id);
+    }
 
     // Queue if at capacity
     if (this.running >= this.maxConcurrent) {
@@ -683,6 +693,7 @@ class ProcessManager extends EventEmitter {
         proc.endTime = new Date();
         proc.logLines.push(`[${ts()}] ✗ spawn error: ${err.message}`);
         this.running--;
+        this.cleanupActiveStream(proc);
         this.flushLog(proc, cliArgs);
         this.processNext();
         rejectPromise(err);
@@ -704,6 +715,7 @@ class ProcessManager extends EventEmitter {
         if (proc.status === 'timeout' || proc.status === 'killed') {
           // Already handled — reject so the caller can proceed
           this.running--;
+          this.cleanupActiveStream(proc);
           this.flushLog(proc, cliArgs);
           this.processNext();
           rejectPromise(new Error(`进程被${proc.status === 'timeout' ? '超时终止' : '手动终止'}`));
@@ -733,6 +745,7 @@ class ProcessManager extends EventEmitter {
             const errMsg = proc.error || resultObj.result || 'API Error';
             proc.logLines.push(`[${ts()}] ✗ 失败: API 错误或 is_error=true, errMsg="${errMsg.slice(0, 200)}"`);
             this.running--;
+            this.cleanupActiveStream(proc);
             this.flushLog(proc, cliArgs);
             this.processNext();
             rejectPromise(new Error(errMsg));
@@ -740,6 +753,7 @@ class ProcessManager extends EventEmitter {
             proc.status = 'completed';
             proc.logLines.push(`[${ts()}] ✓ 完成: tokens=${resultObj.usage.input_tokens}+${resultObj.usage.output_tokens}, cost=$${resultObj.cost_usd.toFixed(4)}`);
             this.running--;
+            this.cleanupActiveStream(proc);
             this.flushLog(proc, cliArgs);
             this.processNext();
             resolvePromise(resultObj);
@@ -763,6 +777,7 @@ class ProcessManager extends EventEmitter {
             const errMsg = proc.error || 'API Error detected in output';
             proc.logLines.push(`[${ts()}] ✗ 失败: 检测到 API 错误`);
             this.running--;
+            this.cleanupActiveStream(proc);
             this.flushLog(proc, cliArgs);
             this.processNext();
             rejectPromise(new Error(errMsg));
@@ -779,6 +794,7 @@ class ProcessManager extends EventEmitter {
             proc.jsonResult = synth;
             proc.logLines.push(`[${ts()}] ✓ 完成 (合成 result，无 result 事件)`);
             this.running--;
+            this.cleanupActiveStream(proc);
             this.flushLog(proc, cliArgs);
             this.processNext();
             resolvePromise(synth);
@@ -789,6 +805,7 @@ class ProcessManager extends EventEmitter {
           const errMsg = proc.error || `进程退出 code=${code}`;
           proc.logLines.push(`[${ts()}] ✗ 失败: ${errMsg.substring(0, 200)}`);
           this.running--;
+          this.cleanupActiveStream(proc);
           this.flushLog(proc, cliArgs);
           this.processNext();
           rejectPromise(new Error(errMsg));
@@ -805,6 +822,18 @@ class ProcessManager extends EventEmitter {
         // Ignore errors - file might already be deleted or not exist
       }
     }
+  }
+
+  /** Remove frontend session -> chatId mapping when stream ends */
+  private cleanupActiveStream(proc: ProcessInfo): void {
+    if (proc.frontendSessionId) {
+      this.activeStreams.delete(proc.frontendSessionId);
+    }
+  }
+
+  /** Get chatId for a frontend session if there's an active stream */
+  getActiveStreamChatId(frontendSessionId: string): string | undefined {
+    return this.activeStreams.get(frontendSessionId);
   }
 
   private processNext(): void {

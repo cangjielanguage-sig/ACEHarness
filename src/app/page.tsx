@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { useChat } from '@/contexts/ChatContext';
@@ -10,6 +10,8 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import ChatSidebar from '@/components/chat/ChatSidebar';
 import ChatMessage from '@/components/chat/ChatMessage';
 import QuickActions, { QuickActionsBar } from '@/components/chat/QuickActions';
+import RichTextEditor, { RichTextEditorHandle } from '@/components/ui/RichTextEditor';
+import AuthGuard from '@/components/AuthGuard';
 
 const SIDEBAR_STORAGE_KEY = 'chat-sidebar-width';
 const DEFAULT_WIDTH = 264;
@@ -28,25 +30,23 @@ function useIsMobile() {
   return isMobile;
 }
 
-export default function ChatPage() {
+function ChatPageContent() {
   const router = useRouter();
   const {
     activeSession, sessions, createSession, sendMessage, stopStreaming,
-    deleteMessage, retryFromMessage,
+    deleteMessage, retryFromMessage, continueFromMessage,
     loading, streamingMessageId,
     model, setModel, confirmAction, rejectAction, undoActionById, retryAction,
     skillSettings,
   } = useChat();
   const [input, setInput] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const isMobile = useIsMobile();
-
-  // --- Resizable sidebar state ---
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<RichTextEditorHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
 
   // Load saved width
   useEffect(() => {
@@ -90,32 +90,72 @@ export default function ChatPage() {
   }, [activeSession?.messages, loading]);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    editorRef.current?.focus();
   }, [activeSession?.id]);
 
   const handleSend = useCallback(async () => {
-    const text = input.trim();
+    const text = editorRef.current?.getText().trim() || input.trim();
     if (!text || loading) return;
     setInput('');
+    editorRef.current?.clear();
     await sendMessage(text);
-    inputRef.current?.focus();
+    editorRef.current?.focus();
   }, [input, loading, sendMessage]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-  };
+  const handleEditorEnter = useCallback(async (text: string) => {
+    if (!text || loading) return;
+    setInput('');
+    editorRef.current?.clear();
+    await sendMessage(text);
+  }, [loading, sendMessage]);
 
-  const handleQuickAction = (prompt: string) => {
+  const handleQuickAction = useCallback((prompt: string) => {
     if (prompt && !prompt.includes('\n')) {
       setInput('');
+      editorRef.current?.clear();
       sendMessage(prompt);
     } else {
       setInput(prompt);
-      inputRef.current?.focus();
+      editorRef.current?.focus();
     }
-  };
+  }, [sendMessage]);
 
   const messages = activeSession?.messages || [];
+
+  // Memoize message callbacks to prevent unnecessary re-renders
+  const messageCallbacks = useMemo(() => {
+    const callbacks: Record<string, {
+      onConfirmAction: (id: string) => void;
+      onRejectAction: (id: string) => void;
+      onUndoAction: (id: string) => void;
+      onRetryAction: (id: string) => void;
+    }> = {};
+    messages.forEach(msg => {
+      callbacks[msg.id] = {
+        onConfirmAction: (id) => confirmAction(msg.id, id),
+        onRejectAction: (id) => rejectAction(msg.id, id),
+        onUndoAction: (id) => undoActionById(msg.id, id),
+        onRetryAction: (id) => retryAction(msg.id, id),
+      };
+    });
+    return callbacks;
+  }, [messages, confirmAction, rejectAction, undoActionById, retryAction]);
+
+  const renderedMessages = useMemo(() => messages.map(msg => (
+    <ChatMessage
+      key={msg.id}
+      message={msg}
+      isStreaming={msg.id === streamingMessageId}
+      onConfirmAction={messageCallbacks[msg.id].onConfirmAction}
+      onRejectAction={messageCallbacks[msg.id].onRejectAction}
+      onUndoAction={messageCallbacks[msg.id].onUndoAction}
+      onRetryAction={messageCallbacks[msg.id].onRetryAction}
+      onAction={handleQuickAction}
+      onDelete={deleteMessage}
+      onRetryFromMessage={msg.role === 'user' ? retryFromMessage : undefined}
+      onContinue={msg.role === 'error' ? continueFromMessage : undefined}
+    />
+  )), [messages, streamingMessageId, messageCallbacks, handleQuickAction, deleteMessage, retryFromMessage, continueFromMessage]);
 
   return (
     <div ref={containerRef} className="h-screen flex overflow-hidden bg-background">
@@ -154,7 +194,12 @@ export default function ChatPage() {
             <Button size="icon" variant="ghost" onClick={() => setSidebarOpen(p => !p)} title="切换侧边栏">
               <span className="material-symbols-outlined text-lg">menu</span>
             </Button>
-            <span className="font-semibold text-sm">AceFlow 对话</span>
+            <div className="flex items-center gap-1.5">
+              <div className="w-6 h-6 bg-gradient-to-br from-primary to-blue-600 rounded-md flex items-center justify-center">
+                <span className="material-symbols-outlined text-sm text-white">bolt</span>
+              </div>
+              <span className="font-bold text-sm bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">AceFlow</span>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-48 hidden sm:block">
@@ -188,7 +233,7 @@ export default function ChatPage() {
                   animate={{ opacity: 1, y: 0 }}
                   className="text-2xl font-bold bg-gradient-to-r from-primary via-blue-500 to-purple-500 bg-clip-text text-transparent mb-2"
                 >
-                  AceFlow 对话助手
+                  AceFlow Multi-Agent 助手
                 </motion.h2>
                 <motion.p
                   initial={{ opacity: 0 }}
@@ -196,26 +241,13 @@ export default function ChatPage() {
                   transition={{ delay: 0.1 }}
                   className="text-sm text-muted-foreground"
                 >
-                  通过对话管理工作流、Agent、模型和 Skills
+                  通过对话实现全流程 Multi-Agent 智能编排
                 </motion.p>
               </div>
               <QuickActions onAction={handleQuickAction} skillSettings={skillSettings} />
             </div>
           )}
-          {messages.map(msg => (
-            <ChatMessage
-              key={msg.id}
-              message={msg}
-              isStreaming={msg.id === streamingMessageId}
-              onConfirmAction={(id) => confirmAction(msg.id, id)}
-              onRejectAction={(id) => rejectAction(msg.id, id)}
-              onUndoAction={(id) => undoActionById(msg.id, id)}
-              onRetryAction={(id) => retryAction(msg.id, id)}
-              onAction={handleQuickAction}
-              onDelete={deleteMessage}
-              onRetryFromMessage={msg.role === 'user' ? retryFromMessage : undefined}
-            />
-          ))}
+          {renderedMessages}
           <div ref={messagesEndRef} />
         </div>
 
@@ -225,22 +257,24 @@ export default function ChatPage() {
             <QuickActionsBar onAction={handleQuickAction} skillSettings={skillSettings} />
           )}
           <div className="flex items-end gap-2 max-w-4xl mx-auto">
-            <textarea
-              ref={inputRef}
-              className="flex-1 resize-none rounded-xl border border-input bg-background px-4 py-2.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[42px] max-h-32"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
-              rows={1}
-              disabled={loading}
-            />
+            <div className="flex-1">
+              <RichTextEditor
+                ref={editorRef}
+                onEnter={handleEditorEnter}
+                onChange={(html, text) => setInput(text)}
+                placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
+                minHeight={42}
+                maxHeight={200}
+                disabled={loading}
+                autoFocus={false}
+              />
+            </div>
             {loading ? (
               <Button className="rounded-xl h-[42px] px-4" variant="destructive" onClick={stopStreaming} title="停止生成">
                 <span className="material-symbols-outlined text-lg">stop</span>
               </Button>
             ) : (
-              <Button className="rounded-xl h-[42px] px-4" onClick={handleSend} disabled={!input.trim()}>
+              <Button className="rounded-xl h-[42px] px-4" onClick={handleSend} disabled={!input.trim() && !editorRef.current?.getText()?.trim()}>
                 <span className="material-symbols-outlined text-lg">send</span>
               </Button>
             )}
@@ -248,5 +282,13 @@ export default function ChatPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <AuthGuard>
+      <ChatPageContent />
+    </AuthGuard>
   );
 }

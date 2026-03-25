@@ -49,3 +49,10 @@ runs/
 /configs/agents/simple-tester.yaml
 /configs/agents/simple-coder.yaml
 /configs/test-blite-supervisor.yaml
+
+# AceFlow data
+data/*
+!data/chat-settings.yaml
+!data/users/
+skills/
+configs/x.yaml
