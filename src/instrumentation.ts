@@ -1,6 +1,9 @@
 import { existsSync, symlinkSync, statSync } from 'fs';
 import { join } from 'path';
 
+// This file only runs in Node.js runtime
+export const runtime = 'nodejs';
+
 const WORKSPACE_ROOT = process.cwd();
 const LOCAL_CLAUDE_DIR = join(WORKSPACE_ROOT, '.claude');
 const SKILLS_CLAUDE_DIR = join(WORKSPACE_ROOT, 'skills', '.claude');
