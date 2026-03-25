@@ -36,7 +36,7 @@ ${generateActionTypesDocs()}`;;
 const SKILLS_YAML_PATH = resolve(process.cwd(), 'skills', 'skills.yaml');
 const SKILLS_DIR = join(process.cwd(), 'skills', '.claude', 'skills');
 
-const MAX_SKILL_CHARS = 4000; // 每个 skill 最多注入这么多字符
+const MAX_SKILL_CHARS = 2000; // 每个 skill 最多注入2000字符（PROMPT摘要+SKILL核心）
 
 /** 加载单个 skill 的精简文档（PROMPT.md + SKILL.md 头部） */
 async function loadSkillDocs(skillName: string): Promise<string> {
