@@ -111,6 +111,8 @@ export const newConfigFormSchema = z.object({
     .regex(/^[a-zA-Z0-9_-]+\.yaml$/, '文件名必须以 .yaml 结尾且只包含字母、数字、下划线和连字符'),
   workflowName: z.string().min(1, '工作流名称不能为空'),
   description: z.string().optional(),
+  mode: z.enum(['phase-based', 'state-machine', 'ai-guided']).default('phase-based').optional(),
+  requirements: z.string().optional(), // AI 引导模式下的需求描述
 });
 
 export type NewConfigForm = z.infer<typeof newConfigFormSchema>;
@@ -196,6 +198,7 @@ export const stateMachineStateSchema = z.object({
   position: z.object({ x: z.number(), y: z.number() }).optional(), // 可视化位置
   isInitial: z.boolean().default(false), // 是否为初始状态
   isFinal: z.boolean().default(false), // 是否为终止状态
+  maxSelfTransitions: z.number().min(1).max(100).default(3).optional(), // 最大自我转换次数，超出后自动熔断
 });
 
 // 问题路由规则 Schema

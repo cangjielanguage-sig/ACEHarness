@@ -3,11 +3,11 @@
 import { useState } from 'react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Workflow, GitBranch, Check, Info, ArrowRight } from 'lucide-react';
+import { Workflow, GitBranch, Check, Info, ArrowRight, Sparkles } from 'lucide-react';
 
 interface WorkflowModeSelectorProps {
-  value: 'phase-based' | 'state-machine';
-  onChange: (mode: 'phase-based' | 'state-machine') => void;
+  value: 'phase-based' | 'state-machine' | 'ai-guided';
+  onChange: (mode: 'phase-based' | 'state-machine' | 'ai-guided') => void;
   showDetails?: boolean;
 }
 
@@ -60,6 +60,27 @@ export default function WorkflowModeSelector({
         '敏捷迭代开发',
       ],
       color: 'purple',
+    },
+    {
+      id: 'ai-guided',
+      name: 'AI 引导创建',
+      icon: Sparkles,
+      tagline: '描述需求，AI 生成模板',
+      description: '告诉 AI 你的工作流需求，AI 自动生成合适的工作流模板',
+      features: [
+        '自然语言描述需求',
+        'AI 自动生成模板',
+        '智能推荐阶段和步骤',
+        '可后续调整优化',
+      ],
+      pros: ['零基础友好', '快速启动', '智能适配'],
+      cons: ['需要 AI 运行时间', '可能需要微调'],
+      useCases: [
+        '不确定用哪种模式',
+        '希望快速原型',
+        '需要参考模板',
+      ],
+      color: 'green',
     },
   ];
 

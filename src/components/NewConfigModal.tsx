@@ -30,16 +30,22 @@ export default function NewConfigModal({
   onSuccess,
 }: NewConfigModalProps) {
   const { toast } = useToast();
-  const [workflowMode, setWorkflowMode] = useState<'phase-based' | 'state-machine'>('phase-based');
+  const [workflowMode, setWorkflowMode] = useState<'phase-based' | 'state-machine' | 'ai-guided'>('phase-based');
 
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
     reset,
+    watch,
   } = useForm<NewConfigForm>({
     resolver: zodResolver(newConfigFormSchema),
+    defaultValues: {
+      mode: 'phase-based',
+    },
   });
+
+  const requirements = watch('requirements', '');
 
   const onSubmit = async (data: NewConfigForm) => {
     try {
@@ -91,6 +97,25 @@ export default function NewConfigModal({
           {/* 分隔线 */}
           <div className="border-t border-gray-200 dark:border-gray-700" />
 
+          {/* AI 引导模式的额外输入 */}
+          {workflowMode === 'ai-guided' && (
+            <div className="space-y-4 bg-green-50 dark:bg-green-950/30 rounded-lg p-4 border border-green-200 dark:border-green-800">
+              <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
+                <span className="material-symbols-outlined">auto_awesome</span>
+                <span className="font-medium">描述你的工作流需求</span>
+              </div>
+              <Textarea
+                {...register('requirements')}
+                placeholder="例如：我想创建一个代码审查工作流，包含设计评审、代码审查、测试验证等阶段，需要支持发现问题时自动回退..."
+                rows={5}
+                className="bg-background"
+              />
+              <p className="text-xs text-green-600 dark:text-green-500">
+                AI 将根据你的描述生成合适的工作流模板。生成后你可以进入设计页面进一步调整。
+              </p>
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="filename">
               文件名 <span className="text-destructive">*</span>
@@ -140,7 +165,7 @@ export default function NewConfigModal({
             取消
           </Button>
           <Button type="submit" form="new-config-form" disabled={isSubmitting}>
-            {isSubmitting ? '创建中...' : '创建'}
+            {isSubmitting ? '创建中...' : workflowMode === 'ai-guided' ? 'AI 生成模板' : '创建'}
           </Button>
         </div>
       </DialogContent>

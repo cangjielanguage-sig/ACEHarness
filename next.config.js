@@ -1,3 +1,14 @@
+// Suppress known Turbopack warnings that can't be fixed due to dynamic imports
+const originalStderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = ((chunk, ...args) => {
+  const str = chunk.toString();
+  // chat-system-prompt.ts uses dynamic path join - Turbopack can't resolve at build time
+  if (str.includes('chat-system-prompt') && str.includes('file pattern')) return true;
+  // instrumentation-nodejs.ts dynamic import
+  if (str.includes('instrumentation-nodejs') && str.includes('Can\'t resolve')) return true;
+  return originalStderrWrite(chunk, ...args);
+});
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,

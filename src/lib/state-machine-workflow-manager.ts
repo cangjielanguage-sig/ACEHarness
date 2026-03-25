@@ -85,6 +85,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private stateHistory: StateTransitionRecord[] = [];
   private issueTracker: Issue[] = [];
   private transitionCount = 0;
+  /** Track self-transitions per state for circuit breaking */
+  private selfTransitionCounts: Map<string, number> = new Map();
   private runStartTime: string | null = null;
   private runEndTime: string | null = null;
   private pendingForceTransition: string | null = null;
@@ -376,6 +378,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.stateHistory = [];
       this.issueTracker = [];
       this.transitionCount = 0;
+      this.selfTransitionCounts = new Map(); // Reset self-transition counts for new run
       this.completedSteps = [];
       this.supervisorFlow = [];
       this.agentFlow = [];
@@ -854,6 +857,50 @@ export class StateMachineWorkflowManager extends EventEmitter {
         result,
         config
       );
+
+      // Check self-transition circuit breaker
+      if (nextState === this.currentState) {
+        const currentSelfCount = this.selfTransitionCounts.get(this.currentState!) || 0;
+        const maxSelfTransitions = stateConfig.maxSelfTransitions || 3;
+        if (currentSelfCount >= maxSelfTransitions) {
+          // Circuit breaker triggered - force transition to a different state or fail
+          this.emit('circuit-breaker', {
+            state: this.currentState,
+            selfTransitionCount: currentSelfCount,
+            maxSelfTransitions,
+            message: `状态 "${this.currentState}" 自我转换次数超过限制 (${maxSelfTransitions})，自动熔断`,
+          });
+          // Find an alternative transition target
+          const alternativeTransition = stateConfig.transitions.find(t => t.to !== this.currentState);
+          if (alternativeTransition) {
+            this.stateHistory.push({
+              from: this.currentState!,
+              to: alternativeTransition.to,
+              reason: `熔断：自我转换超过限制，强制转向 ${alternativeTransition.to}`,
+              issues: result.issues,
+              timestamp: new Date().toISOString(),
+            });
+            this.transitionCount++;
+            this.currentState = alternativeTransition.to;
+            this.selfTransitionCounts.set(this.currentState, 0);
+            this.emit('transition', {
+              from: this.currentState,
+              to: alternativeTransition.to,
+              transitionCount: this.transitionCount,
+              issues: result.issues,
+              circuitBreaker: true,
+            });
+            continue;
+          } else {
+            throw new Error(`状态 "${this.currentState}" 达到最大自我转换次数 (${maxSelfTransitions}) 且无其他转移路径，工作流终止`);
+          }
+        }
+        // Increment self-transition counter
+        this.selfTransitionCounts.set(this.currentState!, currentSelfCount + 1);
+      } else {
+        // Reset self-transition counter when moving to a different state
+        this.selfTransitionCounts.set(this.currentState!, 0);
+      }
 
       // Check if human approval is required
       // Skip human approval if transitioning to self (iteration) or if forced by user
@@ -1927,6 +1974,16 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.runStartTime = runState.startTime || null;
     this.globalContext = runState.globalContext || '';
     this.stateContexts = new Map(Object.entries(runState.phaseContexts || {}));
+
+    // Restore self-transition counts from state history
+    this.selfTransitionCounts = new Map();
+    for (const record of this.stateHistory) {
+      if (record.from === record.to) {
+        const currentCount = this.selfTransitionCounts.get(record.from) || 0;
+        this.selfTransitionCounts.set(record.from, currentCount + 1);
+      }
+    }
+
     this.status = 'running';
     this.shouldStop = false;
 
