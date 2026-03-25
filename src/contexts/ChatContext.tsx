@@ -425,6 +425,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 reconnectAttempts++;
                 setTimeout(connectSSE, 1000 * reconnectAttempts);
               } else {
+                // Try recovery via backendSessionId
+                const backendSid = activeSessionRef.current?.backendSessionId;
+                if (backendSid) {
+                  fetch(`/api/chat/stream/recover?sessionId=${encodeURIComponent(backendSid)}`)
+                    .then(r => r.json())
+                    .then(recData => {
+                      if (recData.content) {
+                        const { text: cleanText, actions: newActions, cards: newCards } = parseActions(recData.content);
+                        updateActiveSession(s => ({
+                          ...s, messages: s.messages.map(m => m.id === followUpMsgId ? { ...m, content: cleanText, cards: newCards } : m),
+                        }));
+                      }
+                    })
+                    .catch(() => {});
+                }
                 activeChatIdRef.current = null;
                 reject(new Error('Stream error'));
               }
@@ -549,8 +564,46 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               reconnectAttempts++;
               setTimeout(connectSSE, 1000 * reconnectAttempts);
             } else {
+              // All reconnects failed — try to recover full content from backend
+              const backendSid = activeSessionRef.current?.backendSessionId;
+              if (backendSid) {
+                fetch(`/api/chat/stream/recover?sessionId=${encodeURIComponent(backendSid)}`)
+                  .then(r => r.json())
+                  .then(recData => {
+                    if (recData.content) {
+                      const { text: cleanText, actions: newActions, cards: newCards } = parseActions(recData.content);
+                      const newActionStates: ActionState[] = newActions.map(a => ({
+                        id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
+                      }));
+                      updateActiveSession(s => ({
+                        ...s, updatedAt: Date.now(),
+                        messages: s.messages.map(m => m.id === assistantMsgId ? {
+                          ...m, content: cleanText,
+                          actions: newActionStates.length > 0 ? newActionStates : m.actions,
+                          cards: newCards.length > 0 ? newCards : m.cards,
+                        } : m),
+                      }));
+                      if (newActionStates.length > 0) {
+                        autoExecuteSafeActions(assistantMsgId, newActionStates);
+                      }
+                    } else {
+                      updateActiveSession(s => ({
+                        ...s, messages: s.messages.map(m => m.id === assistantMsgId && !m.content
+                          ? { ...m, role: 'error' as const, content: '流式连接中断' }
+                          : m),
+                      }));
+                    }
+                  })
+                  .catch(() => {
+                    updateActiveSession(s => ({
+                      ...s, messages: s.messages.map(m => m.id === assistantMsgId && !m.content
+                        ? { ...m, role: 'error' as const, content: '流式连接中断' }
+                        : m),
+                    }));
+                  });
+              }
               activeChatIdRef.current = null;
-              reject(new Error('Stream error'));
+              resolve();
             }
           });
         };

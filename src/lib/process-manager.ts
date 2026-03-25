@@ -868,6 +868,16 @@ class ProcessManager extends EventEmitter {
     }));
   }
 
+  /** Find a process by its claude CLI session ID (for stream recovery) */
+  getProcessBySessionId(sessionId: string): ProcessInfo | undefined {
+    for (const [, p] of this.processes) {
+      if (p.sessionId === sessionId) {
+        return { ...p, childProcess: undefined };
+      }
+    }
+    return undefined;
+  }
+
   /**
    * Register an external process (e.g. from alternative engines like Kiro CLI)
    * so it appears in getAllProcesses() and getProcess().
