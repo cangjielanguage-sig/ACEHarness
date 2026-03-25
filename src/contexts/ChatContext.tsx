@@ -131,7 +131,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [activeSession, setActiveSession] = useState<ChatSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const [model, setModel] = useState('claude-sonnet-4-6');
+  const [model, setModel] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('chat-model') || 'claude-sonnet-4-6';
+    }
+    return 'claude-sonnet-4-6';
+  });
+
+  // Persist model selection to localStorage whenever it changes
+  const handleSetModel = useCallback((m: string) => {
+    setModel(m);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chat-model', m);
+    }
+  }, []);
   const [skillSettings, setSkillSettings] = useState<Record<string, boolean>>({ 'power-gitcode': true });
   const [discoveredSkills, setDiscoveredSkills] = useState<{ name: string; label: string; description: string; source?: string; tags?: string[] }[]>([]);
 
@@ -712,7 +725,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sessions, activeSessionId, activeSession,
       createSession, deleteSession, renameSession, setActiveSessionId,
       sendMessage, stopStreaming, deleteMessage, retryFromMessage,
-      loading, streamingMessageId, model, setModel,
+      loading, streamingMessageId, model, setModel: handleSetModel,
       confirmAction, rejectAction, undoActionById, retryAction,
       skillSettings, discoveredSkills, toggleSkill,
     }}>
