@@ -14,7 +14,7 @@ import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
 
 const DEBUG_DIR = resolve(process.cwd(), 'runs', '.tmp');
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 
 function ts(): string { return new Date().toISOString(); }
 function fmtMs(ms: number): string {
@@ -188,6 +188,8 @@ export interface ProcessInfo {
   streamContent: string;
   logLines: string[];
   logFile?: string;
+  timeoutTimer?: ReturnType<typeof setTimeout>;
+  lastActivityTime?: number;
   runId?: string;
   prompt?: string;
   systemPrompt?: string;
@@ -434,20 +436,25 @@ class ProcessManager extends EventEmitter {
       proc.logLines.push(`[${ts()}] PID: ${child.pid}`);
       this.emit('started', { id, pid: child.pid, agent, step });
 
-      // Timeout
-      const timer = setTimeout(() => {
-        proc.logLines.push(`[${ts()}] ⚠ 超时 (${fmtMs(timeoutMs)})，终止进程`);
-        proc.status = 'timeout';
-        proc.endTime = new Date();
+      // Timeout — reset on each stream activity so AI thinking doesn't kill the process
+      const resetTimeout = () => {
+        if (proc.status !== 'running') return;
+        proc.lastActivityTime = Date.now();
+        if (proc.timeoutTimer) clearTimeout(proc.timeoutTimer);
+        proc.timeoutTimer = setTimeout(() => {
+          proc.logLines.push(`[${ts()}] ⚠ 超时 (${fmtMs(timeoutMs)})，终止进程`);
+          proc.status = 'timeout';
+          proc.endTime = new Date();
+          this.cleanupTempFiles(tempFiles);
+          child.kill('SIGTERM');
+          setTimeout(() => child.kill('SIGKILL'), 3000);
+          this.flushLog(proc, cliArgs);
+          rejectPromise(new Error(`超时 (${fmtMs(timeoutMs)})`));
+        }, timeoutMs);
+      };
 
-        // Clean up temp files on timeout
-        this.cleanupTempFiles(tempFiles);
-
-        child.kill('SIGTERM');
-        setTimeout(() => child.kill('SIGKILL'), 3000);
-        this.flushLog(proc, cliArgs);
-        rejectPromise(new Error(`超时 (${fmtMs(timeoutMs)})`));
-      }, timeoutMs);
+      // Start the timer
+      resetTimeout();
 
       let buffer = '';
       let resultObj: ClaudeJsonResult | null = null;
@@ -693,6 +700,7 @@ class ProcessManager extends EventEmitter {
       }, 5000);
 
       child.stdout!.on('data', (chunk: Buffer) => {
+        resetTimeout(); // Reset inactivity timeout on any data from process
         const raw = chunk.toString();
         buffer += raw;
         const lines = buffer.split('\n');
@@ -709,13 +717,14 @@ class ProcessManager extends EventEmitter {
       });
 
       child.stderr!.on('data', (chunk: Buffer) => {
+        resetTimeout(); // Reset timeout on stderr activity too
         const text = chunk.toString();
         proc.error += text;
         proc.logLines.push(`[${ts()}] stderr: ${text.trim().substring(0, 200)}`);
       });
 
       child.on('error', (err) => {
-        clearTimeout(timer);
+        if (proc.timeoutTimer) { clearTimeout(proc.timeoutTimer); proc.timeoutTimer = undefined; }
         clearInterval(flushInterval);
 
         // Clean up temp files on error
@@ -732,7 +741,7 @@ class ProcessManager extends EventEmitter {
       });
 
       child.on('close', (code) => {
-        clearTimeout(timer);
+        if (proc.timeoutTimer) { clearTimeout(proc.timeoutTimer); proc.timeoutTimer = undefined; }
         clearInterval(flushInterval);
 
         // Clean up temp files now that process has finished

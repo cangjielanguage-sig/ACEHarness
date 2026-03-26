@@ -529,7 +529,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         let accumulated = '';
         let reconnectAttempts = 0;
         const MAX_RECONNECTS = 3;
-        const INACTIVITY_TIMEOUT = 600_000; // 10 minutes without any data
+        const INACTIVITY_TIMEOUT = 1_200_000; // 20 minutes without any data
         let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 
         const resetInactivityTimer = () => {
