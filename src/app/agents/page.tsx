@@ -39,6 +39,7 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedGroup, setSelectedGroup] = useState<string>('all');
   const [selectedTeam, setSelectedTeam] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -158,11 +159,27 @@ export default function AgentsPage() {
   // Get all unique tags
   const allTags = Array.from(new Set(agents.flatMap(a => a.tags || [])));
 
+  // Determine agent group by name prefix or first tag
+  const getAgentGroup = (agent: AgentConfig): string => {
+    // Check name prefix first (compiler_xxx agents)
+    if (agent.name.startsWith('compiler_')) return 'compiler';
+    // Check name prefix (oh-cangjie agents)
+    if (agent.name.startsWith('oh-cangjie')) return 'openharmony';
+    // Check first tag
+    const firstTag = agent.tags?.[0] || '';
+    if (firstTag === 'OH' || firstTag === '仓颉') return 'openharmony';
+    if (firstTag === 'C++' || firstTag === '编译器' || firstTag === 'LLVM') return 'compiler';
+    return 'common';
+  };
+
   // Get all unique models
   const allModels = Array.from(new Set(agents.map(a => a.model).filter(Boolean)));
 
   // Filter agents
   const filteredAgents = agents.filter(agent => {
+    if (selectedGroup !== 'all' && getAgentGroup(agent) !== selectedGroup) {
+      return false;
+    }
     if (searchQuery && !agent.name.toLowerCase().includes(searchQuery.toLowerCase())) {
       return false;
     }
@@ -185,11 +202,26 @@ export default function AgentsPage() {
     judge: filteredAgents.filter(a => a.team === 'judge'),
   };
 
+  // Group agents by first tag (for sidebar counts)
+  const groupCounts = {
+    all: agents.length,
+    common: agents.filter(a => getAgentGroup(a) === 'common').length,
+    compiler: agents.filter(a => getAgentGroup(a) === 'compiler').length,
+    openharmony: agents.filter(a => getAgentGroup(a) === 'openharmony').length,
+  };
+
   const teamLabels: Record<string, string> = { blue: '蓝队', red: '红队', judge: '裁判' };
   const teamColors: Record<string, string> = {
     blue: 'border-l-blue-500 bg-blue-500/5',
     red: 'border-l-red-500 bg-red-500/5',
     judge: 'border-l-yellow-500 bg-yellow-500/5',
+  };
+  const groupLabels: Record<string, string> = { all: '全部', common: '通用', compiler: '编译器', openharmony: '仓颉' };
+  const groupColors: Record<string, string> = {
+    all: 'border-l-primary',
+    common: 'border-l-green-500',
+    compiler: 'border-l-purple-500',
+    openharmony: 'border-l-orange-500',
   };
 
   const toggleTag = (tag: string) => {
@@ -221,187 +253,225 @@ export default function AgentsPage() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="border-b bg-card p-4">
-        <div className="flex flex-wrap gap-3 items-center">
-          <Input
-            placeholder="搜索 Agent..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-64"
-          />
-
-          <div className="flex gap-2 items-center">
-            <span className="text-sm text-muted-foreground">团队:</span>
-            <Button
-              size="sm"
-              variant={selectedTeam === 'all' ? 'default' : 'outline'}
-              onClick={() => setSelectedTeam('all')}
-            >
-              全部
-            </Button>
-            <Button
-              size="sm"
-              variant={selectedTeam === 'blue' ? 'default' : 'outline'}
-              onClick={() => setSelectedTeam('blue')}
-              className={selectedTeam === 'blue' ? TEAM_COLORS.blue : ''}
-            >
-              蓝队
-            </Button>
-            <Button
-              size="sm"
-              variant={selectedTeam === 'red' ? 'default' : 'outline'}
-              onClick={() => setSelectedTeam('red')}
-              className={selectedTeam === 'red' ? TEAM_COLORS.red : ''}
-            >
-              红队
-            </Button>
-            <Button
-              size="sm"
-              variant={selectedTeam === 'judge' ? 'default' : 'outline'}
-              onClick={() => setSelectedTeam('judge')}
-              className={selectedTeam === 'judge' ? TEAM_COLORS.judge : ''}
-            >
-              裁判
-            </Button>
+      {/* Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Sidebar - Group Selection */}
+        <div className="w-48 border-r bg-card flex flex-col">
+          <div className="p-3 border-b">
+            <h2 className="text-sm font-semibold text-muted-foreground">分组</h2>
           </div>
-
-          <div className="flex gap-2 items-center">
-            <span className="text-sm text-muted-foreground">分类:</span>
-            <Button
-              size="sm"
-              variant={selectedCategory === 'all' ? 'default' : 'outline'}
-              onClick={() => setSelectedCategory('all')}
-            >
-              全部
-            </Button>
-            {CATEGORIES.map(cat => (
-              <Button
-                key={cat}
-                size="sm"
-                variant={selectedCategory === cat ? 'default' : 'outline'}
-                onClick={() => setSelectedCategory(cat)}
+          <div className="flex-1 overflow-auto p-2">
+            {(['all', 'common', 'compiler', 'openharmony'] as const).map(group => (
+              <button
+                key={group}
+                onClick={() => setSelectedGroup(group)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm mb-1 transition-colors ${
+                  selectedGroup === group
+                    ? 'bg-primary text-primary-foreground'
+                    : 'hover:bg-accent'
+                }`}
               >
-                {cat}
-              </Button>
+                <span>{groupLabels[group]}</span>
+                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                  selectedGroup === group ? 'bg-primary-foreground/20' : 'bg-muted'
+                }`}>
+                  {groupCounts[group]}
+                </span>
+              </button>
             ))}
           </div>
         </div>
 
-        {allTags.length > 0 && (
-          <div className="flex gap-2 items-center mt-3">
-            <span className="text-sm text-muted-foreground">标签:</span>
-            <div className="flex flex-wrap gap-1">
-              {allTags.map(tag => (
-                <Badge
-                  key={tag}
-                  variant={selectedTags.includes(tag) ? 'default' : 'outline'}
-                  className="cursor-pointer"
-                  onClick={() => toggleTag(tag)}
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Filters */}
+          <div className="border-b bg-card p-4">
+            <div className="flex flex-wrap gap-3 items-center">
+              <Input
+                placeholder="搜索 Agent..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-64"
+              />
+
+              <div className="flex gap-2 items-center">
+                <span className="text-sm text-muted-foreground">团队:</span>
+                <Button
+                  size="sm"
+                  variant={selectedTeam === 'all' ? 'default' : 'outline'}
+                  onClick={() => setSelectedTeam('all')}
                 >
-                  {tag}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-auto p-6">
-        {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <ClipLoader color="hsl(var(--primary))" size={40} />
-          </div>
-        ) : filteredAgents.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-            <span className="material-symbols-outlined text-5xl mb-4">smart_toy</span>
-            <p>没有找到匹配的 Agent</p>
-          </div>
-        ) : (
-          <div className="space-y-8">
-            {(['blue', 'red', 'judge'] as const).map(team => (
-              groupedAgents[team].length > 0 && (
-                <div key={team}>
-                  <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <span className={`w-3 h-3 rounded-full ${
-                      team === 'blue' ? 'bg-blue-500' : team === 'red' ? 'bg-red-500' : 'bg-yellow-500'
-                    }`}></span>
-                    {teamLabels[team]} <span className="text-sm font-normal text-muted-foreground">({groupedAgents[team].length})</span>
-                  </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {groupedAgents[team].map(agent => (
-                      <div
-                        key={agent.name}
-                        className={`bg-card border rounded-lg p-4 hover:shadow-lg transition-shadow border-l-4 ${teamColors[team]}`}
-                      >
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1">
-                            <h3 className="font-semibold text-base mb-1">{agent.name}</h3>
-                          </div>
-                          <div className="flex gap-1">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEditAgent(agent)}
-                            >
-                              <span className="material-symbols-outlined text-sm">edit</span>
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleDeleteAgent(agent.name)}
-                            >
-                              <span className="material-symbols-outlined text-sm">delete</span>
-                            </Button>
-                          </div>
-                        </div>
-
-                {agent.category && (
-                  <div className="mb-2">
-                    <Badge variant="secondary">{agent.category}</Badge>
-                  </div>
-                )}
-
-                <div className="text-sm text-muted-foreground mb-2">
-                  <div>模型: {agent.model}</div>
-                  {agent.temperature !== undefined && (
-                    <div>Temperature: {agent.temperature}</div>
-                  )}
-                </div>
-
-                {agent.tags && agent.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-2">
-                    {agent.tags.map(tag => (
-                      <Badge key={tag} variant="outline" className="text-xs">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-
-                {agent.capabilities && agent.capabilities.length > 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    能力: {agent.capabilities.join(', ')}
-                  </div>
-                )}
-
-                {agent.iterationPrompt && (
-                  <div className="mt-2 pt-2 border-t">
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span className="material-symbols-outlined text-xs">loop</span>
-                      已配置迭代提示词
-                    </div>
-                  </div>
-                )}
+                  全部
+                </Button>
+                <Button
+                  size="sm"
+                  variant={selectedTeam === 'blue' ? 'default' : 'outline'}
+                  onClick={() => setSelectedTeam('blue')}
+                  className={selectedTeam === 'blue' ? TEAM_COLORS.blue : ''}
+                >
+                  蓝队
+                </Button>
+                <Button
+                  size="sm"
+                  variant={selectedTeam === 'red' ? 'default' : 'outline'}
+                  onClick={() => setSelectedTeam('red')}
+                  className={selectedTeam === 'red' ? TEAM_COLORS.red : ''}
+                >
+                  红队
+                </Button>
+                <Button
+                  size="sm"
+                  variant={selectedTeam === 'judge' ? 'default' : 'outline'}
+                  onClick={() => setSelectedTeam('judge')}
+                  className={selectedTeam === 'judge' ? TEAM_COLORS.judge : ''}
+                >
+                  裁判
+                </Button>
               </div>
-            ))}
-                  </div>
+
+              <div className="flex gap-2 items-center">
+                <span className="text-sm text-muted-foreground">分类:</span>
+                <Button
+                  size="sm"
+                  variant={selectedCategory === 'all' ? 'default' : 'outline'}
+                  onClick={() => setSelectedCategory('all')}
+                >
+                  全部
+                </Button>
+                {CATEGORIES.map(cat => (
+                  <Button
+                    key={cat}
+                    size="sm"
+                    variant={selectedCategory === cat ? 'default' : 'outline'}
+                    onClick={() => setSelectedCategory(cat)}
+                  >
+                    {cat}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {allTags.length > 0 && (
+              <div className="flex gap-2 items-center mt-3">
+                <span className="text-sm text-muted-foreground">标签:</span>
+                <div className="flex flex-wrap gap-1">
+                  {allTags.map(tag => (
+                    <Badge
+                      key={tag}
+                      variant={selectedTags.includes(tag) ? 'default' : 'outline'}
+                      className="cursor-pointer"
+                      onClick={() => toggleTag(tag)}
+                    >
+                      {tag}
+                    </Badge>
+                  ))}
                 </div>
-              )
-            ))}
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Agent List */}
+          <div className="flex-1 overflow-auto p-6">
+            {loading ? (
+              <div className="flex items-center justify-center h-64">
+                <ClipLoader color="hsl(var(--primary))" size={40} />
+              </div>
+            ) : filteredAgents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                <span className="material-symbols-outlined text-5xl mb-4">smart_toy</span>
+                <p>没有找到匹配的 Agent</p>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {(['blue', 'red', 'judge'] as const).map(team => (
+                  groupedAgents[team].length > 0 && (
+                    <div key={team}>
+                      <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <span className={`w-3 h-3 rounded-full ${
+                          team === 'blue' ? 'bg-blue-500' : team === 'red' ? 'bg-red-500' : 'bg-yellow-500'
+                        }`}></span>
+                        {teamLabels[team]} <span className="text-sm font-normal text-muted-foreground">({groupedAgents[team].length})</span>
+                      </h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {groupedAgents[team].map(agent => (
+                          <div
+                            key={agent.name}
+                            className={`bg-card border rounded-lg p-4 hover:shadow-lg transition-shadow border-l-4 ${teamColors[team]}`}
+                          >
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex-1">
+                                <h3 className="font-semibold text-base mb-1">{agent.name}</h3>
+                              </div>
+                              <div className="flex gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleEditAgent(agent)}
+                                >
+                                  <span className="material-symbols-outlined text-sm">edit</span>
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleDeleteAgent(agent.name)}
+                                >
+                                  <span className="material-symbols-outlined text-sm">delete</span>
+                                </Button>
+                              </div>
+                            </div>
+
+                            {agent.category && (
+                              <div className="mb-2">
+                                <Badge variant="secondary">{agent.category}</Badge>
+                              </div>
+                            )}
+
+                            <div className="text-sm text-muted-foreground mb-2">
+                              <div>模型: {agent.model}</div>
+                              {agent.temperature !== undefined && (
+                                <div>Temperature: {agent.temperature}</div>
+                              )}
+                            </div>
+
+                            {agent.tags && agent.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mb-2">
+                                {agent.tags.slice(0, 3).map(tag => (
+                                  <Badge key={tag} variant="outline" className="text-xs">
+                                    {tag}
+                                  </Badge>
+                                ))}
+                                {agent.tags.length > 3 && (
+                                  <Badge variant="outline" className="text-xs">
+                                    +{agent.tags.length - 3}
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
+
+                            {agent.capabilities && agent.capabilities.length > 0 && (
+                              <div className="text-xs text-muted-foreground">
+                                能力: {agent.capabilities.join(', ')}
+                              </div>
+                            )}
+
+                            {agent.iterationPrompt && (
+                              <div className="mt-2 pt-2 border-t">
+                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                  <span className="material-symbols-outlined text-xs">loop</span>
+                                  已配置迭代提示词
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {editingAgent && (
