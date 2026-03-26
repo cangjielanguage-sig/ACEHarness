@@ -1,0 +1,48 @@
+workflow:
+  name: OH Cangjie Compile Smoke Test (状态机)
+  description: 最小化单阶段流程，用于对给定接口执行编译验证并输出报告
+  mode: state-machine
+  maxTransitions: 5
+  states:
+    - name: 编译验证
+      description: 对给定接口对应的 FFI 与 Wrapper 目标进行实际编译验证
+      requireHumanApproval: false
+      isInitial: true
+      isFinal: true
+      position:
+        x: 300
+        y: 200
+      steps:
+        - name: 执行编译验证并生成报告
+          agent: oh-cangjie-reviewer
+          role: judge
+          task: >
+            根据 context.interfacePath 与 context.requirements 执行接口编译验证。
+            必须在 context.projectRoot 目录下按顺序执行：
+            1) ./build.sh --product-name ${context.productName} --build-target ${context.cjFfiTarget}
+            2) ./build.sh --product-name ${context.productName} --build-target ${context.wrapperTarget}
+            3) llvm-nm -D ${context.nmSoPath} | grep Ffi
+            并读取错误日志：cat out/${context.productName}/error.log 2>/dev/null | head -120。
+            将验证报告写入 .ace-outputs/{runId}/接口编译验证报告.md，内容至少包含：
+            接口路径、执行命令、关键输出、结论、失败原因（如有）、修复建议（如有）。
+            在回复末尾输出 JSON：{"verdict":"pass|fail","summary":"一句话结论","issues":[]}。
+          preCommands:
+            - ./build.sh --product-name rk3568 --build-target cj_file_fs_ffi
+            - ./build.sh --product-name rk3568 --build-target file_api
+            - cat out/rk3568/error.log 2>/dev/null | head -120
+          skills:
+            - ohos-cangjie-reviewer-skill
+          enablePlanLoop: false
+          maxPlanRounds: 1
+      transitions: []
+context:
+  projectRoot: /home/wujizhou/worksapce
+  requirements: 仅用于验证给定接口是否可编译
+  interfacePath: "/home/wujizhou/worksapce/foundation/filemanagement/filemanagement_cangjie_wrapper/ohos/file/fs/"
+  productName: rk3568
+  cjFfiTarget: cj_file_fs_ffi
+  wrapperTarget: file_api
+  nmSoPath: out/rk3568/lib.unstripped/libcj_file_fs_ffi.z.so
+  timeoutMinutes: 60
+  routerModel: gpt-5.4
+  skills: []

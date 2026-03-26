@@ -4,6 +4,35 @@ skills:
   algorithmic-art: false
   brand-guidelines: false
   build-cangjie: false
+  cangjie_basic_concepts: true
+  cangjie_basic_data_type: true
+  cangjie_cffi: true
+  cangjie_class: true
+  cangjie_collections: true
+  cangjie_concurrency: true
+  cangjie_const: true
+  cangjie_enum: true
+  cangjie_error_handle: true
+  cangjie_extend: true
+  cangjie_for: true
+  cangjie_full_docs: true
+  cangjie_function: true
+  cangjie_generic: true
+  cangjie_interface: true
+  cangjie_macro: true
+  cangjie_network: true
+  cangjie_option: true
+  cangjie_package: true
+  cangjie_pattern_match: true
+  cangjie_project_management: true
+  cangjie_reflect_and_annotation: true
+  cangjie_regulations: true
+  cangjie_std: true
+  cangjie_stdx: true
+  cangjie_string: true
+  cangjie_struct: true
+  cangjie_toolchains: true
+  cangjie_type_system: true
   canvas-design: false
   claude-api: false
   doc-coauthoring: false
