@@ -25,6 +25,7 @@ interface ChatMessageProps {
   onAction?: (prompt: string) => void;
   onDelete?: (messageId: string) => void;
   onRetryFromMessage?: (messageId: string) => void;
+  onEditMessage?: (messageId: string) => void;
   onContinue?: (messageId: string) => void; // For timeout recovery
 }
 
@@ -63,24 +64,129 @@ function ThinkingBot() {
   );
 }
 
-export default memo(function ChatMessage({ message, isStreaming, onConfirmAction, onRejectAction, onUndoAction, onRetryAction, onAction, onDelete, onRetryFromMessage, onContinue }: ChatMessageProps) {
+// Robot Logo component for app icons
+export function RobotLogo({ size = 32, className = '' }: { size?: number; className?: string }) {
+  return (
+    <svg
+      className={`animate-robotGlow ${className}`}
+      width={size}
+      height={size}
+      viewBox="0 0 800 800"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <linearGradient id="robotLogoBody" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#818CF8" />
+          <stop offset="50%" stopColor="#6366F1" />
+          <stop offset="100%" stopColor="#4F46E5" />
+        </linearGradient>
+        <linearGradient id="robotLogoInner" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#A5B4FC" />
+          <stop offset="100%" stopColor="#818CF8" />
+        </linearGradient>
+        <linearGradient id="robotLogoRing" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#C7D2FE" />
+          <stop offset="100%" stopColor="#A5B4FC" />
+        </linearGradient>
+      </defs>
+
+      {/* Outer ring */}
+      <circle cx="400" cy="400" r="380" fill="url(#robotLogoRing)" opacity="0.3">
+        <animate attributeName="r" values="380;390;380" dur="4s" repeatCount="indefinite" />
+      </circle>
+      <circle cx="400" cy="400" r="350" fill="none" stroke="url(#robotLogoRing)" strokeWidth="12" opacity="0.5">
+        <animate attributeName="opacity" values="0.5;0.3;0.5" dur="3s" repeatCount="indefinite" />
+      </circle>
+
+      {/* Robot body */}
+      <circle cx="400" cy="400" r="280" fill="url(#robotLogoBody)">
+        <animate attributeName="r" values="280;285;280" dur="4s" repeatCount="indefinite" />
+      </circle>
+
+      {/* Inner face area */}
+      <circle cx="400" cy="400" r="200" fill="url(#robotLogoInner)" />
+
+      {/* Left eye */}
+      <ellipse cx="320" cy="360" rx="45" ry="50" fill="#1E1B4B">
+        <animate attributeName="ry" values="50;5;50" dur="3s" repeatCount="indefinite" keyTimes="0;0.45;0.5;1" />
+      </ellipse>
+      <ellipse cx="310" cy="345" rx="15" ry="15" fill="white" opacity="0.6">
+        <animate attributeName="ry" values="15;3;15" dur="3s" repeatCount="indefinite" keyTimes="0;0.45;0.5;1" />
+        <animate attributeName="opacity" values="0.6;0.2;0.6" dur="3s" repeatCount="indefinite" keyTimes="0;0.45;0.5;1" />
+      </ellipse>
+
+      {/* Right eye */}
+      <ellipse cx="480" cy="360" rx="45" ry="50" fill="#1E1B4B">
+        <animate attributeName="ry" values="50;5;50" dur="3s" repeatCount="indefinite" keyTimes="0;0.45;0.5;1" />
+      </ellipse>
+      <ellipse cx="470" cy="345" rx="15" ry="15" fill="white" opacity="0.6">
+        <animate attributeName="ry" values="15;3;15" dur="3s" repeatCount="indefinite" keyTimes="0;0.45;0.5;1" />
+        <animate attributeName="opacity" values="0.6;0.2;0.6" dur="3s" repeatCount="indefinite" keyTimes="0;0.45;0.5;1" />
+      </ellipse>
+
+      {/* Mouth - slightly changes expression */}
+      <path d="M 320 440 Q 400 500 480 440" fill="none" stroke="#1E1B4B" strokeWidth="8" strokeLinecap="round" />
+
+      {/* Antenna */}
+      <line x1="400" y1="120" x2="400" y2="160" stroke="#4F46E5" strokeWidth="8" strokeLinecap="round" />
+      <circle cx="400" cy="110" r="20" fill="#818CF8">
+        <animate attributeName="r" values="20;25;20" dur="1.5s" repeatCount="indefinite" />
+        <animate attributeName="fill" values="#818CF8;#A78BFA;#818CF8" dur="1.5s" repeatCount="indefinite" />
+      </circle>
+
+      {/* Ear Left */}
+      <rect x="130" y="360" width="30" height="60" rx="8" fill="#6366F1">
+        <animate attributeName="opacity" values="1;0.7;1" dur="2s" repeatCount="indefinite" />
+      </rect>
+      <rect x="140" y="370" width="10" height="40" rx="4" fill="#A5B4FC" />
+
+      {/* Ear Right */}
+      <rect x="640" y="360" width="30" height="60" rx="8" fill="#6366F1">
+        <animate attributeName="opacity" values="1;0.7;1" dur="2s" repeatCount="indefinite" />
+      </rect>
+      <rect x="650" y="370" width="10" height="40" rx="4" fill="#A5B4FC" />
+
+      {/* Chest decoration */}
+      <circle cx="400" cy="520" r="30" fill="#4F46E5" opacity="0.6">
+        <animate attributeName="opacity" values="0.6;1;0.6" dur="2s" repeatCount="indefinite" />
+      </circle>
+
+      {/* Side bolts */}
+      <circle cx="170" cy="400" r="15" fill="#818CF8">
+        <animate attributeName="r" values="15;17;15" dur="3s" repeatCount="indefinite" />
+      </circle>
+      <circle cx="630" cy="400" r="15" fill="#818CF8">
+        <animate attributeName="r" values="15;17;15" dur="3s" repeatCount="indefinite" />
+      </circle>
+    </svg>
+  );
+}
+
+export default memo(function ChatMessage({ message, isStreaming, onConfirmAction, onRejectAction, onUndoAction, onRetryAction, onAction, onDelete, onRetryFromMessage, onEditMessage, onContinue }: ChatMessageProps) {
   if (message.role === 'user') {
     return (
       <div className="group flex justify-end mb-4 items-start gap-1">
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 pt-1">
+          {onEditMessage && (
+            <button onClick={() => onEditMessage(message.id)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="编辑">
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span>
+            </button>
+          )}
           {onRetryFromMessage && (
             <button onClick={() => onRetryFromMessage(message.id)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="重试">
-              <span className="material-symbols-outlined text-sm">refresh</span>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>refresh</span>
             </button>
           )}
           {onDelete && (
             <button onClick={() => onDelete(message.id)} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive" title="删除">
-              <span className="material-symbols-outlined text-sm">delete</span>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
             </button>
           )}
         </div>
-        <div className="max-w-[80%] rounded-2xl rounded-br-sm px-4 py-2.5 bg-primary text-primary-foreground text-sm whitespace-pre-wrap">
-          {message.content}
+        <div className="max-w-[80%] rounded-2xl rounded-br-sm px-4 py-2.5 bg-primary text-primary-foreground text-sm">
+          <div className="[&_a]:text-white [&_a]:underline [&_a:hover]:text-blue-200">
+            <Markdown>{message.content}</Markdown>
+          </div>
         </div>
       </div>
     );
@@ -121,7 +227,7 @@ export default memo(function ChatMessage({ message, isStreaming, onConfirmAction
         {message.content && (
           <div className="rounded-2xl rounded-bl-sm px-4 py-2.5 bg-muted text-sm prose-sm prose-neutral dark:prose-invert max-w-none [&_pre]:bg-background [&_pre]:border [&_pre]:rounded [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:bg-background/50 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5">
             <Markdown>{message.content}</Markdown>
-            {isStreaming && <span className="inline-block w-0.5 h-4 bg-foreground/60 animate-pulse ml-0.5 align-text-bottom" />}
+            {isStreaming && <ThinkingBot />}
           </div>
         )}
         {message.actions?.map(action => (

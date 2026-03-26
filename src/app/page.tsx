@@ -8,8 +8,9 @@ import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
 import { ModelSelect } from '@/components/ModelSelect';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import ChatSidebar from '@/components/chat/ChatSidebar';
-import ChatMessage from '@/components/chat/ChatMessage';
+import ChatMessage, { RobotLogo } from '@/components/chat/ChatMessage';
 import QuickActions, { QuickActionsBar } from '@/components/chat/QuickActions';
 import AuthGuard from '@/components/AuthGuard';
 
@@ -53,8 +54,12 @@ function ChatPageContent() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [editorLoaded, setEditorLoaded] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editContent, setEditContent] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<RichTextEditorHandle | null>(null);
+  const editEditorRef = useRef<RichTextEditorHandle | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
@@ -104,20 +109,34 @@ function ChatPageContent() {
   }, [activeSession?.id]);
 
   const handleSend = useCallback(async () => {
-    const text = editorRef.current?.getText().trim() || input.trim();
+    const text = editorRef.current?.getMarkdown().trim() || input.trim();
     if (!text || loading) return;
+
+    // If editing, delete the original message first
+    if (editingMessageId) {
+      deleteMessage(editingMessageId);
+      setEditingMessageId(null);
+    }
+
     setInput('');
     editorRef.current?.clear();
     await sendMessage(text);
     editorRef.current?.focus();
-  }, [input, loading, sendMessage]);
+  }, [input, loading, sendMessage, editingMessageId, deleteMessage]);
 
   const handleEditorEnter = useCallback(async (text: string) => {
     if (!text || loading) return;
+
+    // If editing, delete the original message first
+    if (editingMessageId) {
+      deleteMessage(editingMessageId);
+      setEditingMessageId(null);
+    }
+
     setInput('');
     editorRef.current?.clear();
     await sendMessage(text);
-  }, [loading, sendMessage]);
+  }, [loading, sendMessage, editingMessageId, deleteMessage]);
 
   const handleQuickAction = useCallback((prompt: string) => {
     if (prompt && !prompt.includes('\n')) {
@@ -131,6 +150,46 @@ function ChatPageContent() {
   }, [sendMessage]);
 
   const messages = activeSession?.messages || [];
+
+  const handleEditMessage = useCallback((messageId: string) => {
+    const msg = messages.find(m => m.id === messageId);
+    if (!msg) return;
+    setEditingMessageId(messageId);
+    setEditDialogOpen(true);
+    // Set content after dialog opens
+    setTimeout(() => {
+      editEditorRef.current?.setContent(msg.content);
+    }, 0);
+  }, [messages]);
+
+  const handleConfirmEdit = useCallback(async () => {
+    const text = editEditorRef.current?.getMarkdown().trim() || editContent.trim();
+    if (!editingMessageId || !text) return;
+
+    // Delete the original message and any subsequent messages
+    const msgIndex = messages.findIndex(m => m.id === editingMessageId);
+    if (msgIndex !== -1) {
+      const messagesToDelete = messages.slice(msgIndex);
+      for (const msg of messagesToDelete) {
+        if (msg.id) {
+          deleteMessage(msg.id);
+        }
+      }
+    }
+
+    setEditDialogOpen(false);
+    setEditingMessageId(null);
+    setEditContent('');
+    editEditorRef.current?.clear();
+    await sendMessage(text);
+  }, [editingMessageId, editContent, messages, deleteMessage, sendMessage]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditDialogOpen(false);
+    setEditingMessageId(null);
+    setEditContent('');
+    editEditorRef.current?.clear();
+  }, []);
 
   // Memoize message callbacks to prevent unnecessary re-renders
   const messageCallbacks = useMemo(() => {
@@ -163,9 +222,10 @@ function ChatPageContent() {
       onAction={handleQuickAction}
       onDelete={deleteMessage}
       onRetryFromMessage={msg.role === 'user' ? retryFromMessage : undefined}
+      onEditMessage={msg.role === 'user' ? handleEditMessage : undefined}
       onContinue={msg.role === 'error' ? continueFromMessage : undefined}
     />
-  )), [messages, streamingMessageId, messageCallbacks, handleQuickAction, deleteMessage, retryFromMessage, continueFromMessage]);
+  )), [messages, streamingMessageId, messageCallbacks, handleQuickAction, deleteMessage, retryFromMessage, handleEditMessage, continueFromMessage]);
 
   return (
     <div ref={containerRef} className="h-screen flex overflow-hidden bg-background">
@@ -202,26 +262,27 @@ function ChatPageContent() {
         <div className="flex items-center justify-between px-4 py-2 border-b bg-background/80 backdrop-blur shrink-0">
           <div className="flex items-center gap-2">
             <Button size="icon" variant="ghost" onClick={() => setSidebarOpen(p => !p)} title="切换侧边栏">
-              <span className="material-symbols-outlined text-lg">menu</span>
+              <span className="material-symbols-outlined" style={{ fontSize: '24px' }}>menu</span>
             </Button>
-            <div className="flex items-center gap-1.5">
-              <div className="w-6 h-6 bg-gradient-to-br from-primary to-blue-600 rounded-md flex items-center justify-center">
-                <span className="material-symbols-outlined text-sm text-white">bolt</span>
-              </div>
-              <span className="font-bold text-sm bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">AceFlow</span>
-            </div>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-48 hidden sm:block">
               <ModelSelect value={model} onChange={setModel} className="h-8 text-xs" />
             </div>
             <Button size="sm" variant="ghost" onClick={() => createSession()} title="新建会话">
-              <span className="material-symbols-outlined text-sm">add</span>
+              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>add</span>
             </Button>
             <ThemeToggle />
             <Button size="sm" variant="outline" onClick={() => router.push('/dashboard')} title="切换到控制台">
-              <span className="material-symbols-outlined text-sm sm:mr-1">dashboard</span>
+              <span className="material-symbols-outlined" style={{ fontSize: '20px', marginRight: '4px' }}>dashboard</span>
               <span className="hidden sm:inline">控制台</span>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => {
+              localStorage.removeItem('auth-token');
+              localStorage.removeItem('auth-user');
+              router.push('/login');
+            }} title="退出登录">
+              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>lock_open</span>
             </Button>
           </div>
         </div>
@@ -234,9 +295,9 @@ function ChatPageContent() {
                 <motion.div
                   animate={{ rotate: 360 }}
                   transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-                  className="inline-flex p-3 bg-gradient-to-br from-primary to-blue-600 rounded-2xl mb-4"
+                  className="inline-flex p-3 mb-4"
                 >
-                  <span className="material-symbols-outlined text-3xl text-white">bolt</span>
+                  <RobotLogo size={56} className="animate-robotPulse" />
                 </motion.div>
                 <motion.h2
                   initial={{ opacity: 0, y: 10 }}
@@ -274,22 +335,46 @@ function ChatPageContent() {
                 onChange={(html, text) => setInput(text)}
                 placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
                 minHeight={42}
-                maxHeight={200}
                 disabled={loading}
                 autoFocus={false}
+                showFullscreenToggle={true}
               />
             </div>
             {loading ? (
               <Button className="rounded-xl h-[42px] px-4" variant="destructive" onClick={stopStreaming} title="停止生成">
-                <span className="material-symbols-outlined text-lg">stop</span>
+                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>stop</span>
               </Button>
             ) : (
               <Button className="rounded-xl h-[42px] px-4" onClick={handleSend} disabled={!input.trim() && !editorRef.current?.getText()?.trim()}>
-                <span className="material-symbols-outlined text-lg">send</span>
+                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>send</span>
               </Button>
             )}
           </div>
         </div>
+
+        {/* Edit Dialog */}
+        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>编辑消息</DialogTitle>
+            </DialogHeader>
+            <div className="min-h-[200px]">
+              <RichTextEditor
+                ref={editEditorRef}
+                onChange={(html, text) => setEditContent(text)}
+                placeholder="输入消息内容..."
+                minHeight={200}
+                maxHeight={400}
+                autoFocus
+                showFullscreenToggle={true}
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={handleCancelEdit}>取消</Button>
+              <Button onClick={handleConfirmEdit}>发送</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
