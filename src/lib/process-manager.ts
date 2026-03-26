@@ -405,11 +405,18 @@ class ProcessManager extends EventEmitter {
 
     // On Windows, Claude Code requires git-bash and must be launched via PowerShell.
     // Set code page to UTF-8 before invoking claude to avoid encoding issues.
+    // Note: Using -File instead of -Command to avoid PowerShell parsing @path as here-string.
     const spawnCmd = isWindows ? 'powershell' : 'claude';
     let spawnArgs: string[];
     if (isWindows) {
-      const fullCmd = cliArgs.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
-      spawnArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `chcp 65001 >$null 2>&1; claude ${fullCmd}`];
+      // Build a PowerShell script that sets UTF-8 code page then runs claude with all arguments
+      const psArgs = cliArgs.map(a => a.replace(/'/g, "''")).join(' ');
+      const script = `chcp 65001 >$null 2>&1; claude ${psArgs}`;
+      const scriptFile = resolve(tmpdir(), `claude-run-${randomBytes(8).toString('hex')}.ps1`);
+      await writeFile(scriptFile, script, 'utf-8');
+      tempFiles.push(scriptFile);
+      spawnArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile];
+      proc.logLines.push(`[${ts()}] Windows PowerShell script: ${scriptFile}`);
     } else {
       spawnArgs = cliArgs;
     }

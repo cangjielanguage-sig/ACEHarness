@@ -1,5 +1,6 @@
 skills:
   aceflow-chat-card: true
+  aceflow-workflow-creator: true
   algorithmic-art: false
   brand-guidelines: false
   build-cangjie: false
@@ -18,7 +19,7 @@ skills:
   skill-creator: false
   slack-gif-creator: false
   theme-factory: false
-  use-knowledge-base: true
+  use-knowledge-base: false
   web-artifacts-builder: false
   webapp-testing: false
   xlsx: false
