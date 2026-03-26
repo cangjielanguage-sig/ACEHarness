@@ -317,8 +317,11 @@ class ProcessManager extends EventEmitter {
     const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
     proc.logLines.push(`[${ts()}] 超时阈值: ${fmtMs(timeoutMs)}`);
 
-    // Use temp files for long prompts to avoid E2BIG error
-    const ARG_SIZE_LIMIT = 50000; // Conservative limit (system ARG_MAX is typically 128KB-2MB)
+    // Use temp files for prompts on Windows to avoid command-line encoding issues.
+    // On non-Windows, only use files for very long prompts to avoid E2BIG.
+    const isWindows = process.platform === 'win32';
+    const ARG_SIZE_LIMIT = 50000; // Conservative limit for non-Windows E2BIG threshold
+    const USE_FILE_THRESHOLD = isWindows ? 0 : ARG_SIZE_LIMIT;
     let promptFile: string | null = null;
     let systemPromptFile: string | null = null;
     const tempFiles: string[] = [];
@@ -330,20 +333,20 @@ class ProcessManager extends EventEmitter {
       '--include-partial-messages',
     ];
 
-    // Handle prompt - use file if too large
-    if (prompt.length > ARG_SIZE_LIMIT) {
+    // Handle prompt - use file if too large (or always on Windows)
+    if (prompt.length > USE_FILE_THRESHOLD) {
       promptFile = resolve(tmpdir(), `claude-prompt-${randomBytes(8).toString('hex')}.txt`);
       await writeFile(promptFile, prompt, 'utf-8');
       tempFiles.push(promptFile);
       cliArgs.push('-p', `@${promptFile}`);
-      proc.logLines.push(`[${ts()}] Prompt 过长 (${prompt.length} chars)，使用临时文件: ${promptFile}`);
+      proc.logLines.push(`[${ts()}] Prompt 使用临时文件 (${prompt.length} chars): ${promptFile}`);
     } else {
       cliArgs.push('-p', prompt);
     }
 
-    // Handle system prompt - use file if too large
+    // Handle system prompt - use file if too large (or always on Windows)
     if (systemPrompt) {
-      if (systemPrompt.length > ARG_SIZE_LIMIT) {
+      if (systemPrompt.length > USE_FILE_THRESHOLD) {
         systemPromptFile = resolve(tmpdir(), `claude-system-${randomBytes(8).toString('hex')}.txt`);
         await writeFile(systemPromptFile, systemPrompt, 'utf-8');
         tempFiles.push(systemPromptFile);
@@ -352,7 +355,7 @@ class ProcessManager extends EventEmitter {
         } else {
           cliArgs.push('--system-prompt', `@${systemPromptFile}`);
         }
-        proc.logLines.push(`[${ts()}] System prompt 过长 (${systemPrompt.length} chars)，使用临时文件: ${systemPromptFile}`);
+        proc.logLines.push(`[${ts()}] System prompt 使用临时文件 (${systemPrompt.length} chars): ${systemPromptFile}`);
       } else {
         if (options.appendSystemPrompt) {
           cliArgs.push('--append-system-prompt', systemPrompt);
@@ -389,12 +392,34 @@ class ProcessManager extends EventEmitter {
     delete spawnEnv.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC;
     // Allow --dangerously-skip-permissions under root
     spawnEnv.IS_SANDBOX = '1';
+    // On Windows, require CLAUDE_CODE_GIT_BASH_PATH env var to be set
+    if (isWindows) {
+      const envPath = process.env.CLAUDE_CODE_GIT_BASH_PATH;
+      if (!envPath || !existsSync(envPath)) {
+        throw new Error(
+          `Claude Code on Windows requires git-bash (set CLAUDE_CODE_GIT_BASH_PATH, got "${envPath}" which does not exist).`
+        );
+      }
+      spawnEnv.CLAUDE_CODE_GIT_BASH_PATH = envPath;
+    }
+
+    // On Windows, Claude Code requires git-bash and must be launched via PowerShell.
+    // Set code page to UTF-8 before invoking claude to avoid encoding issues.
+    const spawnCmd = isWindows ? 'powershell' : 'claude';
+    let spawnArgs: string[];
+    if (isWindows) {
+      const fullCmd = cliArgs.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
+      spawnArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `chcp 65001 >$null 2>&1; claude ${fullCmd}`];
+    } else {
+      spawnArgs = cliArgs;
+    }
 
     return new Promise<ClaudeJsonResult>((resolvePromise, rejectPromise) => {
-      const child = spawn('claude', cliArgs, {
+      const child = spawn(spawnCmd, spawnArgs, {
         cwd: options.workingDirectory || process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],
         env: spawnEnv,
+        shell: false,
       });
 
       proc.childProcess = child;
