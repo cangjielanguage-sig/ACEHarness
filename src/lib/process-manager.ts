@@ -935,6 +935,7 @@ class ProcessManager extends EventEmitter {
     return Array.from(this.processes.values()).map(p => ({
       ...p,
       childProcess: undefined, // Don't serialize
+      timeoutTimer: undefined,  // Node.js Timeout has circular refs — exclude
     }));
   }
 
