@@ -34,6 +34,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { useToast } from '@/components/ui/toast';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import { RobotLogo } from '@/components/chat/ChatMessage';
 import styles from './page.module.css';
 
 export default function WorkbenchPage() {
@@ -1662,7 +1663,7 @@ export default function WorkbenchPage() {
             <span className="material-symbols-outlined text-sm">arrow_back</span><span className="hidden sm:inline"> 返回</span>
           </Button>
           <h1 className="text-sm sm:text-base font-semibold m-0 flex items-center gap-1.5 truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
-            <span className="material-symbols-outlined text-lg sm:text-xl shrink-0">bolt</span>
+            <RobotLogo size={20} />
             {isDesignMode ? (
               editingName ? (
                 <Input

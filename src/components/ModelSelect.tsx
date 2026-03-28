@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { ModelOption } from '@/lib/models';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/components/ui/toast';
 
 interface ModelSelectProps {
   value: string;
@@ -10,8 +12,9 @@ interface ModelSelectProps {
 }
 
 export function ModelSelect({ value, onChange, className = '' }: ModelSelectProps) {
-  const [models, setModels] = useState<ModelOption[]>([]);
+  const [models, setModels] = useState< ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
 
   useEffect(() => {
     fetch('/api/models')
@@ -23,18 +26,26 @@ export function ModelSelect({ value, onChange, className = '' }: ModelSelectProp
       .catch(() => setLoading(false));
   }, []);
 
+  const handleChange = (newValue: string) => {
+    const selectedModel = models.find(m => m.value === newValue);
+    onChange(newValue);
+    if (selectedModel) {
+      toast('info', `模型已切换: ${selectedModel.label} (${selectedModel.costMultiplier}x)`);
+    }
+  };
+
   return (
-    <select
-      className={`w-full h-10 px-3 rounded-md border bg-background ${className}`}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={loading}
-    >
-      {models.map(opt => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label} ({opt.costMultiplier}x)
-        </option>
-      ))}
-    </select>
+    <Select value={value} onValueChange={handleChange} disabled={loading}>
+      <SelectTrigger className={className}>
+        <SelectValue placeholder="选择模型" />
+      </SelectTrigger>
+      <SelectContent>
+        {models.map(opt => (
+          <SelectItem key={opt.value} value={opt.value}>
+            {opt.label} ({opt.costMultiplier}x)
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

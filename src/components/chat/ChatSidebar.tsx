@@ -5,6 +5,7 @@ import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
+import { RobotLogo } from './ChatMessage';
 
 interface SessionSummaryItem {
   id: string;
@@ -33,18 +34,18 @@ export default function ChatSidebar() {
     <div className="w-full bg-muted/30 flex flex-col h-full">
       {/* AceFlow Header */}
       <div className="p-3 border-b bg-gradient-to-r from-primary/10 to-blue-500/10">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-7 h-7 bg-gradient-to-br from-primary to-blue-600 rounded-lg flex items-center justify-center">
-            <span className="material-symbols-outlined text-sm text-white">bolt</span>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <RobotLogo size={28} />
+            <span className="font-bold text-sm bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">AceFlow</span>
           </div>
-          <span className="font-bold text-sm bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">AceFlow</span>
+          <Button size="sm" variant="ghost" onClick={() => createSession()} title="新建会话" className="h-6 px-2">
+            <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>add</span>
+            <span className="ml-1 text-xs">新建</span>
+          </Button>
         </div>
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">对话管理</span>
-          <Button size="sm" variant="ghost" onClick={() => createSession()} title="新建会话" className="h-6 px-2">
-            <span className="material-symbols-outlined text-xs">add</span>
-            <span className="ml-1 text-xs">新建</span>
-          </Button>
         </div>
       </div>
 
@@ -88,7 +89,7 @@ export default function ChatSidebar() {
               className="p-1 hover:bg-muted rounded"
               title="重命名"
             >
-              <span className="material-symbols-outlined text-xs text-muted-foreground">edit</span>
+              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>edit</span>
             </button>
           </div>
         </div>
@@ -323,7 +324,7 @@ function SessionItem({ session, active, onClick, onDelete, onRename }: {
         onClick={(e) => { e.stopPropagation(); onDelete(); }}
         title="删除会话"
       >
-        <span className="material-symbols-outlined text-xs">delete</span>
+        <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>delete</span>
       </Button>
     </div>
   );

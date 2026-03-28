@@ -12,6 +12,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import NewConfigModal from '@/components/NewConfigModal';
+import { RobotLogo } from '@/components/chat/ChatMessage';
 
 interface DashboardStats {
   totalRuns: number;
@@ -233,13 +234,7 @@ export default function DashboardPage() {
           <div className="container mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-                  className="p-2 bg-gradient-to-br from-primary to-blue-600 rounded-lg"
-                >
-                  <Zap className="w-6 h-6 text-white" />
-                </motion.div>
+                <RobotLogo size={48} />
                 <div>
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-blue-600 bg-clip-text text-transparent">
                     {t('dashboard.title')}
@@ -257,6 +252,13 @@ export default function DashboardPage() {
                 <Button size="sm" onClick={() => setShowNewModal(true)}>
                   <Play className="w-4 h-4 mr-2" />
                   {t('dashboard.quickActions.newWorkflow')}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => {
+                  localStorage.removeItem('auth-token');
+                  localStorage.removeItem('auth-user');
+                  router.push('/login');
+                }} title="退出登录">
+                  <span className="material-symbols-outlined text-sm">lock_open</span>
                 </Button>
               </div>
             </div>

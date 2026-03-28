@@ -5,6 +5,11 @@ import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
 import Markdown from '@/components/Markdown';
 import { ModelSelect } from '@/components/ModelSelect';
+import { RobotLogo } from '@/components/chat/ChatMessage';
+import dynamic from 'next/dynamic';
+import type { RichTextEditorHandle } from '@/components/ui/RichTextEditor';
+
+const RichTextEditor = dynamic(() => import('@/components/ui/RichTextEditor'), { ssr: false });
 
 interface Message {
   role: 'user' | 'assistant' | 'error';
@@ -22,20 +27,21 @@ export default function ChatModal() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [model, setModel] = useState('claude-sonnet-4-6');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<RichTextEditorHandle>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
   useEffect(() => {
-    if (isOpen) setTimeout(() => inputRef.current?.focus(), 100);
+    if (isOpen) setTimeout(() => editorRef.current?.focus(), 100);
   }, [isOpen]);
 
-  const send = async () => {
-    const text = input.trim();
+  const send = async (textToSend?: string) => {
+    const text = textToSend || editorRef.current?.getMarkdown().trim() || input.trim();
     if (!text || loading) return;
     setInput('');
+    editorRef.current?.clear();
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setLoading(true);
     try {
@@ -58,11 +64,11 @@ export default function ChatModal() {
       setMessages(prev => [...prev, { role: 'error', content: err.message || '请求失败' }]);
     }
     setLoading(false);
-    inputRef.current?.focus();
+    editorRef.current?.focus();
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  const handleEditorEnter = (text: string) => {
+    send(text);
   };
 
   const clearChat = () => { setMessages([]); setSessionId(null); };
@@ -75,7 +81,7 @@ export default function ChatModal() {
           onClick={toggleChat}
           title="Claude 在线聊天"
         >
-          <span className="material-symbols-outlined text-2xl">chat</span>
+          <RobotLogo size={28} />
         </Button>
       )}
 
@@ -92,10 +98,10 @@ export default function ChatModal() {
                 />
               </div>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={clearChat} title="清空对话">
-                <span className="material-symbols-outlined text-sm">delete_sweep</span>
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete_sweep</span>
               </Button>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={closeChat} title="关闭">
-                <span className="material-symbols-outlined text-sm">close</span>
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>close</span>
               </Button>
             </div>
           </div>
@@ -103,7 +109,7 @@ export default function ChatModal() {
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {messages.length === 0 && !loading && (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                <span className="material-symbols-outlined text-4xl mb-2">chat</span>
+                <RobotLogo size={48} className="mb-2 opacity-50" />
                 <span className="text-sm">输入消息开始对话</span>
               </div>
             )}
@@ -128,28 +134,28 @@ export default function ChatModal() {
               </div>
             ))}
             {loading && (
-              <div className="flex gap-1 text-muted-foreground">
-                <span className="animate-bounce">●</span>
-                <span className="animate-bounce" style={{ animationDelay: '0.1s' }}>●</span>
-                <span className="animate-bounce" style={{ animationDelay: '0.2s' }}>●</span>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <RobotLogo size={24} className="animate-robotPulse" />
+                <span className="text-sm">思考中</span>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
           <div className="flex items-end gap-2 p-3 border-t flex-shrink-0">
-            <textarea
-              ref={inputRef}
-              className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="输入消息... (Enter 发送)"
-              rows={1}
-              disabled={loading}
-            />
-            <Button size="sm" onClick={send} disabled={loading || !input.trim()}>
-              <span className="material-symbols-outlined text-sm">send</span>
+            <div className="flex-1">
+              <RichTextEditor
+                ref={editorRef}
+                onEnter={handleEditorEnter}
+                onChange={(html, text) => setInput(text)}
+                placeholder="输入消息... (Enter 发送)"
+                minHeight={36}
+                maxHeight={120}
+                disabled={loading}
+              />
+            </div>
+            <Button size="sm" onClick={() => send()} disabled={loading || (!input.trim() && !editorRef.current?.getText()?.trim())}>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>send</span>
             </Button>
           </div>
         </div>

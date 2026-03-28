@@ -1,0 +1,10 @@
+{
+  "id": "user-1774450925857-c6ecbb06",
+  "username": "sundaiyue",
+  "email": "sundaiyue@foxmail.com",
+  "passwordHash": "b07585b65df37beaa7a8e3cc5400cd49c7e3ccdbd798389e84b046915511ad2c",
+  "salt": "a9ec94e02a6e25fc36181b0458e4db65",
+  "createdAt": 1774450925859,
+  "isAdmin": true,
+  "lastLoginAt": 1774451024751
+}

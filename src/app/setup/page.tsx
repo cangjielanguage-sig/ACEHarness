@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { RobotLogo } from '@/components/chat/ChatMessage';
 
 interface DiscoveredSkill {
   name: string;
@@ -163,9 +164,7 @@ export default function SetupPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-primary to-blue-600 rounded-xl flex items-center justify-center">
-            <span className="material-symbols-outlined text-2xl text-white animate-spin">progress_activity</span>
-          </div>
+          <RobotLogo size={48} className="animate-robotPulse" />
           <p className="text-sm text-muted-foreground">
             {cloning ? '正在拉取 Skills 仓库...' : '检查系统状态...'}
           </p>
@@ -184,9 +183,7 @@ export default function SetupPage() {
         >
           {/* Logo */}
           <div className="flex items-center justify-center gap-3 mb-8">
-            <div className="w-14 h-14 bg-gradient-to-br from-primary to-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-primary/25">
-              <span className="material-symbols-outlined text-3xl text-white">bolt</span>
-            </div>
+            <RobotLogo size={56} className="animate-robotPulse" />
             <div>
               <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
                 AceFlow
@@ -315,9 +312,7 @@ export default function SetupPage() {
         >
           {/* Logo */}
           <div className="flex items-center justify-center gap-3 mb-8">
-            <div className="w-14 h-14 bg-gradient-to-br from-primary to-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-primary/25">
-              <span className="material-symbols-outlined text-3xl text-white">bolt</span>
-            </div>
+            <RobotLogo size={56} className="animate-robotPulse" />
             <div>
               <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
                 AceFlow
@@ -423,7 +418,7 @@ export default function SetupPage() {
               >
                 {submitting ? (
                   <span className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-sm animate-spin">progress_activity</span>
+                    <RobotLogo size={18} className="animate-robotPulse" />
                     设置中...
                   </span>
                 ) : (

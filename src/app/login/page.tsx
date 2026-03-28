@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { RobotLogo } from '@/components/chat/ChatMessage';
 
 const CAROUSEL_ITEMS = [
   {
@@ -146,20 +147,49 @@ export default function LoginPage() {
       </div>
 
       {/* Right side - Login form */}
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-md">
-          {/* Logo */}
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 bg-gradient-to-br from-primary to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-primary/25">
-              <span className="material-symbols-outlined text-2xl text-white">bolt</span>
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
-                AceFlow
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="w-full max-w-md">
+            {/* Hero Title */}
+            <div className="mb-10 text-center">
+              <h1 className="text-4xl md:text-5xl font-bold mb-4">
+                <span className="relative inline-block">
+                  <span className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent animate-gradientShift bg-[length:200%_100%]">
+                    AceFlow
+                  </span>
+                  <span className="absolute inset-0 blur-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent opacity-30 animate-pulse" aria-hidden="true">
+                    AceFlow
+                  </span>
+                </span>
               </h1>
-              <p className="text-xs text-muted-foreground">全流程 Multi-Agent 智能编排系统</p>
+              <p className="text-lg md:text-xl text-muted-foreground animate-fadeInUp">
+                Your team of AIs, collaborating to get work done.
+              </p>
+              <div className="mt-6 flex justify-center gap-2">
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm">
+                  <span className="material-symbols-outlined text-sm">auto_awesome</span>
+                  Multi-Agent
+                </span>
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-purple-500/10 text-purple-500 text-sm">
+                  <span className="material-symbols-outlined text-sm">psychology</span>
+                  Intelligent
+                </span>
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-pink-500/10 text-pink-500 text-sm">
+                  <span className="material-symbols-outlined text-sm">speed</span>
+                  Efficient
+                </span>
+              </div>
             </div>
-          </div>
+
+            {/* Logo */}
+            <div className="flex items-center gap-3 mb-8">
+              <RobotLogo size={48} className="animate-robotPulse" />
+              <div>
+                <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
+                  AceFlow
+                </h1>
+                <p className="text-xs text-muted-foreground">全流程 Multi-Agent 智能编排系统</p>
+              </div>
+            </div>
 
           {/* Form */}
           <div className="bg-card rounded-2xl border p-8 shadow-xl">
@@ -210,7 +240,7 @@ export default function LoginPage() {
               >
                 {loading ? (
                   <span className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-sm animate-spin">progress_activity</span>
+                    <RobotLogo size={18} className="animate-robotPulse" />
                     登录中...
                   </span>
                 ) : (
