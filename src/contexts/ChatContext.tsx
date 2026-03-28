@@ -251,9 +251,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const checkRes = await fetch(`/api/chat/stream?checkActive=${encodeURIComponent(activeSessionId)}`);
         const checkData = await checkRes.json();
         if (checkData.active && checkData.chatId) {
-          // Find the last assistant message to resume streaming into
-          const lastAssistant = cleaned.messages.filter(m => m.role === 'assistant').pop();
-          if (lastAssistant) {
+          // Find or create the last assistant message to resume streaming into
+          let lastAssistant = cleaned.messages.filter(m => m.role === 'assistant').pop();
+          if (!lastAssistant) {
+            // Empty assistant message was filtered out — re-add it for recovery
+            lastAssistant = { id: genId(), role: 'assistant' as const, content: '', timestamp: Date.now() };
+            cleaned.messages.push(lastAssistant);
+            setActiveSession(reparseSession(cleaned));
+          }
             setLoading(true);
             setStreamingMessageId(lastAssistant.id);
             activeChatIdRef.current = checkData.chatId;
@@ -333,18 +338,40 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               setLoading(false);
               setStreamingMessageId(null);
             });
-          }
         }
       } catch { /* recovery is best-effort */ }
     });
   }, [activeSessionId]);
 
   // Debounced persist to server
+  const pendingSessionRef = useRef<ChatSession | null>(null);
   const scheduleSave = useCallback((session: ChatSession) => {
+    pendingSessionRef.current = session;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
+      pendingSessionRef.current = null;
       apiSaveSession(session).catch(console.error);
     }, 300);
+  }, []);
+
+  // Flush pending save on page unload to prevent data loss
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const pending = pendingSessionRef.current;
+      if (pending) {
+        pendingSessionRef.current = null;
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        // Use synchronous XHR for reliable save during unload
+        try {
+          const xhr = new XMLHttpRequest();
+          xhr.open('PUT', `/api/chat/sessions/${encodeURIComponent(pending.id)}`, false);
+          xhr.setRequestHeader('Content-Type', 'application/json');
+          xhr.send(JSON.stringify(pending));
+        } catch { /* best effort */ }
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
   // Helper: update active session in state + schedule save

@@ -1,7 +1,7 @@
 {
   "dashboard": {
     "title": "AceFlow 控制中心",
-    "subtitle": "AI 协同编排平台",
+    "subtitle": "全流程 Multi-Agent 智能编排系统",
     "stats": {
       "totalRuns": "总运行次数",
       "successRate": "成功率",
@@ -20,7 +20,8 @@
       "engines": "引擎管理",
       "schedules": "定时任务",
       "apiDocs": "API 文档",
-      "chatMode": "对话模式"
+      "chatMode": "对话模式",
+      "envVars": "环境变量"
     },
     "charts": {
       "performanceTrends": "性能趋势",

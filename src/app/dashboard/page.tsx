@@ -316,7 +316,7 @@ export default function DashboardPage() {
               {t('dashboard.quickActions.title')}
             </h2>
             <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <QuickAction
                   icon={Play}
                   label={t('dashboard.quickActions.newWorkflow')}
@@ -335,14 +335,8 @@ export default function DashboardPage() {
                   onClick={() => router.push('/agents')}
                   color="from-purple-600 to-purple-700"
                 />
-                <QuickAction
-                  icon={FileText}
-                  label={t('dashboard.quickActions.apiDocs')}
-                  onClick={() => router.push('/api-docs')}
-                  color="from-green-600 to-green-700"
-                />
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <QuickAction
                   icon={Settings}
                   label={t('dashboard.quickActions.models')}
@@ -361,6 +355,8 @@ export default function DashboardPage() {
                   onClick={() => router.push('/engines')}
                   color="from-indigo-600 to-indigo-700"
                 />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <QuickAction
                   icon={Clock}
                   label={t('dashboard.quickActions.schedules')}
@@ -369,9 +365,15 @@ export default function DashboardPage() {
                 />
                 <QuickAction
                   icon={Key}
-                  label={t('dashboard.quickActions.envVars') || '环境变量'}
+                  label={t('dashboard.quickActions.envVars')}
                   onClick={() => setShowEnvVars(true)}
                   color="from-amber-600 to-amber-700"
+                />
+                <QuickAction
+                  icon={FileText}
+                  label={t('dashboard.quickActions.apiDocs')}
+                  onClick={() => router.push('/api-docs')}
+                  color="from-green-600 to-green-700"
                 />
               </div>
             </div>

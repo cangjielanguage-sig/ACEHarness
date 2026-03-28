@@ -1,7 +1,7 @@
 {
   "dashboard": {
     "title": "AceFlow Control Center",
-    "subtitle": "AI Orchestration Platform",
+    "subtitle": "Full-Lifecycle Multi-Agent Orchestration System",
     "stats": {
       "totalRuns": "Total Runs",
       "successRate": "Success Rate",
@@ -20,7 +20,8 @@
       "engines": "Engines",
       "schedules": "Schedules",
       "apiDocs": "API Docs",
-      "chatMode": "Chat Mode"
+      "chatMode": "Chat Mode",
+      "envVars": "Env Vars"
     },
     "charts": {
       "performanceTrends": "Performance Trends",

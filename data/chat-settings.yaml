@@ -2,8 +2,12 @@ skills:
   aceflow-chat-card: true
   aceflow-workflow-creator: true
   algorithmic-art: false
+  base-skill: false
   brand-guidelines: false
   build-cangjie: false
+  cangjie-doc-search-guide: false
+  cangjie-evolution: false
+  cangjie-vec-retriever-guide: false
   cangjie_basic_concepts: true
   cangjie_basic_data_type: true
   cangjie_cffi: true
@@ -38,6 +42,12 @@ skills:
   doc-coauthoring: false
   docx: false
   frontend-design: false
+  harmonyos-build: false
+  harmonyos-doc-search-guide: false
+  harmonyos-evolution: false
+  harmonyos-project-init: false
+  harmonyos-requirement-analysis: false
+  harmonyos-stdx-dependency: false
   internal-comms: false
   mcp-builder: false
   pdf: false
@@ -49,6 +59,7 @@ skills:
   slack-gif-creator: false
   theme-factory: false
   use-knowledge-base: false
+  utils: false
   web-artifacts-builder: false
   webapp-testing: false
   xlsx: false
