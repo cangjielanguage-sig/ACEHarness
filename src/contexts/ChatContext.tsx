@@ -9,7 +9,7 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'error';
   content: string;
-  thinking?: string;
+  rawContent?: string;
   actions?: ActionState[];
   cards?: any[];
   costUsd?: number;
@@ -237,27 +237,33 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     setLoading(false);
     setStreamingMessageId(null);
+    console.log('[ChatRecovery] Loading session:', activeSessionId);
     apiLoadSession(activeSessionId).then(async s => {
-      if (!s) { setActiveSession(null); return; }
+      if (!s) { console.log('[ChatRecovery] Session not found on disk'); setActiveSession(null); return; }
+      console.log('[ChatRecovery] Loaded session, messages:', s.messages.length, 'backendSessionId:', s.backendSessionId);
       // Clean up empty assistant messages left by interrupted streams
       const cleaned = {
         ...s,
         messages: s.messages.filter(m => !(m.role === 'assistant' && !m.content && !m.actions?.length && !m.cards?.length)),
       };
+      console.log('[ChatRecovery] After cleanup, messages:', cleaned.messages.length);
       setActiveSession(reparseSession(cleaned));
 
       // Check if there's an active stream for this session and reconnect
       try {
         const checkRes = await fetch(`/api/chat/stream?checkActive=${encodeURIComponent(activeSessionId)}`);
         const checkData = await checkRes.json();
+        console.log('[ChatRecovery] checkActive response:', JSON.stringify(checkData));
         if (checkData.active && checkData.chatId) {
           // Find or create the last assistant message to resume streaming into
           let lastAssistant = cleaned.messages.filter(m => m.role === 'assistant').pop();
+          console.log('[ChatRecovery] lastAssistant found:', !!lastAssistant, lastAssistant?.id);
           if (!lastAssistant) {
             // Empty assistant message was filtered out — re-add it for recovery
             lastAssistant = { id: genId(), role: 'assistant' as const, content: '', timestamp: Date.now() };
             cleaned.messages.push(lastAssistant);
             setActiveSession(reparseSession(cleaned));
+            console.log('[ChatRecovery] Created new assistant message for recovery:', lastAssistant.id);
           }
             setLoading(true);
             setStreamingMessageId(lastAssistant.id);
@@ -276,6 +282,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             }
 
             // Connect SSE to continue receiving deltas
+            console.log('[ChatRecovery] Connecting SSE to:', checkData.chatId, 'streamContent length:', (checkData.streamContent || '').length);
             const es = new EventSource(`/api/chat/stream?id=${checkData.chatId}`);
             activeEventSourceRef.current = es;
             let accumulated = checkData.streamContent || '';
@@ -298,10 +305,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               setActiveSession(prev => {
                 if (!prev) return prev;
                 const msg = prev.messages.find(m => m.id === lastAssistant.id);
-                const prevThinking = msg?.thinking || '';
+                const prevRaw = msg?.rawContent || '';
                 return {
                   ...prev,
-                  messages: prev.messages.map(m => m.id === lastAssistant.id ? { ...m, thinking: prevThinking + content } : m),
+                  messages: prev.messages.map(m => m.id === lastAssistant.id ? { ...m, rawContent: prevRaw + content } : m),
                 };
               });
             });
@@ -322,6 +329,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                   ...prev, updatedAt: Date.now(),
                   messages: prev.messages.map(m => m.id === lastAssistant.id ? {
                     ...m, content: cleanText,
+                    rawContent: cards.length > 0 ? fullText : m.rawContent,
                     cards: cards.length > 0 ? cards : m.cards,
                     costUsd: data.costUsd, durationMs: data.durationMs, usage: data.usage,
                   } : m),
@@ -557,6 +565,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 ...s, updatedAt: Date.now(),
                 messages: s.messages.map(m => m.id === followUpMsgId ? {
                   ...m, content: cleanText,
+                  rawContent: (newCards.length > 0 || newActionStates.length > 0) ? fullText : undefined,
                   actions: newActionStates.length > 0 ? newActionStates : undefined,
                   cards: newCards.length > 0 ? newCards : undefined,
                 } : m),
@@ -640,6 +649,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const backendSid = activeSessionRef.current?.backendSessionId;
       const frontendSid = activeSessionRef.current?.id;
+      console.log('[ChatSend] backendSessionId:', backendSid, 'frontendSessionId:', frontendSid, 'model:', model);
       const startRes = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -681,14 +691,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           const es = new EventSource(`/api/chat/stream?id=${chatId}`);
           activeEventSourceRef.current = es;
           resetInactivityTimer();
-          let accumulatedThinking = '';
+          let accumulatedRawContent = '';
 
           es.addEventListener('thinking', (e) => {
             resetInactivityTimer();
             const { content } = JSON.parse(e.data);
-            accumulatedThinking += content;
+            accumulatedRawContent += content;
             updateActiveSession(s => ({
-              ...s, messages: s.messages.map(m => m.id === assistantMsgId ? { ...m, thinking: accumulatedThinking } : m),
+              ...s, messages: s.messages.map(m => m.id === assistantMsgId ? { ...m, rawContent: accumulatedRawContent } : m),
             }));
           });
 
@@ -713,6 +723,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           es.addEventListener('done', (e) => {
             if (inactivityTimer) clearTimeout(inactivityTimer);
             const data = JSON.parse(e.data);
+            console.log('[ChatSend] done event, sessionId:', data.sessionId, 'isError:', data.isError);
             es.close();
             activeEventSourceRef.current = null;
             activeChatIdRef.current = null;
@@ -728,6 +739,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               ...s, updatedAt: Date.now(),
               messages: s.messages.map(m => m.id === assistantMsgId ? {
                 ...m, content: cleanText,
+                rawContent: (cards.length > 0 || actionStates.length > 0) ? fullText : undefined,
                 actions: actionStates.length > 0 ? actionStates : undefined,
                 cards: cards.length > 0 ? cards : undefined,
                 costUsd: data.costUsd, durationMs: data.durationMs, usage: data.usage,

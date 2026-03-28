@@ -216,6 +216,9 @@ const FALLBACK_ICON = 'help';
 function validateIconName(name: string): string {
   if (!name || typeof name !== 'string') return FALLBACK_ICON;
   const clean = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  if (!clean) return FALLBACK_ICON;
+  // On client side, VALID_ICONS is minimal — skip validation and trust the icon name
+  if (typeof window !== 'undefined') return clean;
   return VALID_ICONS.has(clean) ? clean : FALLBACK_ICON;
 }
 

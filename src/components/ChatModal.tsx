@@ -81,7 +81,7 @@ export default function ChatModal() {
           onClick={toggleChat}
           title="Claude 在线聊天"
         >
-          <RobotLogo size={28} />
+          <span className="material-symbols-outlined" style={{ fontSize: '28px' }}>chat</span>
         </Button>
       )}
 

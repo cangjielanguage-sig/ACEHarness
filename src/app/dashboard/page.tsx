@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Zap, Cpu, Database, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, Play, Package, Cog, FileText, History, Key } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Activity, Zap, Cpu, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, Play, Package, Cog, FileText, History, Key } from 'lucide-react';
 import { configApi, runsApi, agentApi } from '@/lib/api';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
@@ -46,7 +46,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
   const [showEnvVars, setShowEnvVars] = useState(false);
-  const [performanceData, setPerformanceData] = useState<any[]>([]);
+  const [agentUsageData, setAgentUsageData] = useState<any[]>([]);
   const [activityData, setActivityData] = useState<any[]>([]);
   const [runningRuns, setRunningRuns] = useState<any[]>([]);
 
@@ -112,32 +112,37 @@ export default function DashboardPage() {
         runningProcesses: allRuns.filter((r: any) => r.status === 'running').length,
       });
 
-      // Generate performance trend data (last 24 hours, grouped by 4-hour intervals)
-      const now = Date.now();
-      const intervals = 6; // 24 hours / 4 hours
-      const perfData = [];
-
-      for (let i = 0; i < intervals; i++) {
-        const startTime = now - (intervals - i) * 4 * 60 * 60 * 1000;
-        const endTime = now - (intervals - i - 1) * 4 * 60 * 60 * 1000;
-        const hour = new Date(startTime).getHours();
-
-        const runsInInterval = allRuns.filter((r: any) => {
-          const runTime = new Date(r.startTime).getTime();
-          return runTime >= startTime && runTime < endTime;
-        });
-
-        const successCount = runsInInterval.filter((r: any) => r.status === 'completed').length;
-        const failCount = runsInInterval.filter((r: any) => r.status === 'failed').length;
-
-        perfData.push({
-          time: `${hour.toString().padStart(2, '0')}:00`,
-          success: successCount,
-          failed: failCount,
-        });
+      // Aggregate agent usage from run details
+      const agentMap: Record<string, { calls: number; cost: number }> = {};
+      for (const run of allRuns) {
+        try {
+          const detail = await runsApi.getRunDetail(run.id);
+          if (detail?.stepLogs) {
+            for (const log of detail.stepLogs) {
+              if (!log.agent) continue;
+              if (!agentMap[log.agent]) agentMap[log.agent] = { calls: 0, cost: 0 };
+              agentMap[log.agent].calls += 1;
+              agentMap[log.agent].cost += log.costUsd || 0;
+            }
+          }
+          if (detail?.agents) {
+            for (const ag of detail.agents) {
+              if (!ag.name) continue;
+              if (!agentMap[ag.name]) agentMap[ag.name] = { calls: 0, cost: 0 };
+              // Only use agents array if stepLogs didn't already cover this agent
+              if (agentMap[ag.name].calls === 0) {
+                agentMap[ag.name].calls = ag.completedTasks || 0;
+                agentMap[ag.name].cost = ag.costUsd || 0;
+              }
+            }
+          }
+        } catch { /* skip */ }
       }
-
-      setPerformanceData(perfData);
+      const agentUsage = Object.entries(agentMap)
+        .map(([name, data]) => ({ name, calls: data.calls, cost: Math.round(data.cost * 10000) / 10000 }))
+        .sort((a, b) => b.calls - a.calls)
+        .slice(0, 10);
+      setAgentUsageData(agentUsage);
 
       // Generate weekly activity data (last 7 days)
       const weekDays = [0,1,2,3,4,5,6].map(i => t(`dashboard.weekdays.${i}`));
@@ -198,19 +203,22 @@ export default function DashboardPage() {
     </motion.div>
   );
 
-  const QuickAction = ({ icon: Icon, label, onClick, color }: any) => (
+  const QuickAction = ({ icon: Icon, label, onClick, color, desc }: any) => (
     <motion.button
-      whileHover={{ scale: 1.05 }}
-      whileTap={{ scale: 0.95 }}
+      whileHover={{ y: -3, boxShadow: '0 12px 30px -8px rgba(0,0,0,0.12)' }}
+      whileTap={{ scale: 0.97 }}
       onClick={onClick}
-      className={`relative bg-gradient-to-br ${color} p-6 rounded-xl border border-white/10 overflow-hidden group`}
+      className="relative bg-card hover:bg-card/80 px-4 py-4 rounded-xl border border-border/60 hover:border-primary/30 overflow-hidden group transition-all text-left"
     >
-      <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-      <div className="relative z-10 flex flex-col items-center gap-3">
-        <Icon className="w-8 h-8 text-white" />
-        <span className="text-sm font-medium text-white">{label}</span>
+      <div className="flex items-center gap-3.5">
+        <div className={`shrink-0 w-11 h-11 rounded-lg bg-gradient-to-br ${color} flex items-center justify-center shadow-sm`}>
+          <Icon className="w-5.5 h-5.5 text-white" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold text-foreground group-hover:text-primary transition-colors truncate">{label}</div>
+          {desc && <div className="text-[11px] text-muted-foreground mt-0.5 truncate">{desc}</div>}
+        </div>
       </div>
-      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
     </motion.button>
   );
 
@@ -315,73 +323,76 @@ export default function DashboardPage() {
               <Zap className="w-5 h-5 text-primary" />
               {t('dashboard.quickActions.title')}
             </h2>
-            <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                 <QuickAction
                   icon={Play}
                   label={t('dashboard.quickActions.newWorkflow')}
+                  desc={t('dashboard.quickActions.newWorkflowDesc')}
                   onClick={() => setShowNewModal(true)}
-                  color="from-blue-600 to-blue-700"
+                  color="from-blue-500 to-blue-600"
                 />
                 <QuickAction
                   icon={Workflow}
                   label={t('dashboard.quickActions.workflows')}
+                  desc={t('dashboard.quickActions.workflowsDesc')}
                   onClick={() => router.push('/workflows')}
-                  color="from-cyan-600 to-cyan-700"
+                  color="from-cyan-500 to-cyan-600"
                 />
                 <QuickAction
                   icon={Bot}
                   label={t('dashboard.quickActions.manageAgents')}
+                  desc={t('dashboard.quickActions.manageAgentsDesc')}
                   onClick={() => router.push('/agents')}
-                  color="from-purple-600 to-purple-700"
+                  color="from-purple-500 to-purple-600"
                 />
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <QuickAction
                   icon={Settings}
                   label={t('dashboard.quickActions.models')}
+                  desc={t('dashboard.quickActions.modelsDesc')}
                   onClick={() => router.push('/models')}
-                  color="from-orange-600 to-orange-700"
+                  color="from-orange-500 to-orange-600"
                 />
                 <QuickAction
                   icon={Package}
                   label={t('dashboard.quickActions.skills')}
+                  desc={t('dashboard.quickActions.skillsDesc')}
                   onClick={() => router.push('/skills')}
-                  color="from-pink-600 to-pink-700"
+                  color="from-pink-500 to-pink-600"
                 />
                 <QuickAction
                   icon={Cog}
                   label={t('dashboard.quickActions.engines')}
+                  desc={t('dashboard.quickActions.enginesDesc')}
                   onClick={() => router.push('/engines')}
-                  color="from-indigo-600 to-indigo-700"
+                  color="from-indigo-500 to-indigo-600"
                 />
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <QuickAction
                   icon={Clock}
                   label={t('dashboard.quickActions.schedules')}
+                  desc={t('dashboard.quickActions.schedulesDesc')}
                   onClick={() => router.push('/schedules')}
-                  color="from-teal-600 to-teal-700"
+                  color="from-teal-500 to-teal-600"
                 />
                 <QuickAction
                   icon={Key}
                   label={t('dashboard.quickActions.envVars')}
+                  desc={t('dashboard.quickActions.envVarsDesc')}
                   onClick={() => setShowEnvVars(true)}
-                  color="from-amber-600 to-amber-700"
+                  color="from-amber-500 to-amber-600"
                 />
                 <QuickAction
                   icon={FileText}
                   label={t('dashboard.quickActions.apiDocs')}
+                  desc={t('dashboard.quickActions.apiDocsDesc')}
                   onClick={() => router.push('/api-docs')}
-                  color="from-green-600 to-green-700"
+                  color="from-green-500 to-green-600"
                 />
-              </div>
             </div>
           </motion.div>
 
           {/* Charts Row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Performance Chart */}
+            {/* Agent Usage Chart */}
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -389,35 +400,31 @@ export default function DashboardPage() {
               className="bg-card/50 backdrop-blur-xl border border-border/50 rounded-xl p-6"
             >
               <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-primary" />
-                {t('dashboard.charts.performanceTrends')}
+                <Bot className="w-5 h-5 text-primary" />
+                {t('dashboard.charts.agentUsage')}
               </h3>
-              <ResponsiveContainer width="100%" height={250}>
-                <AreaChart data={performanceData}>
-                  <defs>
-                    <linearGradient id="colorSuccess" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="colorFailed" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                  <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                  />
-                  <Area type="monotone" dataKey="success" stroke="#10b981" fillOpacity={1} fill="url(#colorSuccess)" />
-                  <Area type="monotone" dataKey="failed" stroke="#ef4444" fillOpacity={1} fill="url(#colorFailed)" />
-                </AreaChart>
-              </ResponsiveContainer>
+              {agentUsageData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={agentUsageData} layout="vertical" margin={{ left: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <YAxis type="category" dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={11} width={100} tick={{ fill: 'hsl(var(--muted-foreground))' }} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                      formatter={(value: any, name: string) => [value, name === 'calls' ? t('dashboard.charts.calls') : t('dashboard.charts.cost')]}
+                    />
+                    <Bar dataKey="calls" fill="hsl(var(--primary))" radius={[0, 8, 8, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
+                  {t('common.noData')}
+                </div>
+              )}
             </motion.div>
 
             {/* Activity Chart */}

@@ -11,21 +11,32 @@
     "quickActions": {
       "title": "Quick Actions",
       "newWorkflow": "New Workflow",
+      "newWorkflowDesc": "Create and launch a new orchestration",
       "manageAgents": "Agent Management",
+      "manageAgentsDesc": "Configure agent roles and capabilities",
       "viewHistory": "View History",
       "settings": "Settings",
       "models": "Model Management",
+      "modelsDesc": "Manage available AI models",
       "workflows": "Workflows",
+      "workflowsDesc": "View and manage all workflows",
       "skills": "Skills",
+      "skillsDesc": "Manage agent skill plugins",
       "engines": "Engines",
+      "enginesDesc": "Configure execution engine settings",
       "schedules": "Schedules",
+      "schedulesDesc": "Set up automated scheduled tasks",
       "apiDocs": "API Docs",
+      "apiDocsDesc": "View REST API documentation",
       "chatMode": "Chat Mode",
-      "envVars": "Env Vars"
+      "envVars": "Env Vars",
+      "envVarsDesc": "Manage process environment variables"
     },
     "charts": {
-      "performanceTrends": "Performance Trends",
-      "weeklyActivity": "Weekly Activity"
+      "agentUsage": "Agent Usage",
+      "weeklyActivity": "Weekly Activity",
+      "calls": "Calls",
+      "cost": "Cost ($)"
     },
     "sections": {
       "activeWorkflows": "Active Workflows",

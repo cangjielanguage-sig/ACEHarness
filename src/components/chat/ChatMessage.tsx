@@ -11,7 +11,7 @@ interface ChatMessageProps {
     id: string;
     role: 'user' | 'assistant' | 'error';
     content: string;
-    thinking?: string;
+    rawContent?: string;
     actions?: ActionState[];
     cards?: any[];
     costUsd?: number;
@@ -231,11 +231,14 @@ export default memo(function ChatMessage({ message, isStreaming, onConfirmAction
             {isStreaming && <ThinkingBot />}
           </div>
         )}
-        {message.thinking && (
+        {message.rawContent && (
           <details className="mt-1 rounded-xl border border-border bg-muted/50 text-xs">
-            <summary className="cursor-pointer px-3 py-1.5 text-muted-foreground select-none">💭 思维过程</summary>
+            <summary className="cursor-pointer px-3 py-1.5 text-muted-foreground select-none flex items-center gap-1">
+              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>unfold_more</span>
+              查看完整内容
+            </summary>
             <div className="px-3 py-2 prose-sm prose-neutral dark:prose-invert max-w-none [&_p]:my-1 [&_pre]:bg-background [&_pre]:border [&_pre]:rounded [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:bg-background/50 [&_code]:text-foreground [&_code]:px-1 [&_code]:rounded [&_code]:text-xs">
-              <Markdown>{message.thinking}</Markdown>
+              <Markdown>{message.rawContent}</Markdown>
             </div>
           </details>
         )}

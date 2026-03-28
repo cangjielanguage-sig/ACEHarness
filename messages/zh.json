@@ -11,21 +11,32 @@
     "quickActions": {
       "title": "快速操作",
       "newWorkflow": "新建工作流",
+      "newWorkflowDesc": "创建并启动新的编排流程",
       "manageAgents": "Agent 管理",
+      "manageAgentsDesc": "配置 Agent 角色与能力",
       "viewHistory": "查看历史",
       "settings": "设置",
       "models": "模型管理",
+      "modelsDesc": "管理可用的 AI 模型",
       "workflows": "工作流管理",
+      "workflowsDesc": "查看和管理所有工作流",
       "skills": "Skills 管理",
+      "skillsDesc": "管理 Agent 技能插件",
       "engines": "引擎管理",
+      "enginesDesc": "配置执行引擎参数",
       "schedules": "定时任务",
+      "schedulesDesc": "设置定时自动执行任务",
       "apiDocs": "API 文档",
+      "apiDocsDesc": "查看 REST API 接口文档",
       "chatMode": "对话模式",
-      "envVars": "环境变量"
+      "envVars": "环境变量",
+      "envVarsDesc": "管理进程环境变量"
     },
     "charts": {
-      "performanceTrends": "性能趋势",
-      "weeklyActivity": "每周活动"
+      "agentUsage": "Agent 使用统计",
+      "weeklyActivity": "每周活动",
+      "calls": "调用次数",
+      "cost": "费用 ($)"
     },
     "sections": {
       "activeWorkflows": "活跃工作流",
