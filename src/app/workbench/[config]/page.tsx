@@ -458,8 +458,8 @@ export default function WorkbenchPage() {
       if (agents.length > 0) {
         dispatch({ type: 'SET_SELECTED_AGENT', payload: agents[0] });
       }
-      // If there's a pending checkpoint, show the checkpoint dialog
-      if (detail.pendingCheckpoint) {
+      // If there's a pending checkpoint, show the checkpoint dialog (阶段模式专属)
+      if (detail.pendingCheckpoint && detail.mode !== 'state-machine') {
         dispatch({ type: 'SET_CHECKPOINT_MESSAGE', payload: detail.pendingCheckpoint.message });
         dispatch({ type: 'SET_CHECKPOINT_IS_ITERATIVE', payload: !!detail.pendingCheckpoint.isIterativePhase });
         dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
@@ -580,10 +580,13 @@ export default function WorkbenchPage() {
         }
         break;
       case 'checkpoint':
-        dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
-        dispatch({ type: 'SET_CHECKPOINT_MESSAGE', payload: event.data.message });
-        dispatch({ type: 'SET_CHECKPOINT_IS_ITERATIVE', payload: !!event.data.isIterativePhase });
-        setPendingCheckpointPhase(event.data.phase || null);
+        // 阶段模式专属，状态机模式下不弹出
+        if (workflowConfig?.workflow?.mode !== 'state-machine') {
+          dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: true });
+          dispatch({ type: 'SET_CHECKPOINT_MESSAGE', payload: event.data.message });
+          dispatch({ type: 'SET_CHECKPOINT_IS_ITERATIVE', payload: !!event.data.isIterativePhase });
+          setPendingCheckpointPhase(event.data.phase || null);
+        }
         addLog('system', 'warning', `✋ 检查点: ${event.data.checkpoint}`);
         break;
       case 'iteration':
@@ -2956,13 +2959,18 @@ export default function WorkbenchPage() {
 
       {/* 人工审查对话框 */}
       {humanApprovalData && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <div className="bg-card rounded-lg w-[700px] max-w-[90%] border shadow-2xl">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setHumanApprovalData(null)}>
+          <div className="bg-card rounded-lg w-[700px] max-w-[90%] border shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-5 border-b bg-orange-50 dark:bg-orange-950">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <span className="material-symbols-outlined text-orange-500">person</span>
-                人工审查 - {humanApprovalData.currentState}
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <span className="material-symbols-outlined text-orange-500">person</span>
+                  人工审查 - {humanApprovalData.currentState}
+                </h3>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setHumanApprovalData(null)}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>close</span>
+                </Button>
+              </div>
               <p className="text-sm text-muted-foreground mt-1">
                 状态已完成，请选择下一步操作
               </p>
