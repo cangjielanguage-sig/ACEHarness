@@ -177,7 +177,7 @@ export default function WorkbenchPage() {
 
   const fetchCurrentStatus = async () => {
     try {
-      const status = await workflowApi.getStatus();
+      const status = await workflowApi.getStatus(configFile);
       // Only apply status if it's for the current config file
       if (status.status && status.status !== 'idle') {
         // Check if the running workflow is for this config file
@@ -471,7 +471,7 @@ export default function WorkbenchPage() {
       // Restore state-machine human approval dialog when viewing a historical run
       if (detail.mode === 'state-machine' && detail.currentState === '__human_approval__') {
         const approvalTransition = (detail.stateHistory || []).findLast?.((item: any) => item.to === '__human_approval__');
-        const currentStateName = detail.currentState || '__human_approval__';
+        const currentStateName = approvalTransition?.from || '未知状态';
         const workflowStates = (workflowConfig as any)?.workflow?.states?.map((state: any) => state.name) || [];
         const restoredAvailableStates = detail.pendingCheckpoint?.availableStates
           || workflowStates.filter((stateName: string) => stateName !== '__human_approval__');
@@ -765,7 +765,7 @@ export default function WorkbenchPage() {
 
   const stopWorkflow = async () => {
     try {
-      await workflowApi.stop();
+      await workflowApi.stop(configFile);
       // Directly update local state — don't rely solely on SSE
       dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'stopped' });
       dispatch({ type: 'SET_CURRENT_STEP', payload: '' });
@@ -785,8 +785,7 @@ export default function WorkbenchPage() {
       const rid = runId || selectedRun?.id;
 
       // 先查后端内存里的实际状态，避免重复 resume
-      const liveStatus = await workflowApi.getStatus();
-      const alreadyRunningInMemory = liveStatus.status === 'running';
+      const liveStatus = await workflowApi.getStatus(configFile);      const alreadyRunningInMemory = liveStatus.status === 'running';
 
       if (!alreadyRunningInMemory && rid) {
         // 内存里没有运行中的 workflow，先 resume 再 force-transition
@@ -804,7 +803,7 @@ export default function WorkbenchPage() {
         fetchCurrentStatus();
       } else {
         // 内存里已经有运行中的 workflow，直接 force-transition
-        await workflowApi.forceTransition(forceTransitionModal.targetState, forceTransitionModal.instruction || undefined);
+        await workflowApi.forceTransition(forceTransitionModal.targetState, forceTransitionModal.instruction || undefined, configFile);
       }
       toast('success', `已请求跳转到: ${forceTransitionModal.targetState}`);
       setForceTransitionModal(null);
@@ -817,7 +816,7 @@ export default function WorkbenchPage() {
 
   const forceCompleteStep = async () => {
     try {
-      const result = await workflowApi.forceCompleteStep();
+      const result = await workflowApi.forceCompleteStep(configFile);
       addLog('system', 'info', `步骤 "${result.step}" 已完成 (${result.outputLength} 字符)`);
     } catch (error: any) {
       addLog('system', 'error', `完成失败: ${error.message}`);
@@ -850,8 +849,7 @@ export default function WorkbenchPage() {
       const rid = runId || selectedRun?.id;
 
       // 先查后端内存里的实际状态，避免重复 resume
-      const liveStatus = await workflowApi.getStatus();
-      const alreadyRunningInMemory = liveStatus.status === 'running';
+      const liveStatus = await workflowApi.getStatus(configFile);      const alreadyRunningInMemory = liveStatus.status === 'running';
 
       if (!alreadyRunningInMemory) {
         // 内存里没有运行中的 workflow，先弹确认再 resume
@@ -880,7 +878,7 @@ export default function WorkbenchPage() {
         }
       } else {
         // 内存里已经有运行中的 workflow，直接 approve
-        await workflowApi.approve();
+        await workflowApi.approve(configFile);
       }
 
       dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
@@ -909,7 +907,7 @@ export default function WorkbenchPage() {
     }
     try {
       if (isRunning) {
-        await workflowApi.iterate(iterationFeedback);
+        await workflowApi.iterate(iterationFeedback, configFile);
       } else {
         // Workflow not running — resume with iterate action
         const rid = runId || selectedRun?.id;
@@ -1193,7 +1191,7 @@ export default function WorkbenchPage() {
       try {
         const { processes } = await processApi.list();
         const rid = runId || selectedRun?.id;
-        const runningProc = processes.find((p: any) => p.status === 'running');
+        const runningProc = processes.find((p: any) => p.status === 'running' && (!rid || p.runId === rid));
         const activeStep = runningProc?.step || currentStep || selectedStep?.name;
 
         if (activeStep !== liveStreamStepRef.current) {
@@ -1207,10 +1205,12 @@ export default function WorkbenchPage() {
           content = await streamApi.getStreamContent(rid, activeStep);
         }
         if (!content) {
-          const running = processes.find((p: any) => p.status === 'running');
-          content = running?.streamContent || processes.sort((a: any, b: any) =>
-            new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
-          )[0]?.streamContent;
+          const running = processes.find((p: any) => p.status === 'running' && (!rid || p.runId === rid));
+          content = running?.streamContent || processes
+            .filter((p: any) => !rid || p.runId === rid)
+            .sort((a: any, b: any) =>
+              new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
+            )[0]?.streamContent;
         }
 
         // 增量更新：只处理新增内容
@@ -1244,7 +1244,7 @@ export default function WorkbenchPage() {
     if (!feedback.trim() || sendingFeedback) return;
     setSendingFeedback(true);
     try {
-      const res = await workflowApi.injectFeedback(feedback.trim(), interrupt);
+      const res = await workflowApi.injectFeedback(feedback.trim(), interrupt, configFile);
       if (liveStreamFeedbackRef.current) liveStreamFeedbackRef.current.value = '';
       if (interrupt) {
         if (res.interrupted) {
@@ -1261,7 +1261,7 @@ export default function WorkbenchPage() {
 
   const recallFeedback = async (message: string) => {
     try {
-      await workflowApi.recallFeedback(message);
+      await workflowApi.recallFeedback(message, configFile);
     } catch (error: any) {
       toast('error', `撤回失败: ${error.message}`);
     }
@@ -1279,7 +1279,7 @@ export default function WorkbenchPage() {
   const saveContext = async () => {
     try {
       const rid = runId || initialRunId || selectedRun?.id;
-      await workflowApi.setContext(editingContextScope, editingContextValue, editingContextPhase || undefined, rid || undefined);
+      await workflowApi.setContext(editingContextScope, editingContextValue, editingContextPhase || undefined, rid || undefined, configFile);
       if (editingContextScope === 'global') {
         dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: editingContextValue });
       } else if (editingContextPhase) {
@@ -2181,10 +2181,10 @@ export default function WorkbenchPage() {
                   </div>
                 </div>
               )}
-              {/* Live stream button for currently running step */}
-              {selectedStep && isCurrentStepRunning && !stepResult && (
+              {/* Live stream button — always visible when running */}
+              {isRunning && (
                 <div className="bg-muted border-b p-3.5">
-                  <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider"><span className="material-symbols-outlined text-xs">sync</span> 正在执行中...</div>
+                  <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider"><span className="material-symbols-outlined text-xs">sync</span> {currentStep ? `当前步骤: ${currentStep}` : '工作流运行中'}</div>
                   <div className="flex gap-2 mt-1.5">
                     <Button size="sm" className="text-xs" onClick={startLiveStream}>
                       <span className="material-symbols-outlined text-sm">cell_tower</span> 查看实时输出
@@ -2192,34 +2192,6 @@ export default function WorkbenchPage() {
                     <Button size="sm" variant="secondary" className="text-xs" onClick={forceCompleteStep}>
                       <span className="material-symbols-outlined text-sm">done</span> 完成
                     </Button>
-                  </div>
-                </div>
-              )}
-              {/* Also show live stream button when step has no result and is running */}
-              {isRunning && !selectedStep && currentStep && (
-                <div className="bg-muted border-b p-3.5">
-                  <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider"><span className="material-symbols-outlined text-xs">sync</span> 当前步骤: {currentStep}</div>
-                  <div className="flex gap-2 mt-1.5">
-                    <Button size="sm" className="text-xs" onClick={startLiveStream}>
-                      <span className="material-symbols-outlined text-sm">cell_tower</span> 查看实时输出
-                    </Button>
-                    <Button size="sm" variant="secondary" className="text-xs" onClick={forceCompleteStep}>
-                      <span className="material-symbols-outlined text-sm">done</span> 完成
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {/* Show status when running but no current step */}
-              {isRunning && !selectedStep && !currentStep && (
-                <div className="bg-muted border-b p-3.5">
-                  <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">
-                    <span className="material-symbols-outlined text-xs">sync</span> 工作流运行中
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-2">
-                    {currentPhase === '__human_approval__' ? '等待人工审查...' : '等待步骤开始执行...'}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    当前状态: {formatStateName(currentPhase || '') || '未知'}
                   </div>
                 </div>
               )}
@@ -2636,7 +2608,7 @@ export default function WorkbenchPage() {
                 setLiveStreamVisibleCount(prev => prev + LIVE_STREAM_PAGE_SIZE);
               }
             }}>
-              {liveStream.length === 0 ? (
+              {liveStream.length === 0 && inlineFeedbacks.length === 0 ? (
                 <div className="text-muted-foreground text-sm text-center py-8">(等待输出...)</div>
               ) : (
                 <div className="space-y-3">
@@ -2965,7 +2937,7 @@ export default function WorkbenchPage() {
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold flex items-center gap-2">
                   <span className="material-symbols-outlined text-orange-500">person</span>
-                  人工审查 - {humanApprovalData.currentState}
+                  人工审查 - {formatStateName(humanApprovalData.currentState)}
                 </h3>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setHumanApprovalData(null)}>
                   <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>close</span>

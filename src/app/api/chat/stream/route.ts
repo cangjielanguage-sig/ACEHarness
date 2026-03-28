@@ -63,7 +63,9 @@ function checkSessionValid(sessionId: string): Promise<boolean> {
     delete env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC;
     env.IS_SANDBOX = '1';
 
-    const child = spawn('claude', [
+    const isWindows = process.platform === 'win32';
+    const cmd = isWindows ? 'claude.cmd' : 'claude';
+    const child = spawn(cmd, [
       '--output-format', 'json',
       '-p', '.',
       '--resume', sessionId,
@@ -71,6 +73,7 @@ function checkSessionValid(sessionId: string): Promise<boolean> {
     ], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
+      shell: isWindows,
     });
 
     let resolved = false;
@@ -109,7 +112,8 @@ function checkSessionValid(sessionId: string): Promise<boolean> {
       // Process exited without triggering early detection.
       // code !== 0 or any error text = likely invalid
       const hasError = output.toLowerCase().includes('no conversation found')
-        || output.toLowerCase().includes('is_error')
+        || output.includes('"is_error": true')
+        || output.includes('"is_error":true')
         || code !== 0;
       done(!hasError);
     });
@@ -181,12 +185,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Start execution — SSE will stream results
+    const settings = isResume && mode === 'dashboard'
+      ? await loadChatSettings()  // already loaded above for systemPrompt, but need workingDirectory
+      : mode === 'dashboard' ? await loadChatSettings() : null;
     const execPromise = processManager.executeClaudeCli(
       chatId, 'chat', 'chat', message, systemPrompt, useModel,
       {
         resumeSessionId: validResumeSid,
         appendSystemPrompt: !!validResumeSid && !!systemPrompt,
         frontendSessionId,
+        workingDirectory: settings?.workingDirectory || undefined,
       }
     );
     const entry = { promise: execPromise, settled: false, chatId };
@@ -203,6 +211,23 @@ export async function POST(request: NextRequest) {
 }
 export async function GET(request: NextRequest) {
   const chatId = request.nextUrl.searchParams.get('id');
+  const checkSession = request.nextUrl.searchParams.get('checkActive');
+
+  // Check if a frontend session has an active stream
+  if (checkSession) {
+    const activeChatId = processManager.getActiveStreamChatId(checkSession);
+    if (activeChatId && activeChats.has(activeChatId)) {
+      const proc = processManager.getProcess(activeChatId);
+      return NextResponse.json({
+        active: true,
+        chatId: activeChatId,
+        streamContent: proc?.streamContent || '',
+        status: proc?.status || 'running',
+      });
+    }
+    return NextResponse.json({ active: false });
+  }
+
   if (!chatId) {
     return NextResponse.json({ error: 'Missing id' }, { status: 400 });
   }
@@ -233,10 +258,14 @@ export async function GET(request: NextRequest) {
         try { controller.close(); } catch {}
       };
 
-      // Stream handler — forward text deltas
+      // Stream handler — forward text deltas and thinking
       const onStream = (evt: any) => {
-        if (evt.id === chatId && evt.delta) {
-          send('delta', { content: evt.delta });
+        if (evt.id === chatId) {
+          if (evt.delta) {
+            send('delta', { content: evt.delta });
+          } else if (evt.thinking) {
+            send('thinking', { content: evt.thinking });
+          }
         }
       };
 

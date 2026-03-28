@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { workflowManager } from '@/lib/workflow-manager';
-import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
+import { workflowRegistry } from '@/lib/workflow-registry';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { answer } = body;
+    const { answer, configFile } = body;
 
     if (!answer?.trim()) {
       return NextResponse.json(
@@ -14,35 +13,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const phaseStatus = workflowManager.getStatus();
-    const smStatus = stateMachineWorkflowManager.getStatus();
+    // Find running manager with a pending question
+    const running = configFile
+      ? [{ manager: workflowRegistry.getRunningManager(configFile) }].filter(r => r.manager)
+      : workflowRegistry.getRunningManagers();
 
-    let pendingQuestion = null;
-
-    if (phaseStatus.status === 'running') {
-      pendingQuestion = workflowManager.getPendingUserQuestion();
-      if (pendingQuestion) {
-        workflowManager.submitUserAnswer(answer.trim());
-      }
-    } else if (smStatus.status === 'running') {
-      pendingQuestion = stateMachineWorkflowManager.getPendingUserQuestion();
-      if (pendingQuestion) {
-        stateMachineWorkflowManager.submitUserAnswer(answer.trim());
+    for (const { manager } of running) {
+      if (!manager) continue;
+      const q = manager.getPendingUserQuestion();
+      if (q) {
+        manager.submitUserAnswer(answer.trim());
+        return NextResponse.json({
+          success: true,
+          message: '回答已提交',
+          question: q.question,
+        });
       }
     }
 
-    if (!pendingQuestion) {
-      return NextResponse.json(
-        { error: '当前没有等待回答的问题' },
-        { status: 409 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: '回答已提交',
-      question: pendingQuestion.question,
-    });
+    return NextResponse.json(
+      { error: '当前没有等待回答的问题' },
+      { status: 409 }
+    );
   } catch (error: any) {
     return NextResponse.json(
       { error: '提交回答失败', message: error.message },
@@ -51,23 +43,20 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
-  const phaseStatus = workflowManager.getStatus();
-  const smStatus = stateMachineWorkflowManager.getStatus();
+export async function GET(request: NextRequest) {
+  const configFile = request.nextUrl.searchParams.get('configFile');
 
-  let pendingQuestion = null;
-  let running = false;
-
-  if (phaseStatus.status === 'running') {
-    running = true;
-    pendingQuestion = workflowManager.getPendingUserQuestion();
-  } else if (smStatus.status === 'running') {
-    running = true;
-    pendingQuestion = stateMachineWorkflowManager.getPendingUserQuestion();
+  const running = workflowRegistry.getRunningManagers();
+  for (const { manager, configFile: cf } of running) {
+    if (configFile && cf !== configFile) continue;
+    const q = manager.getPendingUserQuestion();
+    if (q) {
+      return NextResponse.json({ running: true, pendingQuestion: q });
+    }
   }
 
   return NextResponse.json({
-    running,
-    pendingQuestion,
+    running: running.length > 0,
+    pendingQuestion: null,
   });
 }

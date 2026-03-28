@@ -18,7 +18,7 @@ import { processManager } from './process-manager';
 import type { ClaudeJsonResult } from './process-manager';
 import { createRun, updateRun } from './run-store';
 import {
-  saveRunState, saveProcessOutput, saveOutputToWorkspace, saveStreamContent,
+  saveRunState, saveProcessOutput, saveStreamContent,
   loadRunState, loadStepOutputs, type PersistedRunState, type PersistedProcessInfo, type PersistedStepLog,
 } from './run-state-persistence';
 import type {
@@ -383,6 +383,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.supervisorFlow = [];
       this.agentFlow = [];
       this.stepLogs = [];
+      this.currentState = null; // Reset state — will be set from persisted state or initial state
       this.runStartTime = new Date().toISOString();
       this.currentConfigFile = configFile;
 
@@ -554,10 +555,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
     }
   }
 
-  getContexts(): { global: string; phases: Record<string, string> } {
+  getContexts(): { globalContext: string; phaseContexts: Record<string, string> } {
     return {
-      global: this.globalContext,
-      phases: Object.fromEntries(this.stateContexts),
+      globalContext: this.globalContext,
+      phaseContexts: Object.fromEntries(this.stateContexts),
     };
   }
 
@@ -1189,6 +1190,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
       agent.status = 'completed';
       agent.completedTasks++;
       agent.lastOutput = output;
+      // Store session ID for reuse across iterations of the same agent
+      if (stepResult.sessionId) {
+        agent.sessionId = stepResult.sessionId;
+      }
       this.currentStep = null;
       this.completedSteps.push(stepKey);
       this.currentProcesses = [];
@@ -1243,19 +1248,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
       if (this.currentRunId) {
         const stepFileName = stepKey;
         await saveProcessOutput(this.currentRunId, stepFileName, output).catch(() => {});
-
-        // Save conclusion to workspace with timestamp to avoid overwriting
-        // the detailed report the agent wrote, and to handle re-execution on iteration/state-loop
-        if (config.context?.projectRoot) {
-          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          const conclusionFileName = `${ts}-${stepKey}-结论`;
-          await saveOutputToWorkspace(
-            config.context.projectRoot,
-            this.currentRunId,
-            conclusionFileName,
-            output
-          ).catch(() => {});
-        }
       }
 
       return output;
@@ -1329,7 +1321,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     // Add document output path
     if (this.currentRunId && config.context?.projectRoot) {
-      const outputPath = `${config.context.projectRoot}/.ace-outputs/${this.currentRunId}/`;
+      const outputPath = `${process.cwd()}/runs/${this.currentRunId}/outputs/`;
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const safeName = `${state.name}-${step.name}`.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
       const fullPath = `${outputPath}${ts}-${safeName}.md`;
@@ -1545,7 +1537,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     context: string,
     config: StateMachineWorkflowConfig,
     stepId?: string
-  ): Promise<{ output: string; costUsd: number; durationMs: number }> {
+  ): Promise<{ output: string; costUsd: number; durationMs: number; sessionId?: string }> {
     // Find agent config for system prompt and model
     const roleConfig = this.agentConfigs.find(r => r.name === step.agent)
       || config.roles?.find(r => r.name === step.agent);
@@ -1558,7 +1550,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     let currentProcessId = stepId || randomUUID();
     let currentPrompt = context;
-    let currentSessionId: string | undefined;
+    // Reuse session from same agent if available (saves tokens, preserves memory)
+    const agent = this.agents.find(a => a.name === step.agent);
+    let currentSessionId: string | undefined = agent?.sessionId || undefined;
     let accumulatedOutput = '';
     let accumulatedStream = '';
     let accumulatedCost = 0;
@@ -1699,6 +1693,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
       accumulatedCost += result.cost_usd || 0;
       accumulatedDuration += result.duration_ms || 0;
 
+      // Always capture session_id for reuse
+      if (result.session_id) {
+        currentSessionId = result.session_id;
+      }
+
       // Check for pending live feedback after completion
       if (this.liveFeedback.length > 0 && !this.shouldStop) {
         const feedbackPrompt = this.liveFeedback.map((fb, i) => `${i + 1}. ${fb}`).join('\n');
@@ -1734,7 +1733,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     } finally {
       processManager.off('stream', streamFlushHandler);
     }
-    return { output: accumulatedOutput, costUsd: accumulatedCost, durationMs: accumulatedDuration };
+    return { output: accumulatedOutput, costUsd: accumulatedCost, durationMs: accumulatedDuration, sessionId: currentSessionId };
   }
 
   private async evaluateTransitions(

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { workflowManager } from '@/lib/workflow-manager';
-import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
+import { workflowRegistry } from '@/lib/workflow-registry';
 import { loadRunState } from '@/lib/run-state-persistence';
 
 export async function POST(request: NextRequest) {
@@ -15,7 +14,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Load run state to determine workflow mode
     const runState = await loadRunState(runId);
     if (!runState) {
       return NextResponse.json(
@@ -24,18 +22,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const isStateMachine = runState.mode === 'state-machine';
-    const manager = isStateMachine ? stateMachineWorkflowManager : workflowManager;
+    const manager = await workflowRegistry.getManager(runState.configFile);
 
     const currentStatus = manager.getStatus();
     if (currentStatus.status === 'running') {
       return NextResponse.json(
-        { error: '已有工作流正在运行' },
+        { error: '该配置的工作流已在运行中' },
         { status: 409 }
       );
     }
 
-    // Fire-and-forget
     manager.rerunFromStep(runId, stepName).catch(() => {});
 
     return NextResponse.json({

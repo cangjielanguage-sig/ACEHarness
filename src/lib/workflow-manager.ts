@@ -19,7 +19,7 @@ import type { ClaudeJsonResult } from './process-manager';
 import { createRun, updateRun } from './run-store';
 import type { RunRecord } from './run-store';
 import {
-  saveRunState, saveProcessOutput, saveOutputToWorkspace, saveStreamContent, loadStreamContent, loadStepOutputs, loadRunState, findRunningRuns, isProcessAlive,
+  saveRunState, saveProcessOutput, saveStreamContent, loadStreamContent, loadStepOutputs, loadRunState, findRunningRuns, isProcessAlive,
   type PersistedRunState, type PersistedProcessInfo, type PersistedStepLog,
 } from './run-state-persistence';
 import type { WorkflowConfig, WorkflowPhase, WorkflowStep, RoleConfig, IterationConfig } from './schemas';
@@ -69,7 +69,7 @@ export interface IterationState {
   bugsFoundPerRound: number[];
 }
 
-class WorkflowManager extends EventEmitter {
+export class WorkflowManager extends EventEmitter {
   private currentWorkflow: WorkflowConfig | null = null;
   private logs: any[] = [];
   private status: 'idle' | 'running' | 'completed' | 'failed' | 'stopped' = 'idle';
@@ -1186,13 +1186,6 @@ class WorkflowManager extends EventEmitter {
 
       if (this.currentRunId) {
         saveProcessOutput(this.currentRunId, step.name, resultText).catch(() => {});
-        // Save conclusion to workspace with a separate filename so it doesn't
-        // overwrite the detailed report the agent may have written via Write tool
-        if (workflowConfig.context.projectRoot) {
-          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          const conclusionName = `${ts}-${step.name}-结论`;
-          saveOutputToWorkspace(workflowConfig.context.projectRoot, this.currentRunId, conclusionName, resultText).catch(() => {});
-        }
       }
       await this.persistState();
 
@@ -1246,11 +1239,6 @@ class WorkflowManager extends EventEmitter {
 
         if (this.currentRunId) {
           saveProcessOutput(this.currentRunId, step.name, resultText).catch(() => {});
-          if (workflowConfig.context.projectRoot) {
-            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            const conclusionName = `${step.name}-结论-${ts}`;
-            saveOutputToWorkspace(workflowConfig.context.projectRoot, this.currentRunId, conclusionName, resultText).catch(() => {});
-          }
         }
         await this.persistState();
         return resultText;
@@ -1617,7 +1605,7 @@ class WorkflowManager extends EventEmitter {
     if (workflowConfig.context.projectRoot) {
       prompt += `## 项目路径\n${workflowConfig.context.projectRoot}\n\n`;
       if (this.currentRunId) {
-        const outputDir = `${workflowConfig.context.projectRoot}/.ace-outputs/${this.currentRunId}`;
+        const outputDir = `${process.cwd()}/runs/${this.currentRunId}/outputs`;
         const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         prompt += `## 文档输出要求\n`;
         prompt += `请将你产出的所有文档、报告、分析结果等写入以下目录：\n`;

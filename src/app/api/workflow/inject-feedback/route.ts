@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { workflowManager } from '@/lib/workflow-manager';
-import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
+import { workflowRegistry } from '@/lib/workflow-registry';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { message, interrupt } = body;
+    const { message, interrupt, configFile } = body;
 
     if (!message?.trim()) {
       return NextResponse.json(
@@ -14,16 +13,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check both managers to find which one is running
-    const phaseStatus = workflowManager.getStatus();
-    const smStatus = stateMachineWorkflowManager.getStatus();
-
-    let manager;
-    if (phaseStatus.status === 'running') {
-      manager = workflowManager;
-    } else if (smStatus.status === 'running') {
-      manager = stateMachineWorkflowManager;
-    } else {
+    const manager = workflowRegistry.getRunningManager(configFile);
+    if (!manager) {
       return NextResponse.json(
         { error: '当前没有运行中的工作流' },
         { status: 409 }

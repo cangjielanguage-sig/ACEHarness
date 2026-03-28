@@ -12,6 +12,7 @@ import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
+import { loadEnvVars, buildEnvObject } from './env-manager';
 
 const DEBUG_DIR = resolve(process.cwd(), 'runs', '.tmp');
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -139,6 +140,9 @@ function formatToolUseSummary(toolName: string, inputJson: string): string {
         block += `</div>\n`;
         return block;
       }
+      case 'Skill':
+      case 'skill':
+        return `\n🧩 使用技能: ${input.skill || input.name || ''}${input.args ? ` (${input.args})` : ''}\n`;
       default:
         return `\n⚙️ ${toolName}\n`;
     }
@@ -405,6 +409,13 @@ class ProcessManager extends EventEmitter {
       spawnEnv.CLAUDE_CODE_GIT_BASH_PATH = envPath;
     }
 
+    // Inject user-defined environment variables
+    try {
+      const userEnvVars = await loadEnvVars();
+      const userEnv = buildEnvObject(userEnvVars);
+      Object.assign(spawnEnv, userEnv);
+    } catch { /* non-critical */ }
+
     // On Windows, Claude Code requires git-bash and must be launched via PowerShell.
     // Set code page to UTF-8 before invoking claude to avoid encoding issues.
     // Note: Using -File instead of -Command to avoid PowerShell parsing @path as here-string.
@@ -467,6 +478,9 @@ class ProcessManager extends EventEmitter {
       let currentToolUse: { name: string; inputJson: string; id?: string } | null = null;
       // Track whether the last content block was a tool_use (to insert separator before text)
       let lastBlockWasTool = false;
+      // Track thinking block
+      let inThinking = false;
+      let thinkingText = '';
       // Track tool calls by id for matching results to the correct tool (supports parallel calls)
       const pendingToolCalls: Map<string, { name: string; description?: string }> = new Map();
       // Ordered queue of tool names for fallback when tool_use_id is missing
@@ -494,7 +508,18 @@ class ProcessManager extends EventEmitter {
             const evt = obj.event;
             const delta = evt?.delta;
 
-            if (evt?.type === 'content_block_start' && evt.content_block?.type === 'text') {
+            if (evt?.type === 'content_block_start' && evt.content_block?.type === 'thinking') {
+              // Thinking block starting
+              inThinking = true;
+              thinkingText = '';
+            } else if (delta?.type === 'thinking_delta' && delta.thinking && inThinking) {
+              // Accumulate thinking text
+              thinkingText += delta.thinking;
+              this.emit('stream', { id, step, thinking: delta.thinking });
+            } else if (evt?.type === 'content_block_stop' && inThinking) {
+              // Thinking block ended
+              inThinking = false;
+            } else if (evt?.type === 'content_block_start' && evt.content_block?.type === 'text') {
               // Text block starting — if previous block was a tool, insert a visual separator
               if (lastBlockWasTool) {
                 const sep = '\n\n<!-- chunk-boundary -->\n\n';

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { workflowManager } from '@/lib/workflow-manager';
-import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
+import { workflowRegistry } from '@/lib/workflow-registry';
 import { loadRunState } from '@/lib/run-state-persistence';
+import { StateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,7 +15,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Load run state to determine workflow mode
     const runState = await loadRunState(runId);
     if (!runState) {
       return NextResponse.json(
@@ -24,40 +23,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const isStateMachine = runState.mode === 'state-machine';
-    const manager = isStateMachine ? stateMachineWorkflowManager : workflowManager;
+    const manager = await workflowRegistry.getManager(runState.configFile);
 
     const currentStatus = manager.getStatus();
     if (currentStatus.status === 'running') {
       return NextResponse.json(
-        { error: '已有工作流正在运行' },
+        { error: '该配置的工作流已在运行中' },
         { status: 409 }
       );
     }
 
-    // If action specified, queue it so waitForApproval resolves immediately
     if (action === 'iterate' || action === 'approve') {
       manager.setQueuedApprovalAction(action);
-      // If iterate action with feedback, store it
       if (action === 'iterate' && feedback) {
         manager.setIterationFeedback(feedback);
       }
     }
 
-    // For force-transition: queue the transition so it fires right after resume restores state
-    if (action === 'force-transition' && isStateMachine && targetState) {
-      (manager as typeof stateMachineWorkflowManager).setQueuedApprovalAction('approve');
-      // Schedule force-transition after a short delay to let resume restore state first
-      const smManager = manager as typeof stateMachineWorkflowManager;
+    if (action === 'force-transition' && manager instanceof StateMachineWorkflowManager && targetState) {
+      manager.setQueuedApprovalAction('approve');
       setTimeout(() => {
-        smManager.forceTransition(targetState, instruction);
+        (manager as StateMachineWorkflowManager).forceTransition(targetState, instruction);
       }, 500);
     }
 
-    // Fire-and-forget: kick off resume without awaiting completion.
-    manager.resume(runId).catch(() => {
-      // Errors are emitted as 'status' events via SSE.
-    });
+    manager.resume(runId).catch(() => {});
 
     return NextResponse.json({
       success: true,

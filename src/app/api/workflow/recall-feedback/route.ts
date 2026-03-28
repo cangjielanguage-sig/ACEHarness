@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { workflowManager } from '@/lib/workflow-manager';
-import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
+import { workflowRegistry } from '@/lib/workflow-registry';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { message } = body;
+    const { message, configFile } = body;
 
     if (!message?.trim()) {
       return NextResponse.json(
@@ -14,23 +13,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Try both managers
-    let recalled = workflowManager.recallLiveFeedback(message.trim());
-    if (!recalled) {
-      recalled = stateMachineWorkflowManager.recallLiveFeedback(message.trim());
+    // Try all running managers
+    const running = workflowRegistry.getRunningManagers();
+    for (const { manager } of running) {
+      const recalled = manager.recallLiveFeedback(message.trim());
+      if (recalled) {
+        return NextResponse.json({ success: true, message: '反馈已撤回' });
+      }
     }
 
-    if (!recalled) {
-      return NextResponse.json(
-        { error: '该反馈已被处理或不存在' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: '反馈已撤回',
-    });
+    return NextResponse.json(
+      { error: '该反馈已被处理或不存在' },
+      { status: 404 }
+    );
   } catch (error: any) {
     return NextResponse.json(
       { error: '撤回反馈失败', message: error.message },

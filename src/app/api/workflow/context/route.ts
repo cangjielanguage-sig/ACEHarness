@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { workflowManager } from '@/lib/workflow-manager';
-import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
+import { workflowRegistry } from '@/lib/workflow-registry';
 import { loadRunState, saveRunState } from '@/lib/run-state-persistence';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { scope, phase, context, runId } = body;
+    const { scope, phase, context, runId, configFile } = body;
 
     if (!scope || !['global', 'phase'].includes(scope)) {
       return NextResponse.json(
@@ -22,17 +21,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update in-memory state for running managers
-    const phaseStatus = workflowManager.getStatus();
-    const smStatus = stateMachineWorkflowManager.getStatus();
-
+    // Update in-memory state for running manager
     let currentRunId = runId;
-    if (phaseStatus.status === 'running') {
-      workflowManager.setContext(scope, context || '', phase);
-      currentRunId = currentRunId || phaseStatus.runId;
-    } else if (smStatus.status === 'running') {
-      stateMachineWorkflowManager.setContext(scope, context || '', phase);
-      currentRunId = currentRunId || smStatus.runId;
+    const manager = workflowRegistry.getRunningManager(configFile);
+    if (manager) {
+      manager.setContext(scope, context || '', phase);
+      currentRunId = currentRunId || manager.getStatus().runId;
     }
 
     // Always persist to state.yaml
@@ -49,10 +43,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      message: '上下文已更新',
-    });
+    return NextResponse.json({ success: true, message: '上下文已更新' });
   } catch (error: any) {
     return NextResponse.json(
       { error: '设置上下文失败', message: error.message },
@@ -64,6 +55,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const runId = request.nextUrl.searchParams.get('runId');
+    const configFile = request.nextUrl.searchParams.get('configFile');
 
     // Always read from state.yaml as source of truth
     if (runId) {
@@ -77,23 +69,16 @@ export async function GET(request: NextRequest) {
     }
 
     // Fallback: read from in-memory manager
-    const phaseStatus = workflowManager.getStatus();
-    const smStatus = stateMachineWorkflowManager.getStatus();
-
-    let globalContext = '';
-    let phaseContexts: Record<string, string> = {};
-
-    if (phaseStatus.status === 'running') {
-      const c = workflowManager.getContexts();
-      globalContext = c.globalContext || '';
-      phaseContexts = c.phaseContexts || {};
-    } else {
-      const c = stateMachineWorkflowManager.getContexts();
-      globalContext = c.global || '';
-      phaseContexts = c.phases || {};
+    const manager = workflowRegistry.getRunningManager(configFile || undefined);
+    if (manager) {
+      const c = manager.getContexts();
+      return NextResponse.json({
+        globalContext: c.globalContext || '',
+        phaseContexts: c.phaseContexts || {},
+      });
     }
 
-    return NextResponse.json({ globalContext, phaseContexts });
+    return NextResponse.json({ globalContext: '', phaseContexts: {} });
   } catch (error: any) {
     return NextResponse.json(
       { error: '获取上下文失败', message: error.message },

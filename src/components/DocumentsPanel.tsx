@@ -440,10 +440,12 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
             {toolbar(false)}
           </div>
           <div className="flex flex-1 overflow-hidden">
-            {folderTree()}
-            <div className="flex-1 flex flex-col overflow-hidden border-r border-border">
-              {fileList(false)}
-            </div>
+            {!fullscreen && folderTree()}
+            {!fullscreen && (
+              <div className="flex-1 flex flex-col overflow-hidden border-r border-border">
+                {fileList(false)}
+              </div>
+            )}
             {previewPane()}
           </div>
         </DialogContent>

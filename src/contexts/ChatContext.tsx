@@ -9,6 +9,7 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'error';
   content: string;
+  thinking?: string;
   actions?: ActionState[];
   cards?: any[];
   costUsd?: number;
@@ -65,6 +66,8 @@ interface DashboardChatContextType {
   skillSettings: Record<string, boolean>;
   discoveredSkills: { name: string; label: string; description: string; source?: string; tags?: string[] }[];
   toggleSkill: (skill: string) => void;
+  workingDirectory: string;
+  setWorkingDirectory: (dir: string) => void;
 }
 
 const DashboardChatContext = createContext<DashboardChatContextType>({
@@ -79,6 +82,7 @@ const DashboardChatContext = createContext<DashboardChatContextType>({
   confirmAction: async () => {}, rejectAction: () => {},
   undoActionById: async () => {}, retryAction: async () => {},
   skillSettings: { 'power-gitcode': true }, discoveredSkills: [], toggleSkill: () => {},
+  workingDirectory: '', setWorkingDirectory: () => {},
 });
 
 const genId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -148,12 +152,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
   const [skillSettings, setSkillSettings] = useState<Record<string, boolean>>({ 'power-gitcode': true });
   const [discoveredSkills, setDiscoveredSkills] = useState<{ name: string; label: string; description: string; source?: string; tags?: string[] }[]>([]);
+  const [workingDirectory, setWorkingDirectoryState] = useState('');
 
   // Load skill settings on mount
   useEffect(() => {
     fetch('/api/chat/settings').then(r => r.json()).then(data => {
       if (data.skills) setSkillSettings(data.skills);
       if (data.discoveredSkills) setDiscoveredSkills(data.discoveredSkills);
+      if (data.workingDirectory) setWorkingDirectoryState(data.workingDirectory);
     }).catch(() => {});
   }, []);
 
@@ -163,11 +169,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       fetch('/api/chat/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skills: next }),
+        body: JSON.stringify({ skills: next, workingDirectory: workingDirectory || undefined }),
       }).catch(() => {});
       return next;
     });
-  }, []);
+  }, [workingDirectory]);
+
+  const setWorkingDirectory = useCallback((dir: string) => {
+    setWorkingDirectoryState(dir);
+    fetch('/api/chat/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skills: skillSettings, workingDirectory: dir || undefined }),
+    }).catch(() => {});
+  }, [skillSettings]);
 
   // Debounced save ref
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -222,7 +237,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     setLoading(false);
     setStreamingMessageId(null);
-    apiLoadSession(activeSessionId).then(s => {
+    apiLoadSession(activeSessionId).then(async s => {
       if (!s) { setActiveSession(null); return; }
       // Clean up empty assistant messages left by interrupted streams
       const cleaned = {
@@ -230,6 +245,97 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         messages: s.messages.filter(m => !(m.role === 'assistant' && !m.content && !m.actions?.length && !m.cards?.length)),
       };
       setActiveSession(reparseSession(cleaned));
+
+      // Check if there's an active stream for this session and reconnect
+      try {
+        const checkRes = await fetch(`/api/chat/stream?checkActive=${encodeURIComponent(activeSessionId)}`);
+        const checkData = await checkRes.json();
+        if (checkData.active && checkData.chatId) {
+          // Find the last assistant message to resume streaming into
+          const lastAssistant = cleaned.messages.filter(m => m.role === 'assistant').pop();
+          if (lastAssistant) {
+            setLoading(true);
+            setStreamingMessageId(lastAssistant.id);
+            activeChatIdRef.current = checkData.chatId;
+
+            // Pre-fill with accumulated content
+            if (checkData.streamContent) {
+              const { text: cleanText, cards: newCards } = parseActions(checkData.streamContent);
+              setActiveSession(prev => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  messages: prev.messages.map(m => m.id === lastAssistant.id ? { ...m, content: cleanText, cards: newCards.length > 0 ? newCards : m.cards } : m),
+                };
+              });
+            }
+
+            // Connect SSE to continue receiving deltas
+            const es = new EventSource(`/api/chat/stream?id=${checkData.chatId}`);
+            activeEventSourceRef.current = es;
+            let accumulated = checkData.streamContent || '';
+
+            es.addEventListener('delta', (e) => {
+              const { content } = JSON.parse(e.data);
+              accumulated += content;
+              const { text: cleanText, cards: newCards } = parseActions(accumulated);
+              setActiveSession(prev => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  messages: prev.messages.map(m => m.id === lastAssistant.id ? { ...m, content: cleanText, cards: newCards.length > 0 ? newCards : m.cards } : m),
+                };
+              });
+            });
+
+            es.addEventListener('thinking', (e) => {
+              const { content } = JSON.parse(e.data);
+              setActiveSession(prev => {
+                if (!prev) return prev;
+                const msg = prev.messages.find(m => m.id === lastAssistant.id);
+                const prevThinking = msg?.thinking || '';
+                return {
+                  ...prev,
+                  messages: prev.messages.map(m => m.id === lastAssistant.id ? { ...m, thinking: prevThinking + content } : m),
+                };
+              });
+            });
+
+            es.addEventListener('done', (e) => {
+              const data = JSON.parse(e.data);
+              es.close();
+              activeEventSourceRef.current = null;
+              activeChatIdRef.current = null;
+              if (data.sessionId) {
+                setActiveSession(prev => prev ? { ...prev, backendSessionId: data.sessionId } : prev);
+              }
+              const fullText = data.result || accumulated;
+              const { text: cleanText, cards } = parseActions(fullText);
+              setActiveSession(prev => {
+                if (!prev) return prev;
+                return {
+                  ...prev, updatedAt: Date.now(),
+                  messages: prev.messages.map(m => m.id === lastAssistant.id ? {
+                    ...m, content: cleanText,
+                    cards: cards.length > 0 ? cards : m.cards,
+                    costUsd: data.costUsd, durationMs: data.durationMs, usage: data.usage,
+                  } : m),
+                };
+              });
+              setLoading(false);
+              setStreamingMessageId(null);
+            });
+
+            es.addEventListener('error', () => {
+              es.close();
+              activeEventSourceRef.current = null;
+              activeChatIdRef.current = null;
+              setLoading(false);
+              setStreamingMessageId(null);
+            });
+          }
+        }
+      } catch { /* recovery is best-effort */ }
     });
   }, [activeSessionId]);
 
@@ -548,6 +654,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           const es = new EventSource(`/api/chat/stream?id=${chatId}`);
           activeEventSourceRef.current = es;
           resetInactivityTimer();
+          let accumulatedThinking = '';
+
+          es.addEventListener('thinking', (e) => {
+            resetInactivityTimer();
+            const { content } = JSON.parse(e.data);
+            accumulatedThinking += content;
+            updateActiveSession(s => ({
+              ...s, messages: s.messages.map(m => m.id === assistantMsgId ? { ...m, thinking: accumulatedThinking } : m),
+            }));
+          });
 
           es.addEventListener('delta', (e) => {
             resetInactivityTimer();
@@ -842,6 +958,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       loading, streamingMessageId, model, setModel: handleSetModel,
       confirmAction, rejectAction, undoActionById, retryAction,
       skillSettings, discoveredSkills, toggleSkill,
+      workingDirectory, setWorkingDirectory,
     }}>
       {children}
     </DashboardChatContext.Provider>

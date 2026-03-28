@@ -41,29 +41,46 @@ export async function GET(
   try {
     const dirs = await resolveOutputDirs(runId);
     if (!dirs) return NextResponse.json({ error: '未找到运行记录或未配置项目根目录' }, { status: 404 });
-    const { state, aceDir } = dirs;
+    const { state, aceDir, runsDir } = dirs;
 
-    if (!existsSync(aceDir)) {
+    const aceDirExists = existsSync(aceDir);
+    const runsDirExists = existsSync(runsDir);
+
+    if (!aceDirExists && !runsDirExists) {
       return NextResponse.json({ error: '文档目录不存在', files: [] }, { status: 200 });
     }
 
-    // If requesting a specific file's content
+    // If requesting a specific file's content — check runsDir first, then aceDir
     if (filePath) {
-      const safePath = filePath.replace(/\.\./g, '');
-      const fullPath = resolve(aceDir, safePath);
-      if (!fullPath.startsWith(aceDir)) {
-        return NextResponse.json({ error: '非法路径' }, { status: 400 });
+      const safe = filePath.replace(/\.\./g, '');
+      for (const dir of [runsDir, aceDir]) {
+        if (!existsSync(dir)) continue;
+        const fullPath = resolve(dir, safe);
+        if (!fullPath.startsWith(dir)) continue;
+        try {
+          const content = await readFile(fullPath, 'utf-8');
+          return NextResponse.json({ file: filePath, content });
+        } catch { /* try next dir */ }
       }
-      try {
-        const content = await readFile(fullPath, 'utf-8');
-        return NextResponse.json({ file: filePath, content });
-      } catch {
-        return NextResponse.json({ error: '文件不存在' }, { status: 404 });
-      }
+      return NextResponse.json({ error: '文件不存在' }, { status: 404 });
     }
 
-    // List all documents
-    const entries = await readdir(aceDir);
+    // List all documents from both directories, runsDir takes priority for dedup
+    const seenFiles = new Set<string>();
+    const allEntries: { entry: string; dir: string }[] = [];
+
+    for (const dir of [runsDir, aceDir]) {
+      if (!existsSync(dir)) continue;
+      try {
+        const entries = await readdir(dir);
+        for (const entry of entries) {
+          if (!seenFiles.has(entry)) {
+            seenFiles.add(entry);
+            allEntries.push({ entry, dir });
+          }
+        }
+      } catch { /* ignore */ }
+    }
     const iterRegex = /^(.+)-迭代(\d+)\.md$/;
     const versionRegex = /^(.+)-v(\d+)\.md$/;
 
@@ -102,9 +119,9 @@ export async function GET(
     } catch { /* ignore */ }
 
     const files = [];
-    for (const entry of entries) {
+    for (const { entry, dir } of allEntries) {
       if (!entry.endsWith('.md') && !entry.endsWith('.txt')) continue;
-      const fullPath = resolve(aceDir, entry);
+      const fullPath = resolve(dir, entry);
       const fileStat = await stat(fullPath);
 
       let baseName = entry.replace(/\.(md|txt)$/, '');
@@ -168,19 +185,17 @@ export async function PATCH(
     const ext = file.match(/\.(md|txt)$/)?.[0] || '.md';
     const finalName = newName.endsWith(ext) ? newName : newName + ext;
 
-    const oldPath = safePath(dirs.aceDir, file);
-    const newPath = safePath(dirs.aceDir, finalName);
-    if (!oldPath || !newPath) return NextResponse.json({ error: '非法路径' }, { status: 400 });
-    if (!existsSync(oldPath)) return NextResponse.json({ error: '文件不存在' }, { status: 404 });
-
-    await rename(oldPath, newPath);
-
-    // Sync runs/outputs if exists
-    const oldRuns = safePath(dirs.runsDir, file);
-    const newRuns = safePath(dirs.runsDir, finalName);
-    if (oldRuns && newRuns && existsSync(oldRuns)) {
-      await rename(oldRuns, newRuns).catch(() => {});
+    // Rename in both directories
+    let renamed = false;
+    for (const dir of [dirs.runsDir, dirs.aceDir]) {
+      const oldP = safePath(dir, file);
+      const newP = safePath(dir, finalName);
+      if (oldP && newP && existsSync(oldP)) {
+        await rename(oldP, newP).catch(() => {});
+        renamed = true;
+      }
     }
+    if (!renamed) return NextResponse.json({ error: '文件不存在' }, { status: 404 });
 
     return NextResponse.json({ ok: true, newFilename: finalName });
   } catch (error: any) {
@@ -203,13 +218,15 @@ export async function DELETE(
 
     const deleted: string[] = [];
     for (const file of files) {
-      const fullPath = safePath(dirs.aceDir, file);
-      if (!fullPath || !existsSync(fullPath)) continue;
-      await unlink(fullPath);
-      deleted.push(file);
-      // Sync runs/outputs
-      const runsPath = safePath(dirs.runsDir, file);
-      if (runsPath && existsSync(runsPath)) await unlink(runsPath).catch(() => {});
+      let found = false;
+      for (const dir of [dirs.runsDir, dirs.aceDir]) {
+        const fullPath = safePath(dir, file);
+        if (fullPath && existsSync(fullPath)) {
+          await unlink(fullPath).catch(() => {});
+          found = true;
+        }
+      }
+      if (found) deleted.push(file);
     }
 
     return NextResponse.json({ ok: true, deleted });

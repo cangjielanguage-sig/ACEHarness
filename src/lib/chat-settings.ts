@@ -22,6 +22,7 @@ export interface SkillInfo {
 
 export interface ChatSettings {
   skills: Record<string, boolean>;
+  workingDirectory?: string;  // 聊天工作目录，空则用 process.cwd()
 }
 
 /** 从 SKILL.md 提取标题和描述 */
@@ -101,7 +102,7 @@ export async function loadChatSettings(): Promise<ChatSettings> {
   try {
     const content = await readFile(SETTINGS_PATH, 'utf-8');
     const parsed = parse(content);
-    return { skills: { ...defaults, ...parsed?.skills } };
+    return { skills: { ...defaults, ...parsed?.skills }, workingDirectory: parsed?.workingDirectory };
   } catch {
     return { skills: defaults };
   }

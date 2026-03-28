@@ -53,8 +53,9 @@ export async function runNodejsInstrumentation() {
 
   // 3. Recover workflows
   try {
-    const { workflowManager } = await import('./workflow-manager');
-    await workflowManager.recoverFromCrash();
+    const { WorkflowManager } = await import('./workflow-manager');
+    const recoverer = new WorkflowManager();
+    await recoverer.recoverFromCrash();
   } catch (error) {
     console.error('[AceFlow] Workflow recovery failed:', error);
   }

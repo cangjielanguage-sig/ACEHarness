@@ -301,9 +301,11 @@ export const workflowApi = {
     return response.json();
   },
 
-  async stop(): Promise<ApiResponse> {
+  async stop(configFile?: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/stop`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ configFile }),
     });
     if (!response.ok) throw new Error('停止工作流失败');
     return response.json();
@@ -322,29 +324,31 @@ export const workflowApi = {
     return response.json();
   },
 
-  async approve(): Promise<ApiResponse> {
+  async approve(configFile?: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/approve`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ configFile }),
     });
     if (!response.ok) throw new Error('批准检查点失败');
     return response.json();
   },
 
-  async iterate(feedback: string): Promise<ApiResponse> {
+  async iterate(feedback: string, configFile?: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/iterate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feedback }),
+      body: JSON.stringify({ feedback, configFile }),
     });
     if (!response.ok) throw new Error('请求继续迭代失败');
     return response.json();
   },
 
-  async injectFeedback(message: string, interrupt?: boolean): Promise<ApiResponse> {
+  async injectFeedback(message: string, interrupt?: boolean, configFile?: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/inject-feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, interrupt }),
+      body: JSON.stringify({ message, interrupt, configFile }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -353,11 +357,11 @@ export const workflowApi = {
     return response.json();
   },
 
-  async recallFeedback(message: string): Promise<ApiResponse> {
+  async recallFeedback(message: string, configFile?: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/recall-feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, configFile }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -366,9 +370,11 @@ export const workflowApi = {
     return response.json();
   },
 
-  async forceCompleteStep(): Promise<any> {
+  async forceCompleteStep(configFile?: string): Promise<any> {
     const response = await fetch(`${API_BASE}/workflow/force-complete`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ configFile }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -377,11 +383,11 @@ export const workflowApi = {
     return response.json();
   },
 
-  async forceTransition(targetState: string, instruction?: string): Promise<any> {
+  async forceTransition(targetState: string, instruction?: string, configFile?: string): Promise<any> {
     const response = await fetch(`${API_BASE}/workflow/force-transition`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetState, instruction }),
+      body: JSON.stringify({ targetState, instruction, configFile }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -390,17 +396,18 @@ export const workflowApi = {
     return response.json();
   },
 
-  async getStatus(): Promise<WorkflowStatusResponse> {
-    const response = await fetch(`${API_BASE}/workflow/status`);
+  async getStatus(configFile?: string): Promise<WorkflowStatusResponse> {
+    const params = configFile ? `?configFile=${encodeURIComponent(configFile)}` : '';
+    const response = await fetch(`${API_BASE}/workflow/status${params}`);
     if (!response.ok) throw new Error('获取状态失败');
     return response.json();
   },
 
-  async setContext(scope: 'global' | 'phase', context: string, phase?: string, runId?: string): Promise<ApiResponse> {
+  async setContext(scope: 'global' | 'phase', context: string, phase?: string, runId?: string, configFile?: string): Promise<ApiResponse> {
     const response = await fetch(`${API_BASE}/workflow/context`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope, phase, context, runId }),
+      body: JSON.stringify({ scope, phase, context, runId, configFile }),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -409,9 +416,12 @@ export const workflowApi = {
     return response.json();
   },
 
-  async getContexts(runId?: string): Promise<{ globalContext: string; phaseContexts: Record<string, string> }> {
-    const params = runId ? `?runId=${encodeURIComponent(runId)}` : '';
-    const response = await fetch(`${API_BASE}/workflow/context${params}`);
+  async getContexts(runId?: string, configFile?: string): Promise<{ globalContext: string; phaseContexts: Record<string, string> }> {
+    const params = new URLSearchParams();
+    if (runId) params.set('runId', runId);
+    if (configFile) params.set('configFile', configFile);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const response = await fetch(`${API_BASE}/workflow/context${qs}`);
     if (!response.ok) throw new Error('获取上下文失败');
     return response.json();
   },

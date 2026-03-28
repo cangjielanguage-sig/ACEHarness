@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Zap, Cpu, Database, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, Play, Package, Cog, FileText, History } from 'lucide-react';
+import { Activity, Zap, Cpu, Database, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, Play, Package, Cog, FileText, History, Key } from 'lucide-react';
 import { configApi, runsApi, agentApi } from '@/lib/api';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
@@ -12,6 +12,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import NewConfigModal from '@/components/NewConfigModal';
+import EnvVarsDialog from '@/components/EnvVarsDialog';
 import { RobotLogo } from '@/components/chat/ChatMessage';
 
 interface DashboardStats {
@@ -21,6 +22,12 @@ interface DashboardStats {
   activeWorkflows: number;
   totalAgents: number;
   runningProcesses: number;
+}
+
+function formatStateName(name: string): string {
+  if (name === '__origin__') return '开始';
+  if (name === '__human_approval__') return '人工审查';
+  return name;
 }
 
 export default function DashboardPage() {
@@ -38,6 +45,7 @@ export default function DashboardPage() {
   const [recentRuns, setRecentRuns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [showEnvVars, setShowEnvVars] = useState(false);
   const [performanceData, setPerformanceData] = useState<any[]>([]);
   const [activityData, setActivityData] = useState<any[]>([]);
   const [runningRuns, setRunningRuns] = useState<any[]>([]);
@@ -334,7 +342,7 @@ export default function DashboardPage() {
                   color="from-green-600 to-green-700"
                 />
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <QuickAction
                   icon={Settings}
                   label={t('dashboard.quickActions.models')}
@@ -358,6 +366,12 @@ export default function DashboardPage() {
                   label={t('dashboard.quickActions.schedules')}
                   onClick={() => router.push('/schedules')}
                   color="from-teal-600 to-teal-700"
+                />
+                <QuickAction
+                  icon={Key}
+                  label={t('dashboard.quickActions.envVars') || '环境变量'}
+                  onClick={() => setShowEnvVars(true)}
+                  color="from-amber-600 to-amber-700"
                 />
               </div>
             </div>
@@ -465,7 +479,7 @@ export default function DashboardPage() {
                         <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                         <div className="flex flex-col">
                           <span className="font-medium">{configName}</span>
-                          <span className="text-xs text-muted-foreground">{run.currentPhase || 'Starting...'}</span>
+                          <span className="text-xs text-muted-foreground">{formatStateName(run.currentPhase || '') || 'Starting...'}</span>
                         </div>
                       </div>
                       <Badge variant="secondary">{run.completedSteps || 0}/{run.totalSteps || 0}</Badge>
@@ -518,7 +532,7 @@ export default function DashboardPage() {
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{run.configName || run.configFile}</div>
                         <div className="text-xs text-muted-foreground">
-                          {run.currentPhase || t('dashboard.starting')} · {new Date(run.startTime).toLocaleString()}
+                          {formatStateName(run.currentPhase || '') || t('dashboard.starting')} · {new Date(run.startTime).toLocaleString()}
                         </div>
                       </div>
                     </div>
@@ -542,6 +556,10 @@ export default function DashboardPage() {
             router.push(`/workbench/${encodeURIComponent(filename)}?mode=design`);
           }}
         />
+      )}
+
+      {showEnvVars && (
+        <EnvVarsDialog onClose={() => setShowEnvVars(false)} />
       )}
     </div>
   );

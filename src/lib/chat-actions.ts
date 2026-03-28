@@ -194,31 +194,28 @@ function isCardLike(obj: any): boolean {
   );
 }
 
-/** Valid Material Symbol icon names used in this app (whitelist) */
-const VALID_ICONS = new Set([
-  // Git/代码相关
-  'merge_type', 'fork_right', 'branch', 'commit', 'tag', 'source', 'link', 'content_copy',
-  'diff', 'analytics', 'rule', 'fact_check', 'review', 'approval', 'merge', 'playlist_add_check', 'done_all',
-  // 文件相关
-  'description', 'insert_drive_file', 'note', 'article', 'folder', 'file_copy', 'receipt',
-  // 代码/编译
-  'code', 'terminal', 'console', 'memory', 'cpu', 'developer_mode', 'engineering',
-  'precision_manufacturing', 'bug_report', 'error', 'warning', 'outbound', 'plain',
-  'dns', 'router', 'cloud', 'storage', 'backup', 'restore', 'sync',
-  // 状态/进度
-  'running_errors', 'pending', 'hourglass_empty', 'schedule', 'timelapse', 'progress_activity',
-  'visibility', 'check_circle', 'cancel', 'stop', 'play_arrow', 'pause', 'refresh',
-  'next_plan', 'assistant', 'psychology', 'recommend',
-  // 操作相关
-  'search', 'filter_list', 'sort', 'download', 'upload', 'settings', 'launch',
-  'arrow_forward', 'arrow_back', 'close', 'add', 'remove', 'edit', 'delete',
-  // 信息相关
-  'info', 'help', 'smart_toy', 'rocket_launch', 'bolt', 'flash_on', 'energy', 'power',
-  'battery_charging_full', 'device_thermostat', 'speed', 'neural_pulse',
-  // 导航/界面
-  'chat', 'mail', 'phone', 'flag', 'bookmark', 'star', 'favorite', 'thumb_up',
-  'thumb_down', 'share', 'flag_star',
-]);
+/** Load full Material Icons codepoints for validation (server-side only) */
+const VALID_ICONS: Set<string> = (() => {
+  if (typeof window !== 'undefined') {
+    // Client-side: return minimal fallback (validation only runs server-side)
+    return new Set(['help', 'info', 'check_circle', 'error', 'warning']);
+  }
+  try {
+    // Dynamic require to avoid bundling fs/path in client builds
+    const fs = require('fs');
+    const path = require('path');
+    const codepointsPath = path.resolve(process.cwd(), 'skills/.claude/skills/aceflow-chat-card/scripts/MaterialIcons-Regular.codepoints');
+    const content = fs.readFileSync(codepointsPath, 'utf-8');
+    const icons = new Set<string>();
+    for (const line of content.split('\n')) {
+      const name = line.split(' ')[0]?.trim();
+      if (name) icons.add(name);
+    }
+    return icons;
+  } catch {
+    return new Set(['help', 'info', 'check_circle', 'error', 'warning']);
+  }
+})();
 
 const FALLBACK_ICON = 'help';
 

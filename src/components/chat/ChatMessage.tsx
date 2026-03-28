@@ -11,6 +11,7 @@ interface ChatMessageProps {
     id: string;
     role: 'user' | 'assistant' | 'error';
     content: string;
+    thinking?: string;
     actions?: ActionState[];
     cards?: any[];
     costUsd?: number;
@@ -225,10 +226,18 @@ export default memo(function ChatMessage({ message, isStreaming, onConfirmAction
       <div className="max-w-[85%] space-y-1">
         {isStreaming && !message.content && <ThinkingBot />}
         {message.content && (
-          <div className="rounded-2xl rounded-bl-sm px-4 py-2.5 bg-muted text-sm prose-sm prose-neutral dark:prose-invert max-w-none [&_pre]:bg-background [&_pre]:border [&_pre]:rounded [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:bg-background/50 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5">
+          <div className="rounded-2xl rounded-bl-sm px-4 py-2.5 bg-muted text-sm prose-sm prose-neutral dark:prose-invert max-w-none [&_pre]:bg-background [&_pre]:border [&_pre]:rounded [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:bg-background/50 [&_code]:text-foreground [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5">
             <Markdown>{message.content}</Markdown>
             {isStreaming && <ThinkingBot />}
           </div>
+        )}
+        {message.thinking && (
+          <details className="mt-1 rounded-xl border border-border bg-muted/50 text-xs">
+            <summary className="cursor-pointer px-3 py-1.5 text-muted-foreground select-none">💭 思维过程</summary>
+            <div className="px-3 py-2 prose-sm prose-neutral dark:prose-invert max-w-none [&_p]:my-1 [&_pre]:bg-background [&_pre]:border [&_pre]:rounded [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:bg-background/50 [&_code]:text-foreground [&_code]:px-1 [&_code]:rounded [&_code]:text-xs">
+              <Markdown>{message.thinking}</Markdown>
+            </div>
+          </details>
         )}
         {message.actions?.map(action => (
           <ActionCard

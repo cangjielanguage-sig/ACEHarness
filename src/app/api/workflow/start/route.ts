@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { workflowManager } from '@/lib/workflow-manager';
-import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
-import { readFile } from 'fs/promises';
-import { resolve } from 'path';
-import { parse } from 'yaml';
+import { workflowRegistry } from '@/lib/workflow-registry';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,30 +13,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Load config to determine mode
-    const configPath = resolve(process.cwd(), 'configs', configFile);
-    const configContent = await readFile(configPath, 'utf-8');
-    const config = parse(configContent);
-    const isStateMachine = config.workflow?.mode === 'state-machine';
+    const manager = await workflowRegistry.getManager(configFile);
 
-    // Select appropriate manager
-    const manager = isStateMachine ? stateMachineWorkflowManager : workflowManager;
-
-    // Check if already running before kicking off
+    // Check if this specific config is already running
     const currentStatus = manager.getStatus();
     if (currentStatus.status === 'running') {
       return NextResponse.json(
-        { error: '已有工作流正在运行' },
+        { error: '该配置的工作流已在运行中' },
         { status: 409 }
       );
     }
 
-    // Fire-and-forget: kick off the workflow without awaiting completion.
-    // Progress and errors are streamed to the client via SSE (/api/workflow/events).
-    manager.start(configFile).catch(() => {
-      // Errors are already emitted as 'status' events inside start(),
-      // so the SSE stream will notify the frontend.
-    });
+    manager.start(configFile).catch(() => {});
 
     return NextResponse.json({
       success: true,

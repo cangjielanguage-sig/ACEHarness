@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server';
-import { workflowManager } from '@/lib/workflow-manager';
-import { stateMachineWorkflowManager } from '@/lib/state-machine-workflow-manager';
+import { workflowRegistry } from '@/lib/workflow-registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,69 +13,50 @@ export async function GET(request: NextRequest) {
         controller.enqueue(encoder.encode(message));
       };
 
-      // 监听工作流事件
-      const handlers = {
-        status: (data: any) => sendEvent({ type: 'status', data }),
-        phase: (data: any) => sendEvent({ type: 'phase', data }),
-        step: (data: any) => sendEvent({ type: 'step', data }),
-        result: (data: any) => sendEvent({ type: 'result', data }),
-        checkpoint: (data: any) => sendEvent({ type: 'checkpoint', data }),
-        agents: (data: any) => sendEvent({ type: 'agents', data }),
-        iteration: (data: any) => sendEvent({ type: 'iteration', data }),
-        'iteration-complete': (data: any) => sendEvent({ type: 'iteration-complete', data }),
-        escalation: (data: any) => sendEvent({ type: 'escalation', data }),
-        'token-usage': (data: any) => sendEvent({ type: 'token-usage', data }),
-        'feedback-injected': (data: any) => sendEvent({ type: 'feedback-injected', data }),
-        'feedback-recalled': (data: any) => sendEvent({ type: 'feedback-recalled', data }),
-        'context-updated': (data: any) => sendEvent({ type: 'context-updated', data }),
-        // Supervisor-Lite Plan 循环事件
-        'plan-question': (data: any) => sendEvent({ type: 'plan-question', data }),
-        'plan-round': (data: any) => sendEvent({ type: 'plan-round', data }),
-        'route-decision': (data: any) => sendEvent({ type: 'route-decision', data }),
+      // Normalized event handlers — forward from registry which tags with __configFile
+      const handlers: Record<string, (data: any) => void> = {};
+      const eventTypes = [
+        'status', 'phase', 'step', 'result', 'checkpoint', 'agents',
+        'iteration', 'iteration-complete', 'escalation', 'token-usage',
+        'feedback-injected', 'feedback-recalled', 'context-updated',
+        'plan-question', 'plan-round', 'route-decision',
+        // State machine events forwarded with normalized type names
+        'state-change', 'step-start', 'step-complete', 'transition',
+        'force-transition', 'transition-forced', 'human-approval-required',
+        'agent-flow',
+      ];
+
+      // Map SM events to frontend-compatible types
+      const smTypeMap: Record<string, string> = {
+        'state-change': 'phase',
+        'step-start': 'step',
+        'step-complete': 'result',
       };
 
-      // 状态机专属事件
-      const smHandlers = {
-        'state-change': (data: any) => sendEvent({ type: 'phase', data: { phase: data.state, message: data.message } }),
-        'step-start': (data: any) => sendEvent({ type: 'step', data: { id: data.id, step: `${data.state}-${data.step}`, agent: data.agent } }),
-        'step-complete': (data: any) => sendEvent({ type: 'result', data: { id: data.id, step: `${data.state}-${data.step}`, agent: data.agent, output: data.output, costUsd: data.costUsd, durationMs: data.durationMs } }),
-        'transition': (data: any) => sendEvent({ type: 'sm-transition', data }),
-        'force-transition': (data: any) => sendEvent({ type: 'force-transition', data }),
-        'transition-forced': (data: any) => sendEvent({ type: 'transition-forced', data }),
-        'human-approval-required': (data: any) => sendEvent({ type: 'human-approval-required', data }),
-        status: (data: any) => sendEvent({ type: 'status', data }),
-        agents: (data: any) => sendEvent({ type: 'agents', data }),
-        escalation: (data: any) => sendEvent({ type: 'escalation', data }),
-        'token-usage': (data: any) => sendEvent({ type: 'token-usage', data }),
-        'feedback-injected': (data: any) => sendEvent({ type: 'feedback-injected', data }),
-        'feedback-recalled': (data: any) => sendEvent({ type: 'feedback-recalled', data }),
-        // Supervisor-Lite Plan 循环事件
-        'plan-question': (data: any) => sendEvent({ type: 'plan-question', data }),
-        'plan-round': (data: any) => sendEvent({ type: 'plan-round', data }),
-        'route-decision': (data: any) => sendEvent({ type: 'route-decision', data }),
-        // Agent 工作流事件
-        'agent-flow': (data: any) => sendEvent({ type: 'agent-flow', data }),
-      };
+      for (const evt of eventTypes) {
+        handlers[evt] = (data: any) => {
+          const { __configFile, ...rest } = data;
+          const mappedType = smTypeMap[evt];
+          if (evt === 'state-change') {
+            sendEvent({ type: 'phase', data: { phase: rest.state, message: rest.message, configFile: __configFile } });
+          } else if (evt === 'step-start') {
+            sendEvent({ type: 'step', data: { ...rest, step: `${rest.state}-${rest.step}`, configFile: __configFile } });
+          } else if (evt === 'step-complete') {
+            sendEvent({ type: 'result', data: { ...rest, step: `${rest.state}-${rest.step}`, configFile: __configFile } });
+          } else {
+            sendEvent({ type: mappedType || evt, data: { ...rest, configFile: __configFile } });
+          }
+        };
+        workflowRegistry.on(evt, handlers[evt]);
+      }
 
-      Object.entries(handlers).forEach(([event, handler]) => {
-        workflowManager.on(event, handler);
-      });
-      Object.entries(smHandlers).forEach(([event, handler]) => {
-        stateMachineWorkflowManager.on(event, handler);
-      });
-
-      // 清理函数
       request.signal.addEventListener('abort', () => {
-        Object.entries(handlers).forEach(([event, handler]) => {
-          workflowManager.off(event, handler);
-        });
-        Object.entries(smHandlers).forEach(([event, handler]) => {
-          stateMachineWorkflowManager.off(event, handler);
-        });
+        for (const evt of eventTypes) {
+          workflowRegistry.off(evt, handlers[evt]);
+        }
         controller.close();
       });
 
-      // 发送初始连接消息
       sendEvent({ type: 'connected', data: { message: '已连接到事件流' } });
     },
   });
