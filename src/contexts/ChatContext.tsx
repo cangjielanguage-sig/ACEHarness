@@ -237,33 +237,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     setLoading(false);
     setStreamingMessageId(null);
-    console.log('[ChatRecovery] Loading session:', activeSessionId);
     apiLoadSession(activeSessionId).then(async s => {
-      if (!s) { console.log('[ChatRecovery] Session not found on disk'); setActiveSession(null); return; }
-      console.log('[ChatRecovery] Loaded session, messages:', s.messages.length, 'backendSessionId:', s.backendSessionId);
+      if (!s) { setActiveSession(null); return; }
       // Clean up empty assistant messages left by interrupted streams
       const cleaned = {
         ...s,
         messages: s.messages.filter(m => !(m.role === 'assistant' && !m.content && !m.actions?.length && !m.cards?.length)),
       };
-      console.log('[ChatRecovery] After cleanup, messages:', cleaned.messages.length);
       setActiveSession(reparseSession(cleaned));
 
       // Check if there's an active stream for this session and reconnect
       try {
         const checkRes = await fetch(`/api/chat/stream?checkActive=${encodeURIComponent(activeSessionId)}`);
         const checkData = await checkRes.json();
-        console.log('[ChatRecovery] checkActive response:', JSON.stringify(checkData));
         if (checkData.active && checkData.chatId) {
           // Find or create the last assistant message to resume streaming into
           let lastAssistant = cleaned.messages.filter(m => m.role === 'assistant').pop();
-          console.log('[ChatRecovery] lastAssistant found:', !!lastAssistant, lastAssistant?.id);
           if (!lastAssistant) {
             // Empty assistant message was filtered out — re-add it for recovery
             lastAssistant = { id: genId(), role: 'assistant' as const, content: '', timestamp: Date.now() };
             cleaned.messages.push(lastAssistant);
             setActiveSession(reparseSession(cleaned));
-            console.log('[ChatRecovery] Created new assistant message for recovery:', lastAssistant.id);
           }
             setLoading(true);
             setStreamingMessageId(lastAssistant.id);
@@ -282,7 +276,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             }
 
             // Connect SSE to continue receiving deltas
-            console.log('[ChatRecovery] Connecting SSE to:', checkData.chatId, 'streamContent length:', (checkData.streamContent || '').length);
             const es = new EventSource(`/api/chat/stream?id=${checkData.chatId}`);
             activeEventSourceRef.current = es;
             let accumulated = checkData.streamContent || '';
