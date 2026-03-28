@@ -194,24 +194,18 @@ function isCardLike(obj: any): boolean {
   );
 }
 
-/** Load full Material Icons codepoints for validation (server-side only) */
+/** Load full Material Icons list for validation (server-side only) */
 const VALID_ICONS: Set<string> = (() => {
   if (typeof window !== 'undefined') {
     // Client-side: return minimal fallback (validation only runs server-side)
     return new Set(['help', 'info', 'check_circle', 'error', 'warning']);
   }
   try {
-    // Dynamic require to avoid bundling fs/path in client builds
     const fs = require('fs');
     const path = require('path');
-    const codepointsPath = path.resolve(process.cwd(), 'skills/.claude/skills/aceflow-chat-card/scripts/MaterialIcons-Regular.codepoints');
-    const content = fs.readFileSync(codepointsPath, 'utf-8');
-    const icons = new Set<string>();
-    for (const line of content.split('\n')) {
-      const name = line.split(' ')[0]?.trim();
-      if (name) icons.add(name);
-    }
-    return icons;
+    const jsonPath = path.resolve(process.cwd(), 'skills/.claude/skills/aceflow-chat-card/scripts/material-icons.json');
+    const icons: string[] = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+    return new Set(icons);
   } catch {
     return new Set(['help', 'info', 'check_circle', 'error', 'warning']);
   }
