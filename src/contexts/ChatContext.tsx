@@ -724,6 +724,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
             }
             const fullText = data.result || accumulated;
+            const streamText = accumulated || fullText;
             const { text: cleanText, actions, cards } = parseActions(fullText);
             const actionStates: ActionState[] = actions.map(a => ({
               id: genId(), action: a, status: isSafeAction(a) ? 'auto_executing' as ActionStatus : 'pending' as ActionStatus, timestamp: Date.now(),
@@ -732,7 +733,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               ...s, updatedAt: Date.now(),
               messages: s.messages.map(m => m.id === assistantMsgId ? {
                 ...m, content: cleanText,
-                rawContent: (cards.length > 0 || actionStates.length > 0) ? (accumulatedRawContent ? accumulatedRawContent + '\n\n' + fullText : fullText) : undefined,
+                rawContent: (cards.length > 0 || actionStates.length > 0) ? (accumulatedRawContent ? accumulatedRawContent + '\n\n' + streamText : streamText) : undefined,
                 actions: actionStates.length > 0 ? actionStates : undefined,
                 cards: cards.length > 0 ? cards : undefined,
                 costUsd: data.costUsd, durationMs: data.durationMs, usage: data.usage,
