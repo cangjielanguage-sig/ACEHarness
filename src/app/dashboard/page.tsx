@@ -415,7 +415,7 @@ export default function DashboardPage() {
                         border: '1px solid hsl(var(--border))',
                         borderRadius: '8px',
                       }}
-                      formatter={(value: any, name: string) => [value, name === 'calls' ? t('dashboard.charts.calls') : t('dashboard.charts.cost')]}
+                      formatter={(value: any, name?: string | number) => [value, name === 'calls' ? t('dashboard.charts.calls') : t('dashboard.charts.cost')]}
                     />
                     <Bar dataKey="calls" fill="hsl(var(--primary))" radius={[0, 8, 8, 0]} />
                   </BarChart>

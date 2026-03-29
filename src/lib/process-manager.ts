@@ -13,6 +13,7 @@ import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
 import { loadEnvVars, buildEnvObject } from './env-manager';
+import { detectCangjieHome, buildCjpmShellCommand } from './cangjie-env';
 
 const DEBUG_DIR = resolve(process.cwd(), 'runs', '.tmp');
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -199,6 +200,14 @@ export interface ProcessInfo {
   systemPrompt?: string;
 }
 
+export interface McpServerConfig {
+  name: string;
+  type: 'cangjie-magic' | 'stdio';
+  command: string;          // e.g. "cjpm run --name magic.examples.mcp_server"
+  projectDir?: string;      // CangjieMagic 项目目录
+  env?: Record<string, string>;
+}
+
 interface ExecuteOptions {
   workingDirectory?: string;
   allowedTools?: string[];
@@ -209,6 +218,7 @@ interface ExecuteOptions {
   stepId?: string;
   agents?: Record<string, any>; // For review panel mode
   frontendSessionId?: string; // For tracking active streams per frontend session
+  mcpServers?: McpServerConfig[];
 }
 
 class ProcessManager extends EventEmitter {
@@ -384,6 +394,44 @@ class ProcessManager extends EventEmitter {
       cliArgs.push('--agents', JSON.stringify(options.agents));
     }
     cliArgs.push('--dangerously-skip-permissions');
+
+    // Generate MCP config file if mcpServers are specified
+    if (options.mcpServers?.length) {
+      const mcpConfig: Record<string, any> = { mcpServers: {} };
+      for (const server of options.mcpServers) {
+        if (server.type === 'cangjie-magic') {
+          const cangjieHome = await detectCangjieHome();
+          if (!cangjieHome) {
+            proc.logLines.push(`[${ts()}] ⚠️ CANGJIE_HOME not found, skipping MCP server: ${server.name}`);
+            continue;
+          }
+          const { command: shellCmd, args: shellArgs } = await buildCjpmShellCommand(
+            cangjieHome,
+            server.command,
+            server.projectDir,
+          );
+          mcpConfig.mcpServers[server.name] = {
+            command: shellCmd,
+            args: shellArgs,
+            env: { CANGJIE_HOME: cangjieHome, ...server.env },
+          };
+        } else {
+          // Generic stdio MCP server
+          mcpConfig.mcpServers[server.name] = {
+            command: server.command,
+            args: [],
+            env: server.env || {},
+          };
+        }
+      }
+      if (Object.keys(mcpConfig.mcpServers).length > 0) {
+        const mcpConfigFile = resolve(tmpdir(), `claude-mcp-${randomBytes(8).toString('hex')}.json`);
+        await writeFile(mcpConfigFile, JSON.stringify(mcpConfig, null, 2), 'utf-8');
+        tempFiles.push(mcpConfigFile);
+        cliArgs.push('--mcp-config', mcpConfigFile);
+        proc.logLines.push(`[${ts()}] MCP config: ${mcpConfigFile} (${Object.keys(mcpConfig.mcpServers).length} servers)`);
+      }
+    }
 
     proc.logLines.push(`[${ts()}] 命令: claude ${cliArgs.map(a => a.length > 100 ? a.substring(0, 100) + '...' : a.includes(' ') ? `"${a}"` : a).join(' ')}`);
 

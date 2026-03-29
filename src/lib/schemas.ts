@@ -71,6 +71,13 @@ export const roleConfigSchema = z.object({
       model: z.string(),
     })),
   }).optional(),
+  mcpServers: z.array(z.object({
+    name: z.string().min(1),
+    type: z.enum(['cangjie-magic', 'stdio']),
+    command: z.string().min(1),
+    projectDir: z.string().optional(),
+    env: z.record(z.string()).optional(),
+  })).optional(),
 });
 
 // 上下文配置 Schema

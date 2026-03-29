@@ -1389,6 +1389,7 @@ export class WorkflowManager extends EventEmitter {
             : undefined,
           runId: this.currentRunId || undefined,
           agents: agentsJson, // Pass sub-agents configuration
+          mcpServers: roleConfig.mcpServers,
         }
       );
 
@@ -1479,6 +1480,7 @@ export class WorkflowManager extends EventEmitter {
                 ? workflowConfig.context.timeoutMinutes * 60 * 1000
                 : undefined,
               runId: this.currentRunId || undefined,
+              mcpServers: roleConfig.mcpServers,
             }
           );
         } catch (err) {
@@ -2574,6 +2576,7 @@ export class WorkflowManager extends EventEmitter {
             ? resolve(process.cwd(), workflowConfig.context.projectRoot)
             : process.cwd(),
           timeoutMs: 60000,
+          mcpServers: roleConfig.mcpServers,
         }
       );
       return result.result || '[无输出]';

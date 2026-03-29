@@ -732,7 +732,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               ...s, updatedAt: Date.now(),
               messages: s.messages.map(m => m.id === assistantMsgId ? {
                 ...m, content: cleanText,
-                rawContent: (cards.length > 0 || actionStates.length > 0) ? fullText : undefined,
+                rawContent: (cards.length > 0 || actionStates.length > 0) ? (accumulatedRawContent ? accumulatedRawContent + '\n\n' + fullText : fullText) : undefined,
                 actions: actionStates.length > 0 ? actionStates : undefined,
                 cards: cards.length > 0 ? cards : undefined,
                 costUsd: data.costUsd, durationMs: data.durationMs, usage: data.usage,

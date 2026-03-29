@@ -9,8 +9,9 @@ import { resolve } from 'path';
 import { existsSync } from 'fs';
 import type { Engine } from './engine-interface';
 import { KiroCliEngineWrapper } from './kiro-cli-wrapper';
+import { CangjieMagicEngineWrapper } from './cangjie-magic-wrapper';
 
-export type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor';
+export type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic';
 
 interface EngineConfig {
   engine: EngineType;
@@ -61,6 +62,14 @@ export async function createEngine(type?: EngineType): Promise<Engine | null> {
       console.warn(`Engine ${engineType} is not yet implemented`);
       return null;
 
+    case 'cangjie-magic':
+      const cjEngine = new CangjieMagicEngineWrapper();
+      if (!(await cjEngine.isAvailable())) {
+        console.warn('[EngineFactory] CangjieMagic is not available, falling back to Claude Code');
+        return null;
+      }
+      return cjEngine;
+
     default:
       console.warn(`Unknown engine type: ${engineType}`);
       return null;
@@ -95,6 +104,10 @@ export async function isEngineAvailable(type: EngineType): Promise<boolean> {
         }
         return false;
       }
+
+    case 'cangjie-magic':
+      const cjCheck = new CangjieMagicEngineWrapper();
+      return await cjCheck.isAvailable();
 
     default:
       return false;
