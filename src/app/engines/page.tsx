@@ -124,7 +124,13 @@ export default function EnginesPage() {
 
     // Check if engine is available before switching
     if (engineAvailability[engineId] === false) {
-      toast('error', `引擎 ${engine?.name} 不可用。请确保已安装相应的命令行工具。\n\n安装方法：curl -fsSL https://cli.kiro.dev/install | bash`);
+      const hints: Record<string, string> = {
+        'kiro-cli': '安装方法：curl -fsSL https://cli.kiro.dev/install | bash',
+        'claude-code': '安装方法：npm install -g @anthropic-ai/claude-code',
+        'cangjie-magic': '请在环境变量中配置 CANGJIE_HOME、CANGJIE_MAGIC_PATH、OPENSSL_PATH、CANGJIE_STDX_PATH',
+      };
+      const hint = hints[engineId] || '请确保已安装相应的命令行工具';
+      toast('error', `引擎 ${engine?.name} 不可用。${hint}`);
       return;
     }
 
