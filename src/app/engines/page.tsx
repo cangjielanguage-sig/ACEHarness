@@ -57,6 +57,15 @@ const engines: Engine[] = [
     features: ['ACP 协议', '自定义 Agent', 'JSON-RPC 2.0', '流式输出'],
     endpoints: ['anthropic', 'openai'],
   },
+  {
+    id: 'cangjie-magic',
+    name: 'CangjieMagic',
+    description: '仓颉语言 AI Agent 框架，通过 MCP 协议提供智能工具调用能力',
+    icon: '🔮',
+    status: 'available',
+    features: ['MCP 协议', 'JSON-RPC 2.0', '仓颉语言原生', 'Agent 工具调用'],
+    endpoints: ['cangjie'],
+  },
 ];
 
 export default function EnginesPage() {
@@ -298,6 +307,7 @@ export default function EnginesPage() {
           <p className="text-sm text-muted-foreground leading-relaxed mb-3">
             不同的 AI 引擎提供不同的能力和特性。Claude Code 提供完整的代码编辑和执行能力。
             Kiro CLI 基于 ACP 协议，支持自定义 Agent 配置。
+            CangjieMagic 是仓颉语言 AI Agent 框架，通过 MCP 协议提供工具调用能力。
           </p>
           <div className="text-sm text-muted-foreground leading-relaxed space-y-2">
             <p><strong>安装 Kiro CLI：</strong></p>
@@ -305,6 +315,14 @@ export default function EnginesPage() {
               curl -fsSL https://cli.kiro.dev/install | bash
             </code>
             <p className="text-xs">安装后刷新可用性检查，即可切换使用 Kiro CLI 引擎。</p>
+            <p className="mt-2"><strong>配置 CangjieMagic：</strong></p>
+            <p className="text-xs">在环境变量中配置以下变量后刷新可用性检查：</p>
+            <code className="block bg-background/50 p-2 rounded text-xs whitespace-pre-line">
+{`CANGJIE_HOME — 仓颉 SDK 根目录
+CANGJIE_MAGIC_PATH — CangjieMagic 项目路径
+OPENSSL_PATH — OpenSSL 动态库路径
+CANGJIE_STDX_PATH — stdx 动态库路径`}
+            </code>
           </div>
         </motion.div>
       </div>

@@ -63,6 +63,21 @@ export default function EnvVarsDialog({ onClose }: { onClose: () => void }) {
             <div className="text-sm text-muted-foreground text-center py-8">加载中...</div>
           ) : (
             <div className="space-y-2">
+              {/* CangjieMagic 环境变量提示 */}
+              <div className="bg-muted/50 border border-border/50 rounded-lg p-3 mb-3">
+                <p className="text-xs font-medium text-muted-foreground mb-1.5">🔮 CangjieMagic 所需环境变量</p>
+                <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <code className="font-mono text-primary/80">CANGJIE_HOME</code>
+                  <span>仓颉 SDK 根目录</span>
+                  <code className="font-mono text-primary/80">CANGJIE_MAGIC_PATH</code>
+                  <span>CangjieMagic 项目路径</span>
+                  <code className="font-mono text-primary/80">OPENSSL_PATH</code>
+                  <span>OpenSSL 动态库路径（macOS 需要）</span>
+                  <code className="font-mono text-primary/80">CANGJIE_STDX_PATH</code>
+                  <span>stdx 动态库路径</span>
+                </div>
+              </div>
+
               <div className="grid grid-cols-[1fr_1fr_48px_32px] gap-2 text-xs text-muted-foreground font-medium px-1">
                 <span>Key</span>
                 <span>Value</span>
