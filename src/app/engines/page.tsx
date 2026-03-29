@@ -61,7 +61,7 @@ const engines: Engine[] = [
     id: 'cangjie-magic',
     name: 'CangjieMagic',
     description: '仓颉语言 AI Agent 框架，通过 MCP 协议提供智能工具调用能力',
-    icon: '🔮',
+    icon: '🏮',
     status: 'available',
     features: ['MCP 协议', 'JSON-RPC 2.0', '仓颉语言原生', 'Agent 工具调用'],
     endpoints: ['cangjie'],

@@ -72,7 +72,7 @@ export default function EnvVarsDialog({ onClose }: { onClose: () => void }) {
                   <code className="font-mono text-primary/80">CANGJIE_MAGIC_PATH</code>
                   <span>CangjieMagic 项目路径</span>
                   <code className="font-mono text-primary/80">OPENSSL_PATH</code>
-                  <span>OpenSSL 动态库路径（macOS 需要）</span>
+                  <span>OpenSSL 动态库路径</span>
                   <code className="font-mono text-primary/80">CANGJIE_STDX_PATH</code>
                   <span>stdx 动态库路径</span>
                 </div>
