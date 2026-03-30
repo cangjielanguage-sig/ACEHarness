@@ -251,16 +251,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const checkRes = await fetch(`/api/chat/stream?checkActive=${encodeURIComponent(activeSessionId)}`);
         const checkData = await checkRes.json();
         if (checkData.active && checkData.chatId) {
-          // Find or create the last assistant message to resume streaming into
-          let lastAssistant = cleaned.messages.filter(m => m.role === 'assistant').pop();
-          if (!lastAssistant) {
-            // Empty assistant message was filtered out — re-add it for recovery
-            lastAssistant = { id: genId(), role: 'assistant' as const, content: '', timestamp: Date.now() };
-            cleaned.messages.push(lastAssistant);
-            setActiveSession(reparseSession(cleaned));
-          }
+          // Always create a fresh assistant message for recovery — never reuse an existing one
+          // to avoid overwriting completed historical messages with new streaming content
+          const recoveryMsg = { id: genId(), role: 'assistant' as const, content: '', timestamp: Date.now() };
+          cleaned.messages.push(recoveryMsg);
+          setActiveSession(reparseSession(cleaned));
+
             setLoading(true);
-            setStreamingMessageId(lastAssistant.id);
+            setStreamingMessageId(recoveryMsg.id);
             activeChatIdRef.current = checkData.chatId;
 
             // Pre-fill with accumulated content
@@ -270,7 +268,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 if (!prev) return prev;
                 return {
                   ...prev,
-                  messages: prev.messages.map(m => m.id === lastAssistant.id ? { ...m, content: cleanText, cards: newCards.length > 0 ? newCards : m.cards } : m),
+                  messages: prev.messages.map(m => m.id === recoveryMsg.id ? { ...m, content: cleanText, cards: newCards.length > 0 ? newCards : m.cards } : m),
                 };
               });
             }
@@ -288,7 +286,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 if (!prev) return prev;
                 return {
                   ...prev,
-                  messages: prev.messages.map(m => m.id === lastAssistant.id ? { ...m, content: cleanText, cards: newCards.length > 0 ? newCards : m.cards } : m),
+                  messages: prev.messages.map(m => m.id === recoveryMsg.id ? { ...m, content: cleanText, cards: newCards.length > 0 ? newCards : m.cards } : m),
                 };
               });
             });
@@ -297,11 +295,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               const { content } = JSON.parse(e.data);
               setActiveSession(prev => {
                 if (!prev) return prev;
-                const msg = prev.messages.find(m => m.id === lastAssistant.id);
+                const msg = prev.messages.find(m => m.id === recoveryMsg.id);
                 const prevRaw = msg?.rawContent || '';
                 return {
                   ...prev,
-                  messages: prev.messages.map(m => m.id === lastAssistant.id ? { ...m, rawContent: prevRaw + content } : m),
+                  messages: prev.messages.map(m => m.id === recoveryMsg.id ? { ...m, rawContent: prevRaw + content } : m),
                 };
               });
             });
@@ -320,7 +318,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 if (!prev) return prev;
                 return {
                   ...prev, updatedAt: Date.now(),
-                  messages: prev.messages.map(m => m.id === lastAssistant.id ? {
+                  messages: prev.messages.map(m => m.id === recoveryMsg.id ? {
                     ...m, content: cleanText,
                     rawContent: cards.length > 0 ? fullText : m.rawContent,
                     cards: cards.length > 0 ? cards : m.cards,

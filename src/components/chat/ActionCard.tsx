@@ -47,7 +47,10 @@ export default function ActionCard({ action, onConfirm, onReject, onUndo, onRetr
           <span className="material-symbols-outlined text-base text-yellow-500">pending</span>
         )}
         {(action.status === 'executing' || action.status === 'auto_executing') && (
-          <span className="material-symbols-outlined text-base text-blue-500 animate-spin">progress_activity</span>
+          <svg className="animate-spin w-4 h-4 text-blue-500 shrink-0" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
         )}
         {action.status === 'success' && (
           <span className="material-symbols-outlined text-base text-green-500">check_circle</span>

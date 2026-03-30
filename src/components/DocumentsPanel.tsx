@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { runsApi } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -77,6 +77,85 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
 
   // Delete confirm
   const [deleteTarget, setDeleteTarget] = useState<string[] | null>(null);
+
+  // Fullscreen sidebar controls
+  const FOLDER_TREE_WIDTH_KEY = 'doc-folder-tree-width';
+  const FILE_LIST_WIDTH_KEY = 'doc-file-list-width';
+  const FOLDER_TREE_VISIBLE_KEY = 'doc-folder-tree-visible';
+  const FILE_LIST_VISIBLE_KEY = 'doc-file-list-visible';
+  const FOLDER_TREE_DEFAULT = 192;
+  const FOLDER_TREE_MIN = 120;
+  const FOLDER_TREE_MAX = 320;
+  const FILE_LIST_DEFAULT = 300;
+  const FILE_LIST_MIN = 180;
+  const FILE_LIST_MAX = 500;
+
+  const [folderTreeVisible, setFolderTreeVisible] = useState(true);
+  const [fileListVisible, setFileListVisible] = useState(true);
+  const [folderTreeWidth, setFolderTreeWidth] = useState(FOLDER_TREE_DEFAULT);
+  const [fileListWidth, setFileListWidth] = useState(FILE_LIST_DEFAULT);
+  const resizingPanel = useRef<'folderTree' | 'fileList' | null>(null);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+
+  // Load persisted sidebar state
+  useEffect(() => {
+    try {
+      const ftw = localStorage.getItem(FOLDER_TREE_WIDTH_KEY);
+      const flw = localStorage.getItem(FILE_LIST_WIDTH_KEY);
+      const ftv = localStorage.getItem(FOLDER_TREE_VISIBLE_KEY);
+      const flv = localStorage.getItem(FILE_LIST_VISIBLE_KEY);
+      if (ftw) setFolderTreeWidth(Math.max(FOLDER_TREE_MIN, Math.min(FOLDER_TREE_MAX, Number(ftw))));
+      if (flw) setFileListWidth(Math.max(FILE_LIST_MIN, Math.min(FILE_LIST_MAX, Number(flw))));
+      if (ftv !== null) setFolderTreeVisible(ftv !== 'false');
+      if (flv !== null) setFileListVisible(flv !== 'false');
+    } catch {}
+  }, []);
+
+  const toggleFolderTreeVisible = useCallback(() => {
+    setFolderTreeVisible(v => {
+      const next = !v;
+      try { localStorage.setItem(FOLDER_TREE_VISIBLE_KEY, String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const toggleFileListVisible = useCallback(() => {
+    setFileListVisible(v => {
+      const next = !v;
+      try { localStorage.setItem(FILE_LIST_VISIBLE_KEY, String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const onResizeStart = useCallback((panel: 'folderTree' | 'fileList', e: React.MouseEvent) => {
+    e.preventDefault();
+    resizingPanel.current = panel;
+    startX.current = e.clientX;
+    startWidth.current = panel === 'folderTree' ? folderTreeWidth : fileListWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX.current;
+      const newWidth = startWidth.current + delta;
+      if (resizingPanel.current === 'folderTree') {
+        setFolderTreeWidth(Math.max(FOLDER_TREE_MIN, Math.min(FOLDER_TREE_MAX, newWidth)));
+      } else {
+        setFileListWidth(Math.max(FILE_LIST_MIN, Math.min(FILE_LIST_MAX, newWidth)));
+      }
+    };
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      if (resizingPanel.current === 'folderTree') {
+        setFolderTreeWidth(w => { try { localStorage.setItem(FOLDER_TREE_WIDTH_KEY, String(w)); } catch {} return w; });
+      } else {
+        setFileListWidth(w => { try { localStorage.setItem(FILE_LIST_WIDTH_KEY, String(w)); } catch {} return w; });
+      }
+      resizingPanel.current = null;
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [folderTreeWidth, fileListWidth]);
 
   const loadFiles = useCallback(async () => {
     if (!runId) return;
@@ -263,6 +342,18 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
           <span className="material-symbols-outlined text-sm">open_in_new</span>
         </Button>
       )}
+      {!compact && fullscreen && (
+        <>
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={toggleFolderTreeVisible}
+            title={folderTreeVisible ? '隐藏文件夹' : '显示文件夹'}>
+            <span className="material-symbols-outlined text-sm">side_navigation</span>
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={toggleFileListVisible}
+            title={fileListVisible ? '隐藏文件列表' : '显示文件列表'}>
+            <span className="material-symbols-outlined text-sm">view_sidebar</span>
+          </Button>
+        </>
+      )}
       {!compact && (
         <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setFullscreen(f => !f)} title={fullscreen ? '退出全屏' : '全屏'}>
           <span className="material-symbols-outlined text-sm">{fullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>
@@ -440,11 +531,33 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
             {toolbar(false)}
           </div>
           <div className="flex flex-1 overflow-hidden">
-            {!fullscreen && folderTree()}
-            {!fullscreen && (
-              <div className="flex-1 flex flex-col overflow-hidden border-r border-border">
+            {(!fullscreen || folderTreeVisible) && (
+              <div
+                style={fullscreen && folderTreeVisible ? { width: folderTreeWidth } : undefined}
+                className={fullscreen ? 'shrink-0 flex flex-col overflow-hidden' : ''}
+              >
+                {folderTree()}
+              </div>
+            )}
+            {fullscreen && folderTreeVisible && (
+              <div
+                className="w-1 hover:w-1.5 bg-border hover:bg-primary cursor-col-resize shrink-0 transition-colors"
+                onMouseDown={e => onResizeStart('folderTree', e)}
+              />
+            )}
+            {(!fullscreen || fileListVisible) && (
+              <div
+                style={fullscreen && fileListVisible ? { width: fileListWidth } : undefined}
+                className={`flex flex-col overflow-hidden border-r border-border ${fullscreen ? 'shrink-0' : 'flex-1'}`}
+              >
                 {fileList(false)}
               </div>
+            )}
+            {fullscreen && fileListVisible && (
+              <div
+                className="w-1 hover:w-1.5 bg-border hover:bg-primary cursor-col-resize shrink-0 transition-colors"
+                onMouseDown={e => onResizeStart('fileList', e)}
+              />
             )}
             {previewPane()}
           </div>

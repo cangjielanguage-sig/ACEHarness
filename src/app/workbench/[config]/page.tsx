@@ -1186,6 +1186,7 @@ export default function WorkbenchPage() {
     liveStreamLenRef.current = 0;
     setLiveStreamVisibleCount(LIVE_STREAM_PAGE_SIZE);
     liveStreamUserScrolledUp.current = false;
+    setInlineFeedbacks([]);
     if (liveStreamRef.current) clearInterval(liveStreamRef.current);
     liveStreamRef.current = setInterval(async () => {
       try {
@@ -1198,6 +1199,7 @@ export default function WorkbenchPage() {
           liveStreamStepRef.current = activeStep;
           liveStreamLenRef.current = 0;
           setLiveStream([]);
+          setInlineFeedbacks([]);
         }
 
         let content: string | null = null;
@@ -2662,6 +2664,9 @@ export default function WorkbenchPage() {
                       if (it.type === 'feedback') return true;
                       const c = (it as any).content as string;
                       if (!c) return false;
+                      // Filter out stream-embedded human-feedback chunks (already shown via inlineFeedbacks)
+                      const parsedIt = parseChunk(c);
+                      if (parsedIt.isHumanFeedback) return false;
                       // Filter out chunks that are just filler text between tool calls (e.g. lone ".")
                       const stripped = c.replace(/\*\*🔧 .+?\*\*/g, '').replace(/<!--.*?-->/gs, '').trim();
                       if (stripped.length <= 1) return false;

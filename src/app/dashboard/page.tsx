@@ -50,36 +50,46 @@ export default function DashboardPage() {
   const [activityData, setActivityData] = useState<any[]>([]);
   const [runningRuns, setRunningRuns] = useState<any[]>([]);
 
+  const CACHE_KEY = 'dashboard-cache';
+  const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
   useEffect(() => {
+    // Try to load from cache first for instant render
+    try {
+      const raw = sessionStorage.getItem(CACHE_KEY);
+      if (raw) {
+        const cached = JSON.parse(raw);
+        if (Date.now() - cached.ts < CACHE_TTL) {
+          setStats(cached.stats);
+          setConfigs(cached.configs);
+          setRecentRuns(cached.recentRuns);
+          setRunningRuns(cached.runningRuns);
+          setAgentUsageData(cached.agentUsageData);
+          setActivityData(cached.activityData);
+          setLoading(false);
+        }
+      }
+    } catch {}
     loadDashboardData();
   }, []);
 
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      const configsData = await configApi.listConfigs();
+      const [configsData, agentsData] = await Promise.all([
+        configApi.listConfigs(),
+        agentApi.listAgents().catch(() => ({ agents: [] })),
+      ]);
       setConfigs(configsData.configs || []);
+      const agentCount = agentsData.agents?.length || 0;
 
-      // Load agent count
-      let agentCount = 0;
-      try {
-        const agentsData = await agentApi.listAgents();
-        agentCount = agentsData.agents?.length || 0;
-      } catch (e) {
-        console.error('Failed to load agents:', e);
-      }
-
-      // Load runs from all configs
-      const allRuns: any[] = [];
-      for (const config of (configsData.configs || [])) {
-        try {
-          const runsData = await runsApi.listByConfig(config.filename);
-          const runs = runsData.runs || [];
-          allRuns.push(...runs);
-        } catch (e) {
-          // Ignore errors for individual configs
-        }
-      }
+      // Load runs from all configs in parallel
+      const runsResults = await Promise.all(
+        (configsData.configs || []).map(config =>
+          runsApi.listByConfig(config.filename).then(d => d.runs || []).catch(() => [])
+        )
+      );
+      const allRuns: any[] = runsResults.flat();
 
       // Filter running runs for active workflows section
       const activeRuns = allRuns.filter((r: any) => r.status === 'running');
@@ -112,31 +122,34 @@ export default function DashboardPage() {
         runningProcesses: allRuns.filter((r: any) => r.status === 'running').length,
       });
 
-      // Aggregate agent usage from run details
+      // Aggregate agent usage from run details — only fetch recent runs (last 50) in parallel
+      const recentForDetails = allRuns.slice(-50);
+      const detailResults = await Promise.all(
+        recentForDetails.map(run =>
+          runsApi.getRunDetail(run.id).catch(() => null)
+        )
+      );
       const agentMap: Record<string, { calls: number; cost: number }> = {};
-      for (const run of allRuns) {
-        try {
-          const detail = await runsApi.getRunDetail(run.id);
-          if (detail?.stepLogs) {
-            for (const log of detail.stepLogs) {
-              if (!log.agent) continue;
-              if (!agentMap[log.agent]) agentMap[log.agent] = { calls: 0, cost: 0 };
-              agentMap[log.agent].calls += 1;
-              agentMap[log.agent].cost += log.costUsd || 0;
+      for (const detail of detailResults) {
+        if (!detail) continue;
+        if (detail.stepLogs) {
+          for (const log of detail.stepLogs) {
+            if (!log.agent) continue;
+            if (!agentMap[log.agent]) agentMap[log.agent] = { calls: 0, cost: 0 };
+            agentMap[log.agent].calls += 1;
+            agentMap[log.agent].cost += log.costUsd || 0;
+          }
+        }
+        if (detail.agents) {
+          for (const ag of detail.agents) {
+            if (!ag.name) continue;
+            if (!agentMap[ag.name]) agentMap[ag.name] = { calls: 0, cost: 0 };
+            if (agentMap[ag.name].calls === 0) {
+              agentMap[ag.name].calls = ag.completedTasks || 0;
+              agentMap[ag.name].cost = ag.costUsd || 0;
             }
           }
-          if (detail?.agents) {
-            for (const ag of detail.agents) {
-              if (!ag.name) continue;
-              if (!agentMap[ag.name]) agentMap[ag.name] = { calls: 0, cost: 0 };
-              // Only use agents array if stepLogs didn't already cover this agent
-              if (agentMap[ag.name].calls === 0) {
-                agentMap[ag.name].calls = ag.completedTasks || 0;
-                agentMap[ag.name].cost = ag.costUsd || 0;
-              }
-            }
-          }
-        } catch { /* skip */ }
+        }
       }
       const agentUsage = Object.entries(agentMap)
         .map(([name, data]) => ({ name, calls: data.calls, cost: Math.round(data.cost * 10000) / 10000 }))
@@ -168,6 +181,26 @@ export default function DashboardPage() {
       }
 
       setActivityData(actData);
+
+      // Write cache for instant render on next visit
+      try {
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify({
+          ts: Date.now(),
+          stats: {
+            totalRuns: allRuns.length,
+            successRate: Math.round(successRate),
+            avgDuration: Math.round(avgDuration),
+            activeWorkflows: configsData.configs?.length || 0,
+            totalAgents: agentCount,
+            runningProcesses: allRuns.filter((r: any) => r.status === 'running').length,
+          },
+          configs: configsData.configs || [],
+          recentRuns: allRuns.slice(-5).reverse(),
+          runningRuns: activeRuns,
+          agentUsageData: agentUsage,
+          activityData: actData,
+        }));
+      } catch {}
 
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
