@@ -10,3 +10,5 @@ export * from './kiro-cli';
 export * from './kiro-cli-wrapper';
 export * from './cangjie-magic';
 export * from './cangjie-magic-wrapper';
+export * from './opencode';
+export * from './opencode-wrapper';

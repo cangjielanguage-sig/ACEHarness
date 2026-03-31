@@ -7,7 +7,7 @@ tags:
   - 文档
   - API
   - md-sys
-model: gpt-5.4
+model: claude-opus-4-6
 temperature: 0.4
 allowedTools:
   - Bash

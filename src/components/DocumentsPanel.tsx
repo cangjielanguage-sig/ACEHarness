@@ -32,6 +32,20 @@ interface DocumentsPanelProps {
 
 type SortField = 'name' | 'time' | 'size';
 type SortOrder = 'asc' | 'desc';
+type DocFilter = 'all' | 'conclusion' | 'detail';
+
+const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/;
+
+function hasTimestamp(filename: string): boolean {
+  return TIMESTAMP_RE.test(filename);
+}
+
+/** Parse timestamp prefix: "2026-03-30T11-06-14-" → "03-30 11:06" */
+function parseTimestamp(filename: string): string {
+  const m = filename.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-/);
+  if (!m) return '';
+  return `${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+}
 
 const roleBadge: Record<string, string> = {
   attacker: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
@@ -62,6 +76,7 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeGroup, setActiveGroup] = useState<string | null>(null); // null = all
+  const [docFilter, setDocFilter] = useState<DocFilter>('all');
 
   // Selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -169,21 +184,28 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
 
   useEffect(() => { loadFiles(); }, [loadFiles]);
 
+  // Filter files by doc type
+  const tabFiles = useMemo(() => {
+    if (docFilter === 'conclusion') return files.filter(f => !hasTimestamp(f.filename));
+    if (docFilter === 'detail') return files.filter(f => hasTimestamp(f.filename));
+    return files;
+  }, [files, docFilter]);
+
   // Build groups from filenames
   const groups = useMemo(() => {
     const map: Record<string, DocFile[]> = {};
-    files.forEach(f => {
+    tabFiles.forEach(f => {
       const g = getFileGroup(f.filename);
       (map[g] ||= []).push(f);
     });
     return map;
-  }, [files]);
+  }, [tabFiles]);
 
   const groupNames = useMemo(() => Object.keys(groups).sort(), [groups]);
 
   // Filtered + sorted files
   const processedFiles = useMemo(() => {
-    let filtered = activeGroup ? (groups[activeGroup] || []) : [...files];
+    let filtered = activeGroup ? (groups[activeGroup] || []) : [...tabFiles];
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(f => f.filename.toLowerCase().includes(q) || f.baseName.toLowerCase().includes(q));
@@ -285,7 +307,7 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
         >
           <span className="material-symbols-outlined text-sm">folder</span>
           <span className="flex-1">全部文件</span>
-          <span className="text-[10px] text-muted-foreground">{files.length}</span>
+          <span className="text-[10px] text-muted-foreground">{tabFiles.length}</span>
         </div>
         {groupNames.map(g => (
           <div
@@ -327,6 +349,23 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setSortOrder(o => o === 'asc' ? 'desc' : 'asc')} title={sortOrder === 'asc' ? '升序' : '降序'}>
           <span className="material-symbols-outlined text-sm">{sortOrder === 'asc' ? 'arrow_upward' : 'arrow_downward'}</span>
         </Button>
+      )}
+      {!compact && (
+        <div className="flex items-center gap-1 ml-1">
+          {([['all', '全部'], ['conclusion', '结论'], ['detail', '详情']] as const).map(([key, label]) => (
+            <Badge
+              key={key}
+              variant={docFilter === key ? 'default' : 'outline'}
+              className={`cursor-pointer text-[10px] h-5 px-1.5 select-none transition-colors ${docFilter === key ? '' : 'hover:bg-muted'}`}
+              onClick={() => setDocFilter(key)}
+            >
+              {label}
+              <span className="ml-0.5 text-[9px] opacity-70">
+                {key === 'all' ? files.length : key === 'conclusion' ? files.filter(f => !hasTimestamp(f.filename)).length : files.filter(f => hasTimestamp(f.filename)).length}
+              </span>
+            </Badge>
+          ))}
+        </div>
       )}
       <div className="flex-1" />
       {selected.size > 0 && (
@@ -406,6 +445,11 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
           <Badge variant="secondary" className={`text-[9px] h-4 px-1 shrink-0 ${roleBadge[file.role] || ''}`}>
             <span className="material-symbols-outlined text-[9px] mr-0.5">{roleIcon[file.role]}</span>
             {roleLabel[file.role]}
+          </Badge>
+        )}
+        {hasTimestamp(file.filename) && (
+          <Badge variant="outline" className="text-[9px] h-4 px-1 shrink-0 text-muted-foreground">
+            {parseTimestamp(file.filename)}
           </Badge>
         )}
         <span className="text-[10px] text-muted-foreground shrink-0 w-14 text-right">{(file.size / 1024).toFixed(1)}K</span>
@@ -513,6 +557,18 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
       {/* Embedded compact mode */}
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-2 p-2">
+          <div className="flex items-center gap-1">
+            {([['all', '全部'], ['conclusion', '结论'], ['detail', '详情']] as const).map(([key, label]) => (
+              <Badge
+                key={key}
+                variant={docFilter === key ? 'default' : 'outline'}
+                className={`cursor-pointer text-[10px] h-5 px-1.5 select-none transition-colors ${docFilter === key ? '' : 'hover:bg-muted'}`}
+                onClick={() => setDocFilter(key)}
+              >
+                {label}
+              </Badge>
+            ))}
+          </div>
           <div className="flex-1" />
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={loadFiles} disabled={loading}>
             <span className="material-symbols-outlined text-sm">refresh</span>

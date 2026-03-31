@@ -10,8 +10,9 @@ import { existsSync } from 'fs';
 import type { Engine } from './engine-interface';
 import { KiroCliEngineWrapper } from './kiro-cli-wrapper';
 import { CangjieMagicEngineWrapper } from './cangjie-magic-wrapper';
+import { OpenCodeEngineWrapper } from './opencode-wrapper';
 
-export type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic';
+export type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode';
 
 interface EngineConfig {
   engine: EngineType;
@@ -70,6 +71,14 @@ export async function createEngine(type?: EngineType): Promise<Engine | null> {
       }
       return cjEngine;
 
+    case 'opencode':
+      const ocEngine = new OpenCodeEngineWrapper();
+      if (!(await ocEngine.isAvailable())) {
+        console.warn('[EngineFactory] OpenCode is not available, falling back to Claude Code');
+        return null;
+      }
+      return ocEngine;
+
     default:
       console.warn(`Unknown engine type: ${engineType}`);
       return null;
@@ -108,6 +117,10 @@ export async function isEngineAvailable(type: EngineType): Promise<boolean> {
     case 'cangjie-magic':
       const cjCheck = new CangjieMagicEngineWrapper();
       return await cjCheck.isAvailable();
+
+    case 'opencode':
+      const ocCheck = new OpenCodeEngineWrapper();
+      return await ocCheck.isAvailable();
 
     default:
       return false;

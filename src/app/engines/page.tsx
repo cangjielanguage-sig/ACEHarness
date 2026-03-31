@@ -49,6 +49,15 @@ const engines: Engine[] = [
     endpoints: ['anthropic', 'openai'],
   },
   {
+    id: 'opencode',
+    name: 'OpenCode',
+    description: '开源 AI 编程 Agent，支持 ACP 协议，模型在 opencode 配置中设置',
+    icon: '/images/opencode_logo.svg',
+    status: 'available',
+    features: ['ACP 协议', 'JSON-RPC 2.0', '开源', '流式输出'],
+    endpoints: ['anthropic', 'openai'],
+  },
+  {
     id: 'codex',
     name: 'Codex',
     description: 'OpenAI Codex 引擎，专注于代码生成和理解',
@@ -128,6 +137,7 @@ export default function EnginesPage() {
         'kiro-cli': '安装方法：curl -fsSL https://cli.kiro.dev/install | bash',
         'claude-code': '安装方法：npm install -g @anthropic-ai/claude-code',
         'cangjie-magic': '请在环境变量中配置 CANGJIE_HOME、CANGJIE_MAGIC_PATH、OPENSSL_PATH、CANGJIE_STDX_PATH',
+        'opencode': '安装方法：npm install -g opencode-ai',
       };
       const hint = hints[engineId] || '请确保已安装相应的命令行工具';
       toast('error', `引擎 ${engine?.name} 不可用。${hint}`);
@@ -320,7 +330,12 @@ export default function EnginesPage() {
             CangjieMagic 是仓颉语言 AI Agent 框架，通过 MCP 协议提供工具调用能力。
           </p>
           <div className="text-sm text-muted-foreground leading-relaxed space-y-2">
-            <p><strong>安装 Kiro CLI：</strong></p>
+            <p><strong>安装 Claude Code：</strong></p>
+            <code className="block bg-background/50 p-2 rounded text-xs">
+              npm install -g @anthropic-ai/claude-code
+            </code>
+            <p className="text-xs">安装后刷新可用性检查，即可切换使用 Claude Code 引擎。</p>
+            <p className="mt-2"><strong>安装 Kiro CLI：</strong></p>
             <code className="block bg-background/50 p-2 rounded text-xs">
               curl -fsSL https://cli.kiro.dev/install | bash
             </code>
@@ -333,6 +348,11 @@ CANGJIE_MAGIC_PATH — CangjieMagic 项目路径
 OPENSSL_PATH — OpenSSL 动态库路径
 CANGJIE_STDX_PATH — stdx 动态库路径`}
             </code>
+            <p className="mt-2"><strong>安装 OpenCode：</strong></p>
+            <code className="block bg-background/50 p-2 rounded text-xs">
+              npm install -g opencode-ai
+            </code>
+            <p className="text-xs">安装后刷新可用性检查，即可切换使用 OpenCode 引擎。</p>
           </div>
         </motion.div>
       </div>

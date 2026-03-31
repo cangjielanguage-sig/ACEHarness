@@ -168,7 +168,7 @@ workflow:
       transitions: []
 
 context:
-  projectRoot: ../xwechat_files/wxid_8pxeudez26yn22_c6c8/msg/file/2026-03/AI_Chat
+  projectRoot: ../AI_Chat
   requirements: |
     为AIChat应用添加账号管理功能：
     1. 在"我的"页面添加"账号管理"入口列表项

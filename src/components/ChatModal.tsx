@@ -79,7 +79,7 @@ export default function ChatModal() {
         <Button
           className="fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-lg z-50"
           onClick={toggleChat}
-          title="Claude 在线聊天"
+          title="AceFlow 在线"
         >
           <span className="material-symbols-outlined" style={{ fontSize: '28px' }}>chat</span>
         </Button>
@@ -88,7 +88,7 @@ export default function ChatModal() {
       {isOpen && (
         <div className="fixed bottom-6 right-6 w-96 h-[600px] bg-background border rounded-lg shadow-2xl z-50 flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b bg-muted flex-shrink-0">
-            <span className="font-semibold text-sm">Claude 在线聊天</span>
+            <span className="font-semibold text-sm">AceFlow 在线</span>
             <div className="flex items-center gap-2">
               <div className="w-48">
                 <ModelSelect
