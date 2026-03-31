@@ -12,7 +12,6 @@ import { existsSync } from 'fs';
 // Skills directory path segments - constructed at runtime to prevent
 // webpack/Next.js file tracing from over-matching the skills directory
 const SKILLS_SUBDIR = ['skills', '.claude', 'skills'].join('/');
-const CLAUDE_SKILLS_SUBDIR = ['.claude', 'skills'].join('/');
 import { parse } from 'yaml';
 import { processManager } from './process-manager';
 import type { ClaudeJsonResult } from './process-manager';
@@ -27,6 +26,7 @@ import type {
 } from './schemas';
 import { formatTimestamp } from './utils';
 import { createEngine, getConfiguredEngine, type Engine, type EngineType } from './engines';
+import { getEngineSkillsSubdir } from './engines/engine-config';
 import type { EngineStreamEvent } from './engines/engine-interface';
 import {
   parseNeedInfo,
@@ -125,6 +125,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private currentEngine: Engine | null = null;
   /** Current engine type */
   private engineType: EngineType = 'claude-code';
+
+  /** Get the workspace skills subdir based on current engine type */
+  private get workspaceSkillsSubdir(): string {
+    return getEngineSkillsSubdir(this.engineType);
+  }
   /** Lightweight router model, configurable from workflow context.routerModel */
   private lightweightRouterModel: string = 'claude-sonnet-4-6';
 
@@ -162,7 +167,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   /**
-   * Load and cache workspace skills from .claude/skills/
+   * Load and cache workspace skills from <engine-config>/skills/
    */
   private async loadWorkspaceSkills(projectRoot: string): Promise<string> {
     if (this.workspaceSkillsCache && this.workspaceSkillsCacheProjectRoot === projectRoot) {
@@ -171,7 +176,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     // Try project-level first, then server-level skills directory
     const candidates = [
-      join(resolve(process.cwd(), projectRoot), CLAUDE_SKILLS_SUBDIR),
+      join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir),
       join(process.cwd(), SKILLS_SUBDIR),
     ];
 
@@ -209,7 +214,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
    * Load a single skill's content from project or system skills directory
    */
   private async loadSkillContent(skillName: string, projectRoot: string): Promise<string | null> {
-    const projectSkillPath = join(resolve(process.cwd(), projectRoot), CLAUDE_SKILLS_SUBDIR, skillName, 'SKILL.md');
+    const projectSkillPath = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir, skillName, 'SKILL.md');
     try {
       return await readFile(projectSkillPath, 'utf-8');
     } catch { /* not found in project */ }
@@ -244,7 +249,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   /**
-   * Copy skills from server skills/ directory to workspace .claude/skills/
+   * Copy skills from server skills/ directory to workspace <engine-config>/skills/
    * so that AI agents can discover and read them naturally.
    */
   private async syncSkillsToWorkspace(config: StateMachineWorkflowConfig): Promise<void> {
@@ -252,7 +257,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     if (!projectRoot) return;
 
     const serverSkillsDir = join(process.cwd(), SKILLS_SUBDIR);
-    const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), CLAUDE_SKILLS_SUBDIR);
+    const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir);
 
     if (!existsSync(serverSkillsDir)) return;
 
@@ -324,17 +329,17 @@ export class StateMachineWorkflowManager extends EventEmitter {
       try { await rm(resolve(dir, 'SKILL.md'), { force: true }); } catch { /* ignore */ }
     }
 
-    // If we created the .claude/skills/ dir and it's now empty, remove it
+    // If we created the skills dir and it's now empty, remove it
     if (!dirExistedBefore) {
       try {
         const remaining = await readdir(dir);
         if (remaining.length === 0) {
           await rm(dir, { recursive: true, force: true });
-          // Also try removing .claude/ if empty
-          const claudeDir = resolve(dir, '..');
-          const claudeRemaining = await readdir(claudeDir);
-          if (claudeRemaining.length === 0) {
-            await rm(claudeDir, { recursive: true, force: true });
+          // Also try removing the engine config dir (e.g. .claude/, .kiro/) if empty
+          const configDir = resolve(dir, '..');
+          const configRemaining = await readdir(configDir);
+          if (configRemaining.length === 0) {
+            await rm(configDir, { recursive: true, force: true });
           }
         }
       } catch { /* ignore */ }

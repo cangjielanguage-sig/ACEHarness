@@ -12,3 +12,4 @@ export * from './cangjie-magic';
 export * from './cangjie-magic-wrapper';
 export * from './opencode';
 export * from './opencode-wrapper';
+export * from './engine-config';

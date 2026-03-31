@@ -12,7 +12,6 @@ import { existsSync } from 'fs';
 // Skills directory path segments - constructed at runtime to prevent
 // webpack/Next.js file tracing from over-matching the skills directory
 const SKILLS_SUBDIR = ['skills', '.claude', 'skills'].join('/');
-const CLAUDE_SKILLS_SUBDIR = ['.claude', 'skills'].join('/');
 import { parse } from 'yaml';
 import { processManager } from './process-manager';
 import type { ClaudeJsonResult } from './process-manager';
@@ -25,6 +24,7 @@ import {
 import type { WorkflowConfig, WorkflowPhase, WorkflowStep, RoleConfig, IterationConfig } from './schemas';
 import { formatTimestamp } from './utils';
 import { createEngine, getConfiguredEngine, type Engine, type EngineType } from './engines';
+import { getEngineSkillsSubdir } from './engines/engine-config';
 import type { EngineStreamEvent } from './engines/engine-interface';
 import {
   parseNeedInfo,
@@ -103,7 +103,7 @@ export class WorkflowManager extends EventEmitter {
   private globalContext: string = '';
   /** Per-phase context injected into steps of that phase */
   private phaseContexts: Map<string, string> = new Map();
-  /** Cached workspace skills discovered from projectRoot/.claude/skills/ */
+  /** Cached workspace skills discovered from projectRoot/<engine-config>/skills/ */
   private workspaceSkills: string = '';
   /** Cached workspace skill names for deduplication */
   private workspaceSkillNames: Set<string> = new Set();
@@ -116,6 +116,11 @@ export class WorkflowManager extends EventEmitter {
   /** Current engine type */
   private engineType: EngineType = 'claude-code';
 
+  /** Get the workspace skills subdir based on current engine type */
+  private get workspaceSkillsSubdir(): string {
+    return getEngineSkillsSubdir(this.engineType);
+  }
+
   // ========== Supervisor-Lite Plan 循环相关 ==========
   /** 待解答的用户问题 Promise 解析器 */
   private pendingUserQuestionResolver: ((answer: string) => void) | null = null;
@@ -127,7 +132,7 @@ export class WorkflowManager extends EventEmitter {
    */
   private async loadSkillContent(skillName: string, projectRoot: string): Promise<string | null> {
     // Try project-level skill first
-    const projectSkillPath = join(resolve(process.cwd(), projectRoot), CLAUDE_SKILLS_SUBDIR, skillName, 'SKILL.md');
+    const projectSkillPath = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir, skillName, 'SKILL.md');
     try {
       const content = await readFile(projectSkillPath, 'utf-8');
       return content;
@@ -208,14 +213,14 @@ export class WorkflowManager extends EventEmitter {
   }
 
   /**
-   * Copy needed skills from server skills/ to workspace .claude/skills/
+   * Copy needed skills from server skills/ to workspace <engine-config>/skills/
    */
   private async syncSkillsToWorkspace(config: any): Promise<void> {
     const projectRoot = config.context?.projectRoot;
     if (!projectRoot) return;
 
     const serverSkillsDir = join(process.cwd(), SKILLS_SUBDIR);
-    const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), CLAUDE_SKILLS_SUBDIR);
+    const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir);
     if (!existsSync(serverSkillsDir)) return;
 
     const needed = new Set<string>();
@@ -271,9 +276,9 @@ export class WorkflowManager extends EventEmitter {
         const remaining = await readdir(dir);
         if (remaining.length === 0) {
           await rm(dir, { recursive: true, force: true });
-          const claudeDir = resolve(dir, '..');
-          const claudeRemaining = await readdir(claudeDir);
-          if (claudeRemaining.length === 0) await rm(claudeDir, { recursive: true, force: true });
+          const configDir = resolve(dir, '..');
+          const configRemaining = await readdir(configDir);
+          if (configRemaining.length === 0) await rm(configDir, { recursive: true, force: true });
         }
       } catch { /* ignore */ }
     }
@@ -300,13 +305,13 @@ export class WorkflowManager extends EventEmitter {
   }
 
   /**
-   * Discover .claude/skills from the workspace projectRoot.
+   * Discover skills from the workspace projectRoot (engine-aware config dir).
    * Reads each skill's SKILL.md and returns a formatted prompt section.
    * Also tracks skill names for deduplication with step-level skills.
    */
   private async discoverWorkspaceSkills(projectRoot: string): Promise<string> {
     const absRoot = resolve(process.cwd(), projectRoot);
-    const skillsDir = join(absRoot, CLAUDE_SKILLS_SUBDIR);
+    const skillsDir = join(absRoot, this.workspaceSkillsSubdir);
     try {
       const skillIndex = resolve(skillsDir, 'SKILL.md');
       const indexContent = await readFile(skillIndex, 'utf-8');

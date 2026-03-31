@@ -4,13 +4,24 @@
  */
 
 export async function runNodejsInstrumentation() {
-  const { existsSync, symlinkSync } = await import('fs');
+  const { existsSync, symlinkSync, readFileSync } = await import('fs');
   const { join } = await import('path');
+  const { getEngineConfigDir } = await import('./engines/engine-config');
 
   const WORKSPACE_ROOT = process.cwd();
-  const LOCAL_CLAUDE_DIR = join(WORKSPACE_ROOT, '.claude');
   const SKILLS_CLAUDE_DIR = join(WORKSPACE_ROOT, 'skills', '.claude');
   const SKILLS_YAML = join(WORKSPACE_ROOT, 'skills', 'skills.yaml');
+
+  // Determine engine-aware config directory
+  let engineConfigDir = '.claude';
+  try {
+    const engineJson = join(WORKSPACE_ROOT, '.engine.json');
+    if (existsSync(engineJson)) {
+      const config = JSON.parse(readFileSync(engineJson, 'utf-8'));
+      if (config.engine) engineConfigDir = getEngineConfigDir(config.engine);
+    }
+  } catch { /* use default */ }
+  const LOCAL_CONFIG_DIR = join(WORKSPACE_ROOT, engineConfigDir);
 
   // 1. Auto-pull skills if not initialized
   const port = process.env.PORT || '3000';
@@ -38,16 +49,16 @@ export async function runNodejsInstrumentation() {
     // PORT may not be set yet, skip API trigger
   }
 
-  // 2. Setup .claude symlink
-  if (existsSync(LOCAL_CLAUDE_DIR)) {
+  // 2. Setup engine-aware config symlink (e.g. .claude, .kiro, .opencode)
+  if (existsSync(LOCAL_CONFIG_DIR)) {
     return;
   }
   if (existsSync(SKILLS_CLAUDE_DIR)) {
     try {
-      symlinkSync(SKILLS_CLAUDE_DIR, LOCAL_CLAUDE_DIR);
-      console.log('[AceFlow] Linked .claude -> skills/.claude');
+      symlinkSync(SKILLS_CLAUDE_DIR, LOCAL_CONFIG_DIR);
+      console.log(`[AceFlow] Linked ${engineConfigDir} -> skills/.claude`);
     } catch (error) {
-      console.error('[AceFlow] Failed to create .claude symlink:', error);
+      console.error(`[AceFlow] Failed to create ${engineConfigDir} symlink:`, error);
     }
   }
 
