@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Activity, Zap, Cpu, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, Play, Package, Cog, FileText, History, Key } from 'lucide-react';
-import { configApi, runsApi, agentApi } from '@/lib/api';
+
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { useTranslations } from '@/hooks/useTranslations';
@@ -76,128 +76,34 @@ export default function DashboardPage() {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      const [configsData, agentsData] = await Promise.all([
-        configApi.listConfigs(),
-        agentApi.listAgents().catch(() => ({ agents: [] })),
-      ]);
-      setConfigs(configsData.configs || []);
-      const agentCount = agentsData.agents?.length || 0;
-
-      // Load runs from all configs in parallel
-      const runsResults = await Promise.all(
-        (configsData.configs || []).map(config =>
-          runsApi.listByConfig(config.filename).then(d => d.runs || []).catch(() => [])
-        )
-      );
-      const allRuns: any[] = runsResults.flat();
-
-      // Filter running runs for active workflows section
-      const activeRuns = allRuns.filter((r: any) => r.status === 'running');
-      setRunningRuns(activeRuns);
-
-      // Sort runs by start time
-      allRuns.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-
-      setRecentRuns(allRuns.slice(-5).reverse());
-
-      // Calculate stats
-      const completed = allRuns.filter((r: any) => r.status === 'completed').length;
-      const failed = allRuns.filter((r: any) => r.status === 'failed').length;
-      const successRate = allRuns.length > 0 ? (completed / allRuns.length) * 100 : 0;
-      const avgDuration = allRuns.length > 0
-        ? allRuns.reduce((acc: number, r: any) => {
-            if (r.endTime) {
-              return acc + (new Date(r.endTime).getTime() - new Date(r.startTime).getTime());
-            }
-            return acc;
-          }, 0) / allRuns.length / 1000 / 60
-        : 0;
-
-      setStats({
-        totalRuns: allRuns.length,
-        successRate: Math.round(successRate),
-        avgDuration: Math.round(avgDuration),
-        activeWorkflows: configsData.configs?.length || 0,
-        totalAgents: agentCount,
-        runningProcesses: allRuns.filter((r: any) => r.status === 'running').length,
-      });
-
-      // Aggregate agent usage from run details — only fetch recent runs (last 50) in parallel
-      const recentForDetails = allRuns.slice(-50);
-      const detailResults = await Promise.all(
-        recentForDetails.map(run =>
-          runsApi.getRunDetail(run.id).catch(() => null)
-        )
-      );
-      const agentMap: Record<string, { calls: number; cost: number }> = {};
-      for (const detail of detailResults) {
-        if (!detail) continue;
-        if (detail.stepLogs) {
-          for (const log of detail.stepLogs) {
-            if (!log.agent) continue;
-            if (!agentMap[log.agent]) agentMap[log.agent] = { calls: 0, cost: 0 };
-            agentMap[log.agent].calls += 1;
-            agentMap[log.agent].cost += log.costUsd || 0;
-          }
-        }
-        if (detail.agents) {
-          for (const ag of detail.agents) {
-            if (!ag.name) continue;
-            if (!agentMap[ag.name]) agentMap[ag.name] = { calls: 0, cost: 0 };
-            if (agentMap[ag.name].calls === 0) {
-              agentMap[ag.name].calls = ag.completedTasks || 0;
-              agentMap[ag.name].cost = ag.costUsd || 0;
-            }
-          }
-        }
-      }
-      const agentUsage = Object.entries(agentMap)
-        .map(([name, data]) => ({ name, calls: data.calls, cost: Math.round(data.cost * 10000) / 10000 }))
-        .sort((a, b) => b.calls - a.calls)
-        .slice(0, 10);
-      setAgentUsageData(agentUsage);
-
-      // Generate weekly activity data (last 7 days)
       const weekDays = [0,1,2,3,4,5,6].map(i => t(`dashboard.weekdays.${i}`));
-      const actData = [];
 
-      for (let i = 6; i >= 0; i--) {
-        const dayStart = new Date();
-        dayStart.setDate(dayStart.getDate() - i);
-        dayStart.setHours(0, 0, 0, 0);
+      const res = await fetch('/api/dashboard');
+      if (!res.ok) throw new Error('Dashboard API failed');
+      const data = await res.json();
 
-        const dayEnd = new Date(dayStart);
-        dayEnd.setHours(23, 59, 59, 999);
+      setStats(data.stats);
+      setConfigs(data.configs || []);
+      setRecentRuns(data.recentRuns || []);
+      setRunningRuns(data.runningRuns || []);
+      setAgentUsageData(data.agentUsageData || []);
 
-        const runsInDay = allRuns.filter((r: any) => {
-          const runTime = new Date(r.startTime).getTime();
-          return runTime >= dayStart.getTime() && runTime <= dayEnd.getTime();
-        });
-
-        actData.push({
-          name: weekDays[dayStart.getDay()],
-          runs: runsInDay.length,
-        });
-      }
-
+      // Map server dayOfWeek to localized weekday names
+      const actData = (data.activityData || []).map((d: any) => ({
+        name: weekDays[d.dayOfWeek],
+        runs: d.runs,
+      }));
       setActivityData(actData);
 
       // Write cache for instant render on next visit
       try {
         sessionStorage.setItem(CACHE_KEY, JSON.stringify({
           ts: Date.now(),
-          stats: {
-            totalRuns: allRuns.length,
-            successRate: Math.round(successRate),
-            avgDuration: Math.round(avgDuration),
-            activeWorkflows: configsData.configs?.length || 0,
-            totalAgents: agentCount,
-            runningProcesses: allRuns.filter((r: any) => r.status === 'running').length,
-          },
-          configs: configsData.configs || [],
-          recentRuns: allRuns.slice(-5).reverse(),
-          runningRuns: activeRuns,
-          agentUsageData: agentUsage,
+          stats: data.stats,
+          configs: data.configs || [],
+          recentRuns: data.recentRuns || [],
+          runningRuns: data.runningRuns || [],
+          agentUsageData: data.agentUsageData || [],
           activityData: actData,
         }));
       } catch {}
