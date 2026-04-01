@@ -516,6 +516,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
         try { proc.childProcess.kill('SIGTERM'); } catch { /* already dead */ }
         proc.status = 'killed';
         proc.endTime = new Date();
+      } else if (this.currentEngine) {
+        this.currentEngine.cancel();
+        if (proc) { proc.status = 'killed'; proc.endTime = new Date(); }
       }
     }
 
@@ -546,7 +549,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
       );
       if (running) {
         console.log(`[StateMachine] forceTransition: killing process ${running.id}`);
-        processManager.killProcess(running.id);
+        if (!processManager.killProcess(running.id) && this.currentEngine) {
+          this.currentEngine.cancel();
+          const rawProc = processManager.getProcessRaw(running.id);
+          if (rawProc) { rawProc.status = 'killed'; rawProc.endTime = new Date(); }
+        }
       }
     }
   }
@@ -2181,6 +2188,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
       if (running) {
         processManager.killProcess(running.id);
       }
+      // For non-claude engines, also cancel via engine API
+      if (this.currentEngine) {
+        this.currentEngine.cancel();
+      }
     }
   }
 
@@ -2218,6 +2229,17 @@ export class StateMachineWorkflowManager extends EventEmitter {
       console.log(`[SM-Feedback] 找到进程 ${running.id} (status=${running.status}), 正在 kill...`);
       const killed = processManager.killProcess(running.id);
       console.log(`[SM-Feedback] kill 结果: ${killed}`);
+      // For non-claude engines, also cancel via engine API
+      if (!killed && this.currentEngine) {
+        console.log(`[SM-Feedback] processManager.killProcess 失败，使用引擎 cancel`);
+        this.currentEngine.cancel();
+        // Mark external process as killed so executeWithEngine can detect it
+        const rawProc = processManager.getProcessRaw(running.id);
+        if (rawProc) {
+          rawProc.status = 'killed';
+          rawProc.endTime = new Date();
+        }
+      }
       this.emit('feedback-injected', { message, timestamp: new Date().toISOString() });
       return true;
     }
@@ -2246,7 +2268,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
     if (!running) return null;
 
     // Kill the process
-    processManager.killProcess(running.id);
+    if (!processManager.killProcess(running.id) && this.currentEngine) {
+      this.currentEngine.cancel();
+      const rawProc = processManager.getProcessRaw(running.id);
+      if (rawProc) { rawProc.status = 'killed'; rawProc.endTime = new Date(); }
+    }
 
     // Get accumulated output
     const output = running.streamContent || '';
