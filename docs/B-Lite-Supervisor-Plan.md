@@ -1,4 +1,4 @@
-# AceFlow B-Lite 方案：轻量 Supervisor 协调设计
+# ACEHarness B-Lite 方案：轻量 Supervisor 协调设计
 
 > 版本：v1.1 | 日期：2026-02-26
 

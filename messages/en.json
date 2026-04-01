@@ -1,6 +1,6 @@
 {
   "dashboard": {
-    "title": "AceFlow Control Center",
+    "title": "ACEHarness Control Center",
     "subtitle": "Full-Lifecycle Multi-Agent Orchestration System",
     "stats": {
       "totalRuns": "Total Runs",

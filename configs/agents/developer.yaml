@@ -5,7 +5,7 @@ tags:
   - 编码
   - 开发
   - 实现
-model: claude-opus-4-6
+model: gpt-5.3-codex
 temperature: 0.3
 allowedTools:
   - Bash

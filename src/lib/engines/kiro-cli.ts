@@ -143,7 +143,7 @@ export class KiroCliEngine extends EventEmitter {
     const params: InitializeParams = {
       protocolVersion: 1,
       clientInfo: {
-        name: 'aceflow',
+        name: 'aceharness',
         version: '1.0.0',
       },
       clientCapabilities: {

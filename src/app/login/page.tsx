@@ -154,10 +154,10 @@ export default function LoginPage() {
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
                 <span className="relative inline-block">
                   <span className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent animate-gradientShift bg-[length:200%_100%]">
-                    AceFlow
+                    ACEHarness
                   </span>
                   <span className="absolute inset-0 blur-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent opacity-30 animate-pulse" aria-hidden="true">
-                    AceFlow
+                    ACEHarness
                   </span>
                 </span>
               </h1>
@@ -185,7 +185,7 @@ export default function LoginPage() {
               <RobotLogo size={48} className="animate-robotPulse" />
               <div>
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
-                  AceFlow
+                  ACEHarness
                 </h1>
                 <p className="text-xs text-muted-foreground">全流程 Multi-Agent 智能编排系统</p>
               </div>

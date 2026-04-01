@@ -712,6 +712,20 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const proc = processManager.registerExternalProcess(processId, agent, step, options.runId, options.stepId);
 
     const streamHandler = (event: EngineStreamEvent) => {
+      // 'thought' events are forwarded separately (matching Claude Code's { thinking } field),
+      // not accumulated into streamContent.
+      if (event.type === 'thought') {
+        processManager.emit('stream', {
+          id: processId,
+          step,
+          thinking: event.content,
+        });
+        return;
+      }
+
+      // Only accumulate 'text' events into the preview stream.
+      if (event.type !== 'text') return;
+
       // Accumulate stream content on the registered process
       const rawProc = processManager.getProcessRaw(processId);
       if (rawProc) {

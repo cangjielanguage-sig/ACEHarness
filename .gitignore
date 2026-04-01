@@ -50,7 +50,7 @@ runs/
 /configs/agents/simple-coder.yaml
 /configs/test-blite-supervisor.yaml
 
-# AceFlow data
+# ACEHarness data
 data/*
 !data/chat-settings.yaml
 !data/users/

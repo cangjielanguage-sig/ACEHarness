@@ -1,6 +1,6 @@
 {
   "dashboard": {
-    "title": "AceFlow 控制中心",
+    "title": "ACEHarness 控制中心",
     "subtitle": "全流程 Multi-Agent 智能编排系统",
     "stats": {
       "totalRuns": "总运行次数",

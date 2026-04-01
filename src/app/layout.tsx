@@ -3,8 +3,8 @@ import './globals.css';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
-  title: 'AceFlow',
-  description: 'AceFlow - AI 协同工作调度系统',
+  title: 'ACEHarness',
+  description: 'ACEHarness - Agent Centric Engineering Harness',
 };
 
 export default function RootLayout({

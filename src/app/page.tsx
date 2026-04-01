@@ -304,7 +304,7 @@ function ChatPageContent() {
                   animate={{ opacity: 1, y: 0 }}
                   className="text-2xl font-bold bg-gradient-to-r from-primary via-blue-500 to-purple-500 bg-clip-text text-transparent mb-2"
                 >
-                  AceFlow Multi-Agent 助手
+                  ACEHarness Multi-Agent 助手
                 </motion.h2>
                 <motion.p
                   initial={{ opacity: 0 }}

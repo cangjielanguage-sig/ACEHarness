@@ -59,12 +59,12 @@ export class OpenCodeEngine extends EventEmitter {
 
     this.process.on('exit', (code, signal) => {
       this.emit('exit', { code, signal });
-      this.cleanup();
+      this.cleanup(`OpenCode process exited (code=${code}, signal=${signal})`);
     });
 
     this.process.on('error', (error) => {
       this.emit('error', error);
-      this.cleanup();
+      this.cleanup(`OpenCode process error: ${error.message}`);
     });
 
     await this.initialize();
@@ -74,7 +74,7 @@ export class OpenCodeEngine extends EventEmitter {
     const params: InitializeParams = {
       protocolVersion: 1,
       clientInfo: {
-        name: 'aceflow',
+        name: 'aceharness',
         version: '1.0.0',
       },
       clientCapabilities: {
@@ -112,6 +112,30 @@ export class OpenCodeEngine extends EventEmitter {
     });
 
     return this.sessionId!;
+  }
+
+  async resumeSession(sessionId: string): Promise<string> {
+    if (!this.initialized) {
+      throw new Error('OpenCode not initialized');
+    }
+
+    const params = {
+      sessionId,
+      cwd: this.options.workingDirectory,
+      mcpServers: [],
+    };
+
+    const result = await this.sendRequest('session/load', params);
+    this.sessionId = sessionId;
+
+    this.emit('session-resumed', {
+      sessionId: this.sessionId,
+      configOptions: result.configOptions,
+      modes: result.modes,
+      models: result.models,
+    });
+
+    return this.sessionId;
   }
 
   async sendPrompt(prompt: string): Promise<StopReason> {
@@ -187,7 +211,13 @@ export class OpenCodeEngine extends EventEmitter {
   }
 
   private handleMessage(message: any): void {
-    // JSON-RPC response
+    // JSON-RPC request FROM server (e.g. permission/request)
+    if (message.id !== undefined && message.method) {
+      this.handleServerRequest(message);
+      return;
+    }
+
+    // JSON-RPC response to our request
     if (message.id !== undefined) {
       const pending = this.pendingRequests.get(message.id);
       if (pending) {
@@ -205,6 +235,38 @@ export class OpenCodeEngine extends EventEmitter {
     if (message.method === 'session/update') {
       this.handleSessionUpdate(message.params);
     }
+  }
+
+  /**
+   * Handle JSON-RPC requests from the server (permission, fs, terminal).
+   * Auto-approve all permissions so tools don't block.
+   */
+  private handleServerRequest(message: any): void {
+    const { id, method, params } = message;
+
+    if (method === 'session/request_permission' || method === 'permission/request') {
+      // Auto-approve all tool permissions
+      this.sendResponse(id, { outcome: { outcome: 'selected', optionId: 'always' } });
+      this.emit('permission', params);
+      return;
+    }
+
+    // fs.readTextFile / fs.writeTextFile — not implemented, return error
+    if (method.startsWith('fs.') || method.startsWith('terminal.')) {
+      this.sendResponse(id, null, { code: -32601, message: `Method not supported: ${method}` });
+      return;
+    }
+
+    // Unknown server request — return method not found
+    this.sendResponse(id, null, { code: -32601, message: `Unknown method: ${method}` });
+  }
+
+  private sendResponse(id: number, result: any, error?: any): void {
+    if (!this.process?.stdin) return;
+    const response: any = { jsonrpc: '2.0', id };
+    if (error) response.error = error;
+    else response.result = result;
+    this.process.stdin.write(JSON.stringify(response) + '\n');
   }
 
   private handleSessionUpdate(params: any): void {
@@ -228,6 +290,7 @@ export class OpenCodeEngine extends EventEmitter {
           kind: update.kind,
           content: update.content,
           locations: update.locations,
+          rawInput: update.rawInput,
         });
         break;
       case 'tool_call_update':
@@ -235,7 +298,10 @@ export class OpenCodeEngine extends EventEmitter {
           id: update.toolCallId,
           title: update.title,
           status: update.status,
+          kind: update.kind,
           content: update.content,
+          rawInput: update.rawInput,
+          rawOutput: update.rawOutput,
         });
         break;
       case 'plan':
@@ -252,10 +318,15 @@ export class OpenCodeEngine extends EventEmitter {
     }
   }
 
-  private cleanup(): void {
+  private cleanup(reason?: string): void {
     this.process = null;
     this.sessionId = null;
     this.initialized = false;
+    // Reject all pending requests so promises don't hang until timeout
+    const err = new Error(reason || 'OpenCode process exited');
+    for (const [id, pending] of this.pendingRequests) {
+      pending.reject(err);
+    }
     this.pendingRequests.clear();
     this.buffer = '';
   }

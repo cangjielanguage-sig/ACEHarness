@@ -105,7 +105,7 @@ export class CangjieMagicEngine extends EventEmitter {
     const initResult = await this.sendRequest('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
-      clientInfo: { name: 'aceflow-cangjie-magic', version: '1.0.0' },
+      clientInfo: { name: 'aceharness-cangjie-magic', version: '1.0.0' },
     });
     this.emit('log', `[CangjieMagic] initialized: ${JSON.stringify(initResult?.serverInfo || {})}`);
 

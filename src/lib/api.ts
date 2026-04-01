@@ -476,6 +476,37 @@ export const streamApi = {
     const data = await response.json();
     return data.content || '';
   },
+
+  /**
+   * Connect to live SSE stream for a running step.
+   * Returns EventSource; caller is responsible for closing it.
+   */
+  connectLiveStream(
+    runId: string,
+    stepName: string,
+    onDelta: (content: string) => void,
+    onDone?: (status: string) => void,
+  ): EventSource {
+    const url = `${API_BASE}/runs/${encodeURIComponent(runId)}/stream?step=${encodeURIComponent(stepName)}&live=1`;
+    const es = new EventSource(url);
+    es.addEventListener('delta', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.content) onDelta(data.content);
+      } catch {}
+    });
+    es.addEventListener('done', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        onDone?.(data.status || 'completed');
+      } catch {}
+      es.close();
+    });
+    es.onerror = () => {
+      // Auto-reconnect is handled by EventSource; close on fatal
+    };
+    return es;
+  },
 };
 
 export const scheduleApi = {

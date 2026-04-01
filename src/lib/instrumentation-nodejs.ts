@@ -27,7 +27,7 @@ export async function runNodejsInstrumentation() {
   const port = process.env.PORT || '3000';
   try {
     if (!existsSync(SKILLS_YAML)) {
-      console.log('[AceFlow] Skills not initialized, auto-pulling...');
+      console.log('[ACEHarness] Skills not initialized, auto-pulling...');
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60000);
       try {
@@ -39,9 +39,9 @@ export async function runNodejsInstrumentation() {
       } catch (e) {
         clearTimeout(timeout);
         if (e instanceof Error && e.name === 'AbortError') {
-          console.error('[AceFlow] Skills auto-pull timed out');
+          console.error('[ACEHarness] Skills auto-pull timed out');
         } else {
-          console.error('[AceFlow] Skills auto-pull failed:', e);
+          console.error('[ACEHarness] Skills auto-pull failed:', e);
         }
       }
     }
@@ -56,9 +56,9 @@ export async function runNodejsInstrumentation() {
   if (existsSync(SKILLS_CLAUDE_DIR)) {
     try {
       symlinkSync(SKILLS_CLAUDE_DIR, LOCAL_CONFIG_DIR);
-      console.log(`[AceFlow] Linked ${engineConfigDir} -> skills/.claude`);
+      console.log(`[ACEHarness] Linked ${engineConfigDir} -> skills/.claude`);
     } catch (error) {
-      console.error(`[AceFlow] Failed to create ${engineConfigDir} symlink:`, error);
+      console.error(`[ACEHarness] Failed to create ${engineConfigDir} symlink:`, error);
     }
   }
 
@@ -68,6 +68,6 @@ export async function runNodejsInstrumentation() {
     const recoverer = new WorkflowManager();
     await recoverer.recoverFromCrash();
   } catch (error) {
-    console.error('[AceFlow] Workflow recovery failed:', error);
+    console.error('[ACEHarness] Workflow recovery failed:', error);
   }
 }

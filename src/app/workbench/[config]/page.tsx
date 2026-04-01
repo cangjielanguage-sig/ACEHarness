@@ -145,7 +145,7 @@ export default function WorkbenchPage() {
   const [showSkillSelector, setShowSkillSelector] = useState(false);
   const [designTab, setDesignTab] = useState<'workflow' | 'config'>('workflow');
   const [forceTransitionModal, setForceTransitionModal] = useState<{ targetState: string; instruction: string } | null>(null);
-  const liveStreamRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const liveStreamRef = useRef<EventSource | ReturnType<typeof setInterval> | null>(null);
   const liveStreamLenRef = useRef(0);
   const liveStreamStepRef = useRef<string>('');
   const liveStreamScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1177,45 +1177,75 @@ export default function WorkbenchPage() {
     return { timestamp: null, content: chunk, isHumanFeedback: false };
   };
 
-  // --- Live stream polling ---
+  // --- Live stream via SSE (opencode) or polling fallback (claude-code) ---
   const startLiveStream = () => {
     setShowLiveStream(true);
-    // Don't clear liveStream here — let the polling loop load persisted content
-    // so reopening the panel preserves history
     if (liveStreamFeedbackRef.current) liveStreamFeedbackRef.current.value = '';
     liveStreamLenRef.current = 0;
     setLiveStreamVisibleCount(LIVE_STREAM_PAGE_SIZE);
     liveStreamUserScrolledUp.current = false;
     setInlineFeedbacks([]);
-    if (liveStreamRef.current) clearInterval(liveStreamRef.current);
+    setLiveStream([]);
+
+    // Close previous connection
+    if (liveStreamRef.current) {
+      if (liveStreamRef.current instanceof EventSource) liveStreamRef.current.close();
+      else clearInterval(liveStreamRef.current);
+      liveStreamRef.current = null;
+    }
+
+    const rid = runId || selectedRun?.id;
+    const activeStep = currentStep || selectedStep?.name;
+
+    // Try SSE live stream if we have runId + step
+    if (rid && activeStep) {
+      const es = streamApi.connectLiveStream(
+        rid,
+        activeStep,
+        (content) => {
+          // Incremental: split by chunk separator and append new chunks
+          const newChunks = content.split(CHUNK_SEP).filter(Boolean);
+          if (newChunks.length > 0) {
+            liveStreamLenRef.current += content.length;
+            setLiveStream(prev => [...prev, ...newChunks]);
+          }
+        },
+        (_status) => {
+          // Stream done — don't auto-close panel, user may still be reading
+        },
+      );
+      liveStreamRef.current = es;
+      return;
+    }
+
+    // Fallback: polling for claude-code or when runId/step not yet available
     liveStreamRef.current = setInterval(async () => {
       try {
         const { processes } = await processApi.list();
-        const rid = runId || selectedRun?.id;
-        const runningProc = processes.find((p: any) => p.status === 'running' && (!rid || p.runId === rid));
-        const activeStep = runningProc?.step || currentStep || selectedStep?.name;
+        const curRid = runId || selectedRun?.id;
+        const runningProc = processes.find((p: any) => p.status === 'running' && (!curRid || p.runId === curRid));
+        const curStep = runningProc?.step || currentStep || selectedStep?.name;
 
-        if (activeStep !== liveStreamStepRef.current) {
-          liveStreamStepRef.current = activeStep;
+        if (curStep !== liveStreamStepRef.current) {
+          liveStreamStepRef.current = curStep;
           liveStreamLenRef.current = 0;
           setLiveStream([]);
           setInlineFeedbacks([]);
         }
 
         let content: string | null = null;
-        if (rid && activeStep) {
-          content = await streamApi.getStreamContent(rid, activeStep);
+        if (curRid && curStep) {
+          content = await streamApi.getStreamContent(curRid, curStep);
         }
         if (!content) {
-          const running = processes.find((p: any) => p.status === 'running' && (!rid || p.runId === rid));
+          const running = processes.find((p: any) => p.status === 'running' && (!curRid || p.runId === curRid));
           content = running?.streamContent || processes
-            .filter((p: any) => !rid || p.runId === rid)
+            .filter((p: any) => !curRid || p.runId === curRid)
             .sort((a: any, b: any) =>
               new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
             )[0]?.streamContent;
         }
 
-        // 增量更新：只处理新增内容
         if (content && content.length > liveStreamLenRef.current) {
           const newContent = content.slice(liveStreamLenRef.current);
           liveStreamLenRef.current = content.length;
@@ -1234,12 +1264,21 @@ export default function WorkbenchPage() {
 
   const stopLiveStream = () => {
     if (liveStreamRef.current) {
-      clearInterval(liveStreamRef.current);
+      if (liveStreamRef.current instanceof EventSource) liveStreamRef.current.close();
+      else clearInterval(liveStreamRef.current);
       liveStreamRef.current = null;
     }
     setShowLiveStream(false);
     setLiveStreamFullscreen(false);
   };
+
+  // Auto-reconnect live stream when currentStep changes while modal is open
+  useEffect(() => {
+    if (showLiveStream && currentStep) {
+      startLiveStream();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep]);
 
   const sendLiveFeedback = async (interrupt?: boolean) => {
     const feedback = liveStreamFeedbackRef.current?.value || '';
@@ -1322,7 +1361,11 @@ export default function WorkbenchPage() {
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => { if (liveStreamRef.current) clearInterval(liveStreamRef.current); };
+    return () => {
+      if (!liveStreamRef.current) return;
+      if (liveStreamRef.current instanceof EventSource) liveStreamRef.current.close();
+      else clearInterval(liveStreamRef.current as ReturnType<typeof setInterval>);
+    };
   }, []);
 
   // Auto-scroll live stream to bottom when content updates (only if user hasn't scrolled up)
@@ -2306,6 +2349,23 @@ export default function WorkbenchPage() {
                             className="mt-2"
                           />
                           <p className="text-xs text-muted-foreground mt-1.5">每个步骤的最大执行时间</p>
+                        </div>
+
+                        <div>
+                          <Label className="text-sm font-medium">最大转移次数</Label>
+                          <Input
+                            value={workflowConfig?.workflow?.maxTransitions ?? 50}
+                            onChange={(e) => {
+                              const val = Math.max(1, Math.min(200, parseInt(e.target.value) || 1));
+                              const updated = { ...workflowConfig, workflow: { ...workflowConfig.workflow, maxTransitions: val } };
+                              dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: updated });
+                            }}
+                            type="number"
+                            min={1}
+                            max={200}
+                            className="mt-2"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1.5">状态机最大转移次数，防止死循环（1-200）</p>
                         </div>
 
                         {availableSkills.length > 0 && (

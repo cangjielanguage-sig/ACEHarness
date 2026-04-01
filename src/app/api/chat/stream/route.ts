@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processManager } from '@/lib/process-manager';
+import { createEngine, getConfiguredEngine } from '@/lib/engines/engine-factory';
 import { buildDashboardSystemPrompt } from '@/lib/chat-system-prompt';
 import { loadChatSettings } from '@/lib/chat-settings';
+import type { Engine } from '@/lib/engines/engine-interface';
+import {
+  registerEngineStream,
+  appendEngineStreamContent,
+  setEngineStreamSessionId,
+  setEngineStreamStatus,
+  getEngineStream,
+  getEngineStreamByFrontendSessionId,
+  removeEngineStream,
+} from '@/lib/chat-stream-state';
 import { readFile } from 'fs/promises';
 import { resolve } from 'path';
+import { EventEmitter } from 'events';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,7 +57,15 @@ async function loadChatHistory(frontendSessionId: string): Promise<string> {
 }
 
 // Track active chat streams
-const activeChats = new Map<string, { promise: Promise<any>; settled: boolean; chatId: string }>();
+const activeChats = new Map<string, {
+  promise: Promise<any>;
+  settled: boolean;
+  chatId: string;
+  kind: 'claude' | 'engine';
+  cancel?: () => void;
+}>();
+const engineStreamEvents = new EventEmitter();
+engineStreamEvents.setMaxListeners(200);
 
 export async function POST(request: NextRequest) {
   try {
@@ -87,12 +107,95 @@ export async function POST(request: NextRequest) {
       console.log(`[chat/stream] resume sessionId=${sessionId} (trusted directly)`);
     }
 
-    // Start execution — SSE will stream results
-    const chatSettings = isResume && mode === 'dashboard'
-      ? await loadChatSettings()  // already loaded above for systemPrompt, but need workingDirectory
-      : mode === 'dashboard' ? await loadChatSettings() : null;
+    const chatSettings = mode === 'dashboard' ? await loadChatSettings() : null;
+    const configuredEngine = await getConfiguredEngine();
+    const engine = await createEngine(configuredEngine);
+
+    // Non-Claude engines: stream through Engine wrapper events
+    if (engine) {
+      registerEngineStream(chatId, frontendSessionId);
+
+      const onEngineStream = (evt: any) => {
+        if (evt?.type === 'text' && evt.content) {
+          appendEngineStreamContent(chatId, evt.content);
+          engineStreamEvents.emit(chatId, { type: 'delta', content: evt.content });
+        } else if (evt?.type === 'thought' && evt.content) {
+          engineStreamEvents.emit(chatId, { type: 'thinking', content: evt.content });
+        } else if (evt?.type === 'error' && evt.content) {
+          engineStreamEvents.emit(chatId, { type: 'error', content: evt.content });
+        }
+      };
+
+      engine.on('stream', onEngineStream);
+
+      const startedAt = Date.now();
+      const execPromise = engine.execute({
+        agent: 'chat',
+        step: 'chat',
+        prompt: message,
+        systemPrompt,
+        model: useModel,
+        workingDirectory: chatSettings?.workingDirectory || process.cwd(),
+        sessionId: validResumeSid,
+        appendSystemPrompt: !!validResumeSid && !!systemPrompt,
+      }).then((result) => {
+        if (result.sessionId) {
+          setEngineStreamSessionId(chatId, result.sessionId);
+        }
+        const state = getEngineStream(chatId);
+        const output = result.output || state?.streamContent || '';
+
+        if (!result.success && !output && result.error) {
+          throw new Error(result.error);
+        }
+
+        return {
+          result: output,
+          session_id: result.sessionId,
+          cost_usd: 0,
+          duration_ms: Date.now() - startedAt,
+          usage: undefined,
+          is_error: !result.success,
+        };
+      }).finally(() => {
+        engine.off('stream', onEngineStream);
+        if (typeof (engine as any).cleanup === 'function') {
+          (engine as any).cleanup();
+        }
+      });
+
+      const entry = {
+        promise: execPromise,
+        settled: false,
+        chatId,
+        kind: 'engine' as const,
+        cancel: () => {
+          setEngineStreamStatus(chatId, 'killed');
+          engine.cancel();
+        },
+      };
+      activeChats.set(chatId, entry);
+      execPromise
+        .then(() => { entry.settled = true; setEngineStreamStatus(chatId, 'completed'); })
+        .catch(() => { entry.settled = true; setEngineStreamStatus(chatId, 'failed'); })
+        .finally(() => {
+          setTimeout(() => {
+            activeChats.delete(chatId);
+            removeEngineStream(chatId);
+          }, 30000);
+        });
+
+      return NextResponse.json({ chatId });
+    }
+
+    // Claude Code path
     const execPromise = processManager.executeClaudeCli(
-      chatId, 'chat', 'chat', message, systemPrompt, useModel,
+      chatId,
+      'chat',
+      'chat',
+      message,
+      systemPrompt,
+      useModel,
       {
         resumeSessionId: validResumeSid,
         appendSystemPrompt: !!validResumeSid && !!systemPrompt,
@@ -100,7 +203,7 @@ export async function POST(request: NextRequest) {
         workingDirectory: chatSettings?.workingDirectory || undefined,
       }
     );
-    const entry = { promise: execPromise, settled: false, chatId };
+    const entry = { promise: execPromise, settled: false, chatId, kind: 'claude' as const };
     activeChats.set(chatId, entry);
     execPromise
       .then(() => { entry.settled = true; })
@@ -118,6 +221,16 @@ export async function GET(request: NextRequest) {
 
   // Check if a frontend session has an active stream
   if (checkSession) {
+    const engineState = getEngineStreamByFrontendSessionId(checkSession);
+    if (engineState && engineState.status === 'running') {
+      return NextResponse.json({
+        active: true,
+        chatId: engineState.chatId,
+        streamContent: engineState.streamContent || '',
+        status: engineState.status,
+      });
+    }
+
     const activeChatId = processManager.getActiveStreamChatId(checkSession);
     if (activeChatId && activeChats.has(activeChatId)) {
       const proc = processManager.getProcess(activeChatId);
@@ -157,12 +270,13 @@ export async function GET(request: NextRequest) {
 
       const cleanup = () => {
         closed = true;
-        processManager.off('stream', onStream);
+        processManager.off('stream', onClaudeStream);
+        engineStreamEvents.off(chatId, onEngineStream);
         try { controller.close(); } catch {}
       };
 
       // Stream handler — forward text deltas and thinking
-      const onStream = (evt: any) => {
+      const onClaudeStream = (evt: any) => {
         if (evt.id === chatId) {
           if (evt.delta) {
             send('delta', { content: evt.delta });
@@ -172,7 +286,27 @@ export async function GET(request: NextRequest) {
         }
       };
 
-      processManager.on('stream', onStream);
+      const onEngineStream = (evt: any) => {
+        if (!evt) return;
+        if (evt.type === 'delta') {
+          send('delta', { content: evt.content });
+        } else if (evt.type === 'thinking') {
+          send('thinking', { content: evt.content });
+        } else if (evt.type === 'error') {
+          send('error', { message: evt.content || '执行失败' });
+        }
+      };
+
+      if (entry.kind === 'engine') {
+        const state = getEngineStream(chatId);
+        if (state?.streamContent) {
+          send('delta', { content: state.streamContent });
+        }
+        engineStreamEvents.on(chatId, onEngineStream);
+      } else {
+        processManager.on('stream', onClaudeStream);
+      }
+
       send('connected', { chatId });
 
       // Wait for completion
@@ -214,6 +348,14 @@ export async function DELETE(request: NextRequest) {
   const chatId = request.nextUrl.searchParams.get('id');
   if (!chatId) {
     return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+  }
+
+  const entry = activeChats.get(chatId);
+  if (entry?.kind === 'engine' && entry.cancel) {
+    entry.cancel();
+    activeChats.delete(chatId);
+    removeEngineStream(chatId);
+    return NextResponse.json({ killed: true });
   }
 
   const killed = processManager.killProcess(chatId);

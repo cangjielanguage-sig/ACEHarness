@@ -2,7 +2,7 @@
 
 ## 概述
 
-已成功将 Kiro CLI 引擎集成到 AceFlow 工作流系统中。用户现在可以在 Claude Code 和 Kiro CLI 之间自由切换。
+已成功将 Kiro CLI 引擎集成到 ACEHarness 工作流系统中。用户现在可以在 Claude Code 和 Kiro CLI 之间自由切换。
 
 ## 完成的功能
 

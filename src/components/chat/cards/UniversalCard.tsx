@@ -78,12 +78,13 @@ interface UniversalCardProps {
 }
 
 export default function UniversalCard({ card, onAction }: UniversalCardProps) {
+  const blocks = card.blocks || [];
   return (
     <div className="mt-2 rounded-lg border bg-card overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
       {card.header && <CardHeader header={card.header} />}
-      {card.blocks.length > 0 && (
+      {blocks.length > 0 && (
         <div className="p-3 space-y-3">
-          {card.blocks.map((block, i) => (
+          {blocks.map((block, i) => (
             <BlockRenderer key={i} block={block} onAction={onAction} />
           ))}
         </div>

@@ -56,7 +56,7 @@ export default function SetupPage() {
             const settingsRes = await fetch('/api/chat/settings');
             const settingsData = await settingsRes.json();
             setSkills(settingsData.discoveredSkills || []);
-            const defaultEnabled = ['power-gitcode', 'aceflow-chat-card', 'aceflow-workflow-creator'];
+            const defaultEnabled = ['power-gitcode', 'aceharness-chat-card', 'aceharness-workflow-creator'];
             setSelectedSkills(new Set(defaultEnabled));
           } catch {
             // skills 加载失败仍可继续
@@ -186,7 +186,7 @@ export default function SetupPage() {
             <RobotLogo size={56} className="animate-robotPulse" />
             <div>
               <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
-                AceFlow
+                ACEHarness
               </h1>
               <p className="text-xs text-muted-foreground">全流程 Multi-Agent 智能编排系统</p>
             </div>
@@ -315,7 +315,7 @@ export default function SetupPage() {
             <RobotLogo size={56} className="animate-robotPulse" />
             <div>
               <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
-                AceFlow
+                ACEHarness
               </h1>
               <p className="text-xs text-muted-foreground">全流程 Multi-Agent 智能编排系统</p>
             </div>

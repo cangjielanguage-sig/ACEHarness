@@ -7,7 +7,7 @@ tags:
   - 防御
   - 构建
   - 修复
-model: claude-opus-4-6
+model: gpt-5.3-codex
 temperature: 0.3
 allowedTools:
   - Bash

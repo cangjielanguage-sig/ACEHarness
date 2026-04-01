@@ -4,7 +4,7 @@
 - 创建时间：2026-03-05
 - 更新时间：2026-03-05
 - 状态：信息收集完成，准备实现
-- 目标：为 AceFlow 添加 Kiro CLI 引擎支持
+- 目标：为 ACEHarness 添加 Kiro CLI 引擎支持
 
 ---
 
@@ -52,7 +52,7 @@ Kiro CLI 使用 **ACP (Agent Client Protocol)** 协议，通过 **JSON-RPC 2.0**
   "params": {
     "protocolVersion": 1,
     "clientInfo": {
-      "name": "aceflow",
+      "name": "aceharness",
       "version": "1.0.0"
     },
     "clientCapabilities": {
@@ -371,7 +371,7 @@ Agent 通过此通知发送流式更新（无需响应）：
 - [ ] 支持文件差异显示
 - [ ] 支持终端输出显示
 
-### 7.4 集成到 AceFlow
+### 7.4 集成到 ACEHarness
 - [ ] 在 workflow-manager.ts 中添加 Kiro CLI 适配器
 - [ ] 创建 src/lib/engines/kiro-cli.ts
 - [ ] 支持引擎切换

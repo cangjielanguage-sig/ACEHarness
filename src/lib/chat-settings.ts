@@ -96,7 +96,7 @@ export async function discoverSkills(): Promise<SkillInfo[]> {
 export async function loadChatSettings(): Promise<ChatSettings> {
   const discovered = await discoverSkills();
   const defaults: Record<string, boolean> = {};
-  const DEFAULT_ENABLED = ['power-gitcode', 'aceflow-chat-card', 'aceflow-workflow-creator'];
+  const DEFAULT_ENABLED = ['power-gitcode', 'aceharness-chat-card', 'aceharness-workflow-creator'];
   for (const s of discovered) defaults[s.name] = DEFAULT_ENABLED.includes(s.name);
 
   try {

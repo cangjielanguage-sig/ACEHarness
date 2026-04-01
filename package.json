@@ -1,7 +1,7 @@
 {
-  "name": "aceflow",
+  "name": "aceharness",
   "version": "1.0.0",
-  "description": "AceFlow - 多 AI 协同工作调度系统",
+  "description": "ACEHarness - Agent Centric Engineering Harness (From Cangjie Team)",
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",

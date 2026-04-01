@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
 
     // Initialize skills settings
     const discovered = await discoverSkills();
-    const DEFAULT_ENABLED = ['power-gitcode', 'aceflow-chat-card', 'aceflow-workflow-creator'];
+    const DEFAULT_ENABLED = ['power-gitcode', 'aceharness-chat-card', 'aceharness-workflow-creator'];
     const skills: Record<string, boolean> = {};
     for (const s of discovered) {
       skills[s.name] = DEFAULT_ENABLED.includes(s.name);

@@ -1,6 +1,6 @@
 name: compiler_performance-breaker
 team: red
-model: claude-opus-4-6
+model: gpt-5.3-codex
 category: 压力测试
 tags:
   - 压力测试

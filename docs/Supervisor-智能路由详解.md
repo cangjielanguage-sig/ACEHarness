@@ -1,6 +1,6 @@
 # Supervisor 智能路由 -- 让 AI 决定找谁干活
 
-> AceFlow 的 Supervisor-Lite 架构将多 Agent 协作从「静态流水线」推进到「动态按需协调」：Agent 只声明自己缺什么，Supervisor 自动判断问谁。
+> ACEHarness 的 Supervisor-Lite 架构将多 Agent 协作从「静态流水线」推进到「动态按需协调」：Agent 只声明自己缺什么，Supervisor 自动判断问谁。
 
 ---
 

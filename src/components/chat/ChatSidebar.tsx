@@ -34,12 +34,12 @@ export default function ChatSidebar() {
 
   return (
     <div className="w-full bg-muted/30 flex flex-col h-full">
-      {/* AceFlow Header */}
+      {/* ACEHarness Header */}
       <div className="p-3 border-b bg-gradient-to-r from-primary/10 to-blue-500/10">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <RobotLogo size={28} />
-            <span className="font-bold text-sm bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">AceFlow</span>
+            <span className="font-bold text-sm bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">ACEHarness</span>
           </div>
           <Button size="sm" variant="ghost" onClick={() => createSession()} title="新建会话" className="h-6 px-2">
             <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>add</span>
@@ -189,7 +189,7 @@ export default function ChatSidebar() {
   );
 }
 
-const LOCKED_SKILLS = ['aceflow-chat-card'];
+const LOCKED_SKILLS = ['aceharness-chat-card'];
 
 /* ========== Skills 管理弹窗 ========== */
 

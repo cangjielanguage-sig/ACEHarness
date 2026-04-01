@@ -5,7 +5,7 @@ tags:
   - 设计
   - 架构
   - 系统设计
-model: claude-opus-4-6
+model: gpt-5.3-codex
 temperature: 0.7
 allowedTools:
   - Bash

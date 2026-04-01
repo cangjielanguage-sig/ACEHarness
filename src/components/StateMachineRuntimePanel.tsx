@@ -388,8 +388,9 @@ function LiveTimer({ status, startTime, endTime }: { status: string; startTime?:
     return () => clearInterval(interval);
   }, [status, startTime, endTime]);
 
-  const minutes = Math.floor(elapsed / 60);
-  const seconds = elapsed % 60;
+  const safeElapsed = Math.max(0, elapsed);
+  const minutes = Math.floor(safeElapsed / 60);
+  const seconds = safeElapsed % 60;
 
   return (
     <span>

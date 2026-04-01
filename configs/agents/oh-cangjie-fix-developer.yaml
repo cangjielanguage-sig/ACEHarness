@@ -6,7 +6,7 @@ tags:
   - 仓颉
   - 编码
   - 修复
-model: claude-opus-4-6
+model: gpt-5.3-codex
 temperature: 0.3
 allowedTools:
   - Bash

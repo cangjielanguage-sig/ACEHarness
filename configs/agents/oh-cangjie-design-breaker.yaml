@@ -6,7 +6,7 @@ tags:
   - 仓颉
   - 攻击
   - 设计测试
-model: claude-opus-4-6
+model: gpt-5.3-codex
 temperature: 0.8
 allowedTools:
   - Bash
