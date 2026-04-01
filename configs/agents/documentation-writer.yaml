@@ -6,7 +6,7 @@ tags:
   - 编写
   - 技术写作
   - 整理
-model: gpt-5.3-codex
+model: claude-opus-4-6
 temperature: 0.6
 allowedTools:
   - Bash

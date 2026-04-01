@@ -7,7 +7,7 @@ tags:
   - 问题
   - 复现
   - 诊断
-model: gpt-5.3-codex
+model: claude-opus-4-6
 temperature: 0.7
 allowedTools:
   - Bash

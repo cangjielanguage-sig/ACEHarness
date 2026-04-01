@@ -164,6 +164,7 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
     if (!this.engine) return;
 
     this.engine.on('agent-message', (content) => {
+      console.log(`[OpenCodeWrapper] agent-message received:`, JSON.stringify(content).slice(0, 200));
       if (content.type === 'text') {
         let prefix = '';
         if (this.lastBlockWasTool) {
@@ -281,10 +282,12 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
         } catch (resumeErr: any) {
           console.warn(`[OpenCodeWrapper] resumeSession failed, creating new:`, resumeErr.message);
           this.currentSessionId = await this.engine.createSession();
+          if (options.model) await this.engine.setModel(options.model);
         }
       } else {
         // Always create a fresh session for new executions (workflow steps)
         this.currentSessionId = await this.engine.createSession();
+        if (options.model) await this.engine.setModel(options.model);
       }
 
       let fullPrompt = '';
@@ -324,6 +327,7 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
             this.setupEngineEvents();
             await this.engine.start();
             this.currentSessionId = await this.engine.createSession();
+            if (options.model) await this.engine.setModel(options.model);
             this.engine.on('agent-message', textHandler);
             await new Promise(r => setTimeout(r, delay * 1000));
             continue;

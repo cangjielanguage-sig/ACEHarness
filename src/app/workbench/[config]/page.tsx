@@ -1199,15 +1199,39 @@ export default function WorkbenchPage() {
 
     // Try SSE live stream if we have runId + step
     if (rid && activeStep) {
+      let sseBuffer = '';
       const es = streamApi.connectLiveStream(
         rid,
         activeStep,
         (content) => {
-          // Incremental: split by chunk separator and append new chunks
-          const newChunks = content.split(CHUNK_SEP).filter(Boolean);
-          if (newChunks.length > 0) {
-            liveStreamLenRef.current += content.length;
-            setLiveStream(prev => [...prev, ...newChunks]);
+          // Accumulate into buffer, only split on CHUNK_SEP boundaries
+          sseBuffer += content;
+          const parts = sseBuffer.split(CHUNK_SEP);
+          // Last part is incomplete (no trailing separator) — keep in buffer
+          sseBuffer = parts.pop() || '';
+          if (parts.length > 0) {
+            const newChunks = parts.filter(Boolean);
+            if (newChunks.length > 0) {
+              liveStreamLenRef.current += content.length;
+              setLiveStream(prev => [...prev, ...newChunks]);
+            }
+          }
+          // Always update the last (in-progress) chunk
+          if (sseBuffer) {
+            setLiveStream(prev => {
+              // Replace or append the trailing incomplete chunk
+              const last = prev.length > 0 ? prev[prev.length - 1] : null;
+              // If last chunk was the previous buffer tail, replace it
+              if (last !== null && sseBuffer.startsWith(last)) {
+                return [...prev.slice(0, -1), sseBuffer];
+              }
+              // First chunk or after a separator
+              if (prev.length === 0 || parts.length > 0) {
+                return [...prev, sseBuffer];
+              }
+              // Append to last chunk (streaming continuation)
+              return [...prev.slice(0, -1), sseBuffer];
+            });
           }
         },
         (_status) => {
@@ -1701,13 +1725,7 @@ export default function WorkbenchPage() {
     <div className="flex flex-col h-screen bg-background/80 text-foreground">
       <div className="shrink-0 bg-muted border-b flex flex-wrap items-center px-4 py-2 gap-x-4 gap-y-2">
         <div className="flex items-center gap-2 shrink-0">
-          <Button variant="outline" size="sm" onClick={() => {
-            if (document.referrer && document.referrer.includes('/workflows')) {
-              router.push('/workflows');
-            } else {
-              router.push('/');
-            }
-          }}>
+          <Button variant="outline" size="sm" onClick={() => router.push('/workflows')}>
             <span className="material-symbols-outlined text-sm">arrow_back</span><span className="hidden sm:inline"> 返回</span>
           </Button>
           <h1 className="text-sm sm:text-base font-semibold m-0 flex items-center gap-1.5 truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">

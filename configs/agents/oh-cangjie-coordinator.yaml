@@ -7,7 +7,7 @@ tags:
   - 协调
   - 需求分析
   - 进化追踪
-model: gpt-5.3-codex
+model: claude-opus-4-6
 temperature: 0.5
 allowedTools:
   - Bash

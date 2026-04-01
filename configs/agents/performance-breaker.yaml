@@ -1,6 +1,6 @@
 name: performance-breaker
 team: red
-model: gpt-5.3-codex
+model: claude-opus-4-6
 category: 压力测试
 tags:
   - 压力测试

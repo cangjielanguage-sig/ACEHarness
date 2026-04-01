@@ -5,7 +5,7 @@ tags:
   - 压力测试
   - 稳定性测试
   - 极限测试
-model: gpt-5.3-codex
+model: claude-opus-4-6
 temperature: 0.8
 allowedTools:
   - Bash

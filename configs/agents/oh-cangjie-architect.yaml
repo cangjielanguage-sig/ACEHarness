@@ -6,7 +6,7 @@ tags:
   - 仓颉
   - 架构
   - 设计
-model: gpt-5.3-codex
+model: claude-opus-4-6
 temperature: 0.6
 allowedTools:
   - Read

@@ -6,7 +6,7 @@ tags:
   - 仓颉
   - 分析
   - Gap分析
-model: gpt-5.3-codex
+model: claude-opus-4-6
 temperature: 0.4
 allowedTools:
   - Read

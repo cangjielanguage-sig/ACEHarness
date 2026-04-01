@@ -6,7 +6,7 @@ tags:
   - 仓颉
   - 测试
   - 修复验证
-model: gpt-5.3-codex
+model: claude-opus-4-6
 temperature: 0.8
 allowedTools:
   - Bash

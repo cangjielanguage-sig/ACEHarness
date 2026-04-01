@@ -29,6 +29,7 @@ export class OpenCodeEngine extends EventEmitter {
   private sessionId: string | null = null;
   private buffer = '';
   private initialized = false;
+  private availableModels: Array<{ modelId: string; name: string }> = [];
 
   constructor(private options: OpenCodeOptions) {
     super();
@@ -103,6 +104,7 @@ export class OpenCodeEngine extends EventEmitter {
 
     const result = await this.sendRequest('session/new', params);
     this.sessionId = result.sessionId;
+    this.availableModels = result.models?.availableModels || [];
 
     this.emit('session-created', {
       sessionId: this.sessionId,
@@ -127,6 +129,7 @@ export class OpenCodeEngine extends EventEmitter {
 
     const result = await this.sendRequest('session/load', params);
     this.sessionId = sessionId;
+    this.availableModels = result.models?.availableModels || this.availableModels;
 
     this.emit('session-resumed', {
       sessionId: this.sessionId,
@@ -150,6 +153,28 @@ export class OpenCodeEngine extends EventEmitter {
 
     const result = await this.sendRequest('session/prompt', params);
     return result.stopReason;
+  }
+
+  async setModel(modelId: string): Promise<void> {
+    if (!this.sessionId) throw new Error('No active session');
+    // Resolve short model name (e.g. "claude-opus-4-6") to full provider/model ID
+    const resolved = this.resolveModelId(modelId);
+    await this.sendRequest('session/set_model', { sessionId: this.sessionId, modelId: resolved });
+  }
+
+  private resolveModelId(shortName: string): string {
+    if (shortName.includes('/')) return shortName;
+    // Exact suffix match first (e.g. "gpt-5.3-codex" matches ".../gpt-5.3-codex" not ".../gpt-5.3-codex-spark")
+    const exact = this.availableModels.find(m => m.modelId.endsWith('/' + shortName));
+    if (exact) {
+      console.log(`[OpenCode] resolveModelId: "${shortName}" => "${exact.modelId}" (exact)`);
+      return exact.modelId;
+    }
+    // Fuzzy name match
+    const fuzzy = this.availableModels.find(m => m.name.toLowerCase().includes(shortName.toLowerCase()));
+    const resolved = fuzzy?.modelId || shortName;
+    console.log(`[OpenCode] resolveModelId: "${shortName}" => "${resolved}" (${this.availableModels.length} models available)`);
+    return resolved;
   }
 
   cancelSession(): void {

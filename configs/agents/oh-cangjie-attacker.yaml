@@ -7,7 +7,7 @@ tags:
   - 攻击
   - 漏洞挖掘
   - 边界测试
-model: gpt-5.3-codex
+model: claude-opus-4-6
 temperature: 0.7
 allowedTools:
   - Bash
