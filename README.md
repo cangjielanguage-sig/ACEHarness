@@ -43,10 +43,10 @@ cp .env.example .env.local
 
 npm run dev
 # 访问 http://localhost:3000
-# 自定义端口：PORT=8080 npm run dev
+# 自定义端口：npm run dev -- -p 8080
 ```
 
-生产部署：`npm run build && npm start`（同样支持 `PORT=8080 npm start`）
+生产部署：`npm run build && npm start`（自定义端口：`npm start -- -p 8080`）
 
 ---
 
