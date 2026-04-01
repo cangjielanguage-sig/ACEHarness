@@ -13,6 +13,7 @@ import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
 import { loadEnvVars, buildEnvObject } from './env-manager';
+import { fenced } from './markdown-utils';
 import { detectCangjieHome, buildCjpmShellCommand } from './cangjie-env';
 
 const DEBUG_DIR = resolve(process.cwd(), 'runs', '.tmp');
@@ -46,7 +47,7 @@ function formatToolUseSummary(toolName: string, inputJson: string): string {
         if (wContent) {
           const ext = wPath.split('.').pop() || '';
           wBlock += `\n<details><summary>查看内容 (${wLines} 行)</summary>\n\n`;
-          wBlock += `\`\`\`${ext}\n${wContent}\n\`\`\`\n`;
+          wBlock += `${fenced(wContent, ext)}\n`;
           wBlock += `\n</details>\n`;
         }
         return wBlock;
@@ -68,10 +69,11 @@ function formatToolUseSummary(toolName: string, inputJson: string): string {
         if (oldStr || newStr) {
           diffBlock += `\n<details><summary>查看变更 (${stats})</summary>\n\n`;
           if (oldStr) {
-            diffBlock += `\`\`\`diff\n${oldStr.split('\n').map((l: string) => '- ' + l).join('\n')}\n`;
-            diffBlock += `${newStr.split('\n').map((l: string) => '+ ' + l).join('\n')}\n\`\`\`\n`;
+            const diffContent = oldStr.split('\n').map((l: string) => '- ' + l).join('\n') + '\n'
+              + newStr.split('\n').map((l: string) => '+ ' + l).join('\n');
+            diffBlock += `${fenced(diffContent, 'diff')}\n`;
           } else {
-            diffBlock += `\`\`\`diff\n${newStr.split('\n').map((l: string) => '+ ' + l).join('\n')}\n\`\`\`\n`;
+            diffBlock += `${fenced(newStr.split('\n').map((l: string) => '+ ' + l).join('\n'), 'diff')}\n`;
           }
           diffBlock += `\n</details>\n`;
         }
@@ -89,7 +91,7 @@ function formatToolUseSummary(toolName: string, inputJson: string): string {
         }
         let block = `\n💻 执行命令 (${cmdLines.length} 行)\n`;
         block += `\n<details><summary>查看命令</summary>\n\n`;
-        block += `\`\`\`bash\n${cmd}\n\`\`\`\n`;
+        block += `${fenced(cmd, 'bash')}\n`;
         block += `\n</details>\n`;
         return block;
       }
@@ -655,18 +657,18 @@ class ProcessManager extends EventEmitter {
                     const label = resolvedTaskDesc
                       ? `🤖 子任务结果: ${resolvedTaskDesc} (${lines.length} 行)`
                       : `🤖 子任务结果 (${lines.length} 行)`;
-                    resultBlock = `\n<details><summary>${label}</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>\n`;
+                    resultBlock = `\n<details><summary>${label}</summary>\n\n${fenced(output)}\n\n</details>\n`;
                   } else if (tn === 'bash' || tn === 'glob' || tn === 'grep') {
                     if (lines.length <= 5 && output.length <= 500) {
-                      resultBlock = `\n\`\`\`\n${output}\n\`\`\`\n`;
+                      resultBlock = `\n${fenced(output)}\n`;
                     } else {
-                      resultBlock = `\n<details><summary>执行结果 (${lines.length} 行)</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>\n`;
+                      resultBlock = `\n<details><summary>执行结果 (${lines.length} 行)</summary>\n\n${fenced(output)}\n\n</details>\n`;
                     }
                   } else {
                     if (lines.length <= 3 && output.length <= 200) {
                       resultBlock = `\n> ${lines.join('\n> ')}\n`;
                     } else {
-                      resultBlock = `\n<details><summary>返回结果 (${lines.length} 行)</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>\n`;
+                      resultBlock = `\n<details><summary>返回结果 (${lines.length} 行)</summary>\n\n${fenced(output)}\n\n</details>\n`;
                     }
                   }
                 }
@@ -695,11 +697,11 @@ class ProcessManager extends EventEmitter {
                       const label = blockTaskDesc
                         ? `🤖 子任务结果: ${blockTaskDesc} (${lines.length} 行)`
                         : `🤖 子任务结果 (${lines.length} 行)`;
-                      blockResult = `\n<details><summary>${label}</summary>\n\n\`\`\`\n${content}\n\`\`\`\n\n</details>\n`;
+                      blockResult = `\n<details><summary>${label}</summary>\n\n${fenced(content)}\n\n</details>\n`;
                     } else if (lines.length <= 5 && content.length <= 500) {
-                      blockResult = `\n\`\`\`\n${content}\n\`\`\`\n`;
+                      blockResult = `\n${fenced(content)}\n`;
                     } else {
-                      blockResult = `\n<details><summary>返回结果 (${lines.length} 行)</summary>\n\n\`\`\`\n${content}\n\`\`\`\n\n</details>\n`;
+                      blockResult = `\n<details><summary>返回结果 (${lines.length} 行)</summary>\n\n${fenced(content)}\n\n</details>\n`;
                     }
                     resultBlock += blockResult;
                   }

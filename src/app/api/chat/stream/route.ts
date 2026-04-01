@@ -104,7 +104,6 @@ export async function POST(request: NextRequest) {
     let validResumeSid: string | undefined = undefined;
     if (isResume) {
       validResumeSid = sessionId;
-      console.log(`[chat/stream] resume sessionId=${sessionId} (trusted directly)`);
     }
 
     const chatSettings = mode === 'dashboard' ? await loadChatSettings() : null;

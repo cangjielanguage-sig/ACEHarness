@@ -164,17 +164,14 @@ export class OpenCodeEngine extends EventEmitter {
 
   private resolveModelId(shortName: string): string {
     if (shortName.includes('/')) return shortName;
-    // Exact suffix match first (e.g. "gpt-5.3-codex" matches ".../gpt-5.3-codex" not ".../gpt-5.3-codex-spark")
+    // Exact suffix match (e.g. "gpt-5.3-codex" matches ".../gpt-5.3-codex" not ".../gpt-5.3-codex-spark")
     const exact = this.availableModels.find(m => m.modelId.endsWith('/' + shortName));
-    if (exact) {
-      console.log(`[OpenCode] resolveModelId: "${shortName}" => "${exact.modelId}" (exact)`);
-      return exact.modelId;
-    }
-    // Fuzzy name match
-    const fuzzy = this.availableModels.find(m => m.name.toLowerCase().includes(shortName.toLowerCase()));
-    const resolved = fuzzy?.modelId || shortName;
-    console.log(`[OpenCode] resolveModelId: "${shortName}" => "${resolved}" (${this.availableModels.length} models available)`);
-    return resolved;
+    if (exact) return exact.modelId;
+    // Fuzzy: match name, prefer shortest modelId to avoid spark/nano variants
+    const fuzzy = this.availableModels
+      .filter(m => m.name.toLowerCase().includes(shortName.toLowerCase()))
+      .sort((a, b) => a.modelId.length - b.modelId.length);
+    return fuzzy[0]?.modelId || shortName;
   }
 
   cancelSession(): void {

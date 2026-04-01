@@ -7,6 +7,7 @@
 import { EventEmitter } from 'events';
 import { OpenCodeEngine } from './opencode';
 import type { Engine, EngineOptions, EngineResult, EngineStreamEvent } from './engine-interface';
+import { fenced } from '../markdown-utils';
 
 export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
   private engine: OpenCodeEngine | null = null;
@@ -64,7 +65,7 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
             header += `\n💻 执行命令: \`${cmd}\`\n`;
           } else {
             header += `\n💻 执行命令 (${cmdLines.length} 行)\n`;
-            header += `\n<details><summary>查看命令</summary>\n\n\`\`\`bash\n${cmd}\n\`\`\`\n\n</details>\n`;
+            header += `\n<details><summary>查看命令</summary>\n\n${fenced(cmd, 'bash')}\n\n</details>\n`;
           }
         }
         break;
@@ -76,7 +77,7 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
         header += `\n📝 写入文件: \`${wPath}\` (${wLines} 行)\n`;
         if (wContent) {
           const ext = wPath.split('.').pop() || '';
-          header += `\n<details><summary>查看内容 (${wLines} 行)</summary>\n\n\`\`\`${ext}\n${wContent}\n\`\`\`\n\n</details>\n`;
+          header += `\n<details><summary>查看内容 (${wLines} 行)</summary>\n\n${fenced(wContent, ext)}\n\n</details>\n`;
         }
         break;
       }
@@ -95,10 +96,9 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
         if (removed > 0) stats += `, -${removed} 行`;
         header += `\n✏️ 编辑文件: \`${filePath}\` (${stats})\n`;
         if (oldStr || newStr) {
-          header += `\n<details><summary>查看变更 (${stats})</summary>\n\n\`\`\`diff\n`;
-          if (oldStr) header += oldStr.split('\n').map((l: string) => '- ' + l).join('\n') + '\n';
-          if (newStr) header += newStr.split('\n').map((l: string) => '+ ' + l).join('\n') + '\n';
-          header += `\`\`\`\n\n</details>\n`;
+          const diffContent = (oldStr ? oldStr.split('\n').map((l: string) => '- ' + l).join('\n') + '\n' : '')
+            + (newStr ? newStr.split('\n').map((l: string) => '+ ' + l).join('\n') + '\n' : '');
+          header += `\n<details><summary>查看变更 (${stats})</summary>\n\n${fenced(diffContent.trimEnd(), 'diff')}\n\n</details>\n`;
         }
         break;
       }
@@ -153,18 +153,54 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
    */
   private formatToolResult(output: string, metadata: any): string {
     if (!output) return '';
+
+    // Parse <path>...<content>... blocks from Read/Glob tool results
+    const parsed = this.parseToolXmlOutput(output);
+    if (parsed) return parsed;
+
     const lines = output.split('\n');
     if (lines.length <= 15) {
-      return `\n\`\`\`\n${output}\n\`\`\`\n`;
+      return `\n${fenced(output)}\n`;
     }
-    return `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>\n`;
+    return `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n${fenced(output)}\n\n</details>\n`;
+  }
+
+  /**
+   * Parse XML-style tool output (<path>, <content>, <task_result>) into markdown.
+   */
+  private parseToolXmlOutput(output: string): string | null {
+    // Handle <task_result> blocks
+    const taskMatch = output.match(/<task_result>([\s\S]*?)<\/task_result>/);
+    if (taskMatch) {
+      const inner = taskMatch[1].trim();
+      const lines = inner.split('\n');
+      return `\n<details><summary>🤖 子任务结果 (${lines.length} 行)</summary>\n\n${fenced(inner)}\n\n</details>\n`;
+    }
+
+    // Handle <path>...<content>... file read results (may have multiple)
+    const pathRegex = /<path>(.*?)<\/path>\s*(?:<type>.*?<\/type>\s*)?<content>([\s\S]*?)<\/content>/g;
+    let match;
+    const blocks: string[] = [];
+    while ((match = pathRegex.exec(output)) !== null) {
+      const filePath = match[1].trim();
+      const content = match[2].trim();
+      const ext = filePath.split('.').pop() || '';
+      const lines = content.split('\n');
+      if (lines.length <= 15) {
+        blocks.push(`\n${fenced(content, ext)}\n`);
+      } else {
+        blocks.push(`\n<details><summary>📄 ${filePath} (${lines.length} 行)</summary>\n\n${fenced(content, ext)}\n\n</details>\n`);
+      }
+    }
+    if (blocks.length > 0) return blocks.join('');
+
+    return null;
   }
 
   private setupEngineEvents(): void {
     if (!this.engine) return;
 
     this.engine.on('agent-message', (content) => {
-      console.log(`[OpenCodeWrapper] agent-message received:`, JSON.stringify(content).slice(0, 200));
       if (content.type === 'text') {
         let prefix = '';
         if (this.lastBlockWasTool) {
