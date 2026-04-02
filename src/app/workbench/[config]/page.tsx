@@ -2346,6 +2346,20 @@ export default function WorkbenchPage() {
                         </div>
 
                         <div>
+                          <Label className="text-sm font-medium">工作流描述</Label>
+                          <Textarea
+                            value={workflowConfig?.workflow?.description || ''}
+                            onChange={(e) => {
+                              const newConfig = { ...workflowConfig, workflow: { ...workflowConfig.workflow, description: e.target.value } };
+                              dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: newConfig });
+                            }}
+                            rows={2}
+                            placeholder="请输入工作流描述..."
+                            className="mt-2"
+                          />
+                        </div>
+
+                        <div>
                           <Label className="text-sm font-medium">需求描述</Label>
                           <Textarea
                             value={requirements}
