@@ -26,13 +26,13 @@ workflow:
             提供 2-3 个备选方案并推荐最佳方案。
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 攻击设计方案
           agent: design-breaker
           task: 分析设计方案，找出所有可能的缺陷和风险
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 评审方案
           agent: design-judge
           task: >
@@ -86,7 +86,7 @@ workflow:
           role: defender
           skills:
             - build-cangjie
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 代码审查
           agent: code-hunter
           task: >
@@ -97,7 +97,7 @@ workflow:
             4. 是否正确处理 mimalloc 不可用的情况
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 验证实现
           agent: code-judge
           task: >
@@ -269,7 +269,7 @@ workflow:
             提供具体的修复步骤和预期效果。
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 攻击修复方案
           agent: fix-breaker
           task: >
@@ -307,7 +307,7 @@ workflow:
             审查修复代码，验证修复有效性，发现潜在问题。
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 验证修复结果
           agent: fix-reviewer
           task: >
@@ -401,7 +401,7 @@ context:
     - build-cangjie
     - run-cangjie-tests
     - profile-cangjie
-    - use-knowledge-base
+    - cangjie_compiler_knowledge
 
 judgeConfig:
   regressionThreshold: 0.05

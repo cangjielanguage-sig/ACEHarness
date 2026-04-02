@@ -58,8 +58,9 @@ skills:
   skill-creator: false
   slack-gif-creator: false
   theme-factory: false
-  use-knowledge-base: false
+  cangjie_compiler_knowledge: false
   utils: false
   web-artifacts-builder: false
   webapp-testing: false
   xlsx: false
+workingDirectory: ~/ace/cangjie_compiler

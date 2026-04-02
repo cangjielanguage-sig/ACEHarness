@@ -1,16 +1,24 @@
 workflow:
   name: "管道运算符重载函数 ICE: |> + lambda + 重载解析的 SIGSEGV"
   description: >
-    修复仓颉编译器在管道运算符 |> 配合尾随 lambda 调用重载函数时触发的 ICE。 问题代码： ``` func test(input:
-    Array<Int64>) {
-        input |> map { p => f(p + 1.0) }
-    } func map(input: Array<Int64>) { input } func f(float: Float64) { float }
-    func f(int: Int64) { int } main() { 0 } ``` 已知能通过编译的对照用例（Array<Float64> +
-    显式类型标注）： ``` func test(input: Array<Float64>) {
-        input |> map { p: Float64 => f(p + 1.0) }
-    } func map(input: Array<Float64>) { input } func f(float: Float64) { float }
-    func f(int: Int64) { int } main() { 0 } ``` 编译器版本：1.1.0-alpha.20260324030034
-    (cjnative) 错误：Windows unexpected exception code (11) / SIGSEGV，Error Code: 6
+    修复仓颉编译器在管道运算符 |> 配合尾随 lambda 调用重载函数时触发的 ICE。 问题代码： 
+
+    ```cangjie
+
+    import std.collection.map
+
+    func test(input: Array<Float64>) { input |> map { p => f(p + 1.0) } }
+
+    func f(float: Float64) { float }
+
+    func f(int: Int64) { int }
+
+    main() { 0 } 
+
+    ```已知能通过编译的对照用例（Array<Float64> + 显式类型标注）：  `func test(input: Array<Float64>)
+    { input |> map { p: Float64 => f(p + 1.0)
+    }}`编译器版本：1.1.0-alpha.20260324030034 (cjnative) 错误：Windows unexpected
+    exception code (11) / SIGSEGV，Error Code: 6
   mode: state-machine
   maxTransitions: 30
   states:
@@ -27,10 +35,20 @@ workflow:
           task: >
             针对管道运算符 + 重载函数 ICE 构造最小可复现用例，验证 ICE 11 (SIGSEGV) 可稳定触发。
 
-            原始问题代码： ``` func test(input: Array<Int64>) {
-                input |> map { p => f(p + 1.0) }
-            } func map(input: Array<Int64>) { input } func f(float: Float64) {
-            float } func f(int: Int64) { int } main() { 0 } ```
+            原始问题代码： ```cangjie
+
+            import std.collection.map
+
+            func test(input: Array<Float64>) { input |> map { p => f(p + 1.0) }
+            }
+
+            func f(float: Float64) { float }
+
+            func f(int: Int64) { int }
+
+            main() { 0 } 
+
+            ```
 
             请在 ../cangjie_compiler 目录下：
 
@@ -47,17 +65,20 @@ workflow:
 
             4. 已知能通过编译的对照用例（必须验证）：
                ```
-               func test(input: Array<Float64>) {
-                   input |> map { p: Float64 => f(p + 1.0) }
-               }
-               func map(input: Array<Float64>) { input }
-               func f(float: Float64) { float }
-               func f(int: Int64) { int }
-               main() { 0 }
+            import std.collection.map
+
+            func test(input: Array<Float64>) { input |> map { p: Float64 => f(p
+            + 1.0) } }
+
+            func f(float: Float64) { float }
+
+            func f(int: Int64) { int }
+
+            main() { 0 } 
                ```
                确认此用例确实能通过编译
 
-            5. 尝试不同变体确认触发条件：
+            5. 尝试不同变体确认触发条件（需包含以下情况）：
                - 去掉 |> 管道运算符，改为普通函数调用 → 是否正常
                - 去掉重载（只保留一个 f）→ 是否正常
                - 去掉尾随 lambda，改为显式传参 → 是否正常
@@ -69,9 +90,9 @@ workflow:
             6. 同时在 Linux 环境下测试确认 SIGSEGV 是否稳定
 
             输出：完整源码 + 编译输出 + 变体测试结果，确认 ICE 触发条件
-          role: defender
+          role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 复现裁判
           agent: compiler_fix-judge
           task: >
@@ -97,6 +118,8 @@ workflow:
             {"verdict":"pass|fail","next_state":"根因分析","summary":"复现结论，含 ICE
             触发充分必要条件"}
           role: judge
+          skills:
+            - cangjie_compiler_knowledge
       transitions:
         - to: 根因分析
           condition:
@@ -122,9 +145,8 @@ workflow:
             精确分析管道运算符重载函数 ICE 根因。源码位于 ../cangjie_compiler/src/。
 
             已知线索： 1. |> 管道运算符将 input 作为第一个参数传给右侧表达式 2. 右侧是尾随 lambda：map { p =>
-            f(p + 1.0) } 3. lambda 内调用重载函数 f，参数 p + 1.0 涉及 Int64 → Float64 隐式转换
-            4. 重载解析需要在 f(Float64) 和 f(Int64) 之间选择 5. 关键对照：Array<Float64> + 显式标注
-            p: Float64 能通过编译，
+            f(p + 1.0) } 3. lambda 内调用重载函数 f 4. 重载解析需要在 f(Float64) 和 f(Int64)
+            之间选择 5. 关键对照：Array<Float64> + 显式标注 p: Float64 能通过编译，
                说明当 lambda 参数类型需要从 Array<Int64> 推断且未显式标注时，
                重载解析路径中可能存在空指针/野指针
 
@@ -152,9 +174,9 @@ workflow:
                - 确认是空指针解引用还是野指针
 
             输出：精确的崩溃代码路径 + 根因分析 + 涉及的源文件和行号
-          role: defender
+          role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 根因审查
           agent: compiler_code-auditor
           task: >
@@ -165,7 +187,9 @@ workflow:
             类型推断链是否完整（Array<Int64> → Int64 → Float64 → 重载选择）？
 
             输出：审查意见 + 是否同意根因结论
-          role: attacker
+          role: judge
+          skills:
+            - cangjie_compiler_knowledge
         - name: 根因裁判
           agent: compiler_fix-judge
           task: |
@@ -211,7 +235,7 @@ workflow:
             输出：修复方案设计文档
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 实施修复
           agent: compiler_fix-developer
           task: >
@@ -229,8 +253,8 @@ workflow:
             输出：修改的文件列表 + diff + 编译验证结果
           role: defender
           skills:
-            - use-knowledge-base
             - build-cangjie
+            - cangjie_compiler_knowledge
         - name: 修复裁判
           agent: compiler_fix-judge
           task: |
@@ -255,6 +279,7 @@ workflow:
             verdict: fail
           priority: 2
           label: 修复不合格，重新实现
+      requireHumanApproval: true
     - name: 验证测试
       description: 回归测试 + 压力测试确认修复质量
       isInitial: false
@@ -300,9 +325,9 @@ workflow:
             输出：所有测试结果汇总
           role: defender
           skills:
-            - use-knowledge-base
             - build-cangjie
             - run-cangjie-tests
+            - cangjie_compiler_knowledge
         - name: 测试裁判
           agent: compiler_fix-judge
           task: |
@@ -349,23 +374,29 @@ workflow:
 context:
   projectRoot: ../cangjie_compiler
   requirements: |-
-    修复仓颉编译器在管道运算符 |> 配合尾随 lambda 调用重载函数时触发的 ICE。
+    已知release/1.0分支没问题，修复结果注意看下release/1.0的代码，一样说明改的不对。任务：修复仓颉编译器在管道运算符 |> 配合尾随 lambda 调用重载函数时触发的 ICE。
     问题现象：以下代码在编译时触发 ICE (Internal Compiler Error)， Windows 环境下错误码 11 (SIGSEGV)：
-    ``` func test(input: Array<Int64>) {
-        input |> map { p => f(p + 1.0) }
-    } func map(input: Array<Int64>) { input } func f(float: Float64) { float } func f(int: Int64) { int } main() { 0 } ```
-    关键特征： - 管道运算符 |> 将 input 传给 map - 尾随 lambda { p => f(p + 1.0) } 作为 map 的参数 - lambda 内调用重载函数 f，参数涉及 Int64 + Float64 类型转换 - 重载解析需要在 f(Float64) 和 f(Int64) 之间选择
-    已知能通过编译的对照用例（Array<Float64> + 显式类型标注）： ``` func test(input: Array<Float64>) {
-        input |> map { p: Float64 => f(p + 1.0) }
-    } func map(input: Array<Float64>) { input } func f(float: Float64) { float } func f(int: Int64) { int } main() { 0 } ```
+
+    注意复现务必使用以下代码：
+    ```cangjie
+    import std.collection.map
+    func test(input: Array<Float64>) { input |> map { p => f(p + 1.0) } }
+    func f(float: Float64) { float }
+    func f(int: Int64) { int }
+    main() { 0 } 
+    ```
+
+    关键特征： - 管道运算符 |> 将 input 传给 map - 尾随 lambda { p => f(p + 1.0) } 作为 map 的参数 - lambda 内调用重载函数 f，重载解析需要在 f(Float64) 和 f(Int64) 之间选择
+    已知能通过编译的对照用例（Array<Float64> + 显式类型标注）： `func test(input: Array<Float64>) { input |> map { p: Float64 => f(p + 1.0) }}`
+
     修复原则： - 仅做最小化的根因修改，不做防御性修改 - 不添加与业务无关的注释 - 在 ../cangjie_test 补充 LLT 测试用例
-    验收标准： 1. 上述代码不再 ICE，编译通过或给出明确语义错误（而非崩溃） 2. 管道运算符的正常功能不受影响 3. 函数重载的正常功能不受影响 4. 现有测试套件无回归 5. 压力测试无新问题 6. ../cangjie_test 中已补充 LLT 测试用例
-    注意，cangjie语言要求二元操作符两边的类型必须是一致的，所以应该能自动推导出p的类型，而不需要做类型标注。最终arr|>map应该和arr.map行为一致！！
+    验收标准： 1. 上述代码不再 ICE，编译通过 2. 管道运算符的正常功能不受影响 3. 函数重载的正常功能不受影响 4. 现有测试套件无回归 5. 压力测试无新问题 6. ../cangjie_test 中已补充 LLT 测试用例
+    注意，cangjie语言要求二元操作符两边的类型必须是一致的，所以应该能自动推导出p的类型，而不需要做类型标注。注意！需要保证最终修复后不加类型标注也能编过！不能改变语义行为！注意，cangjie语言要求二元操作符两边的类型必须是一致的，所以应该能自动推导出p的类型，而不需要做类型标注。注意！需要保证最终修复后不加类型标注也能编过！不能改变语义行为！不一定要在崩溃点修复，不要加防御性代码，修复根因！
   codebase: src/frontend/
   testRoot: ../cangjie_test
   timeoutMinutes: 300
   skills:
-    - use-knowledge-base
     - build-cangjie
     - run-cangjie-tests
     - power-gitcode
+    - cangjie_compiler_knowledge

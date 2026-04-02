@@ -44,8 +44,8 @@ skills:
    contributors:
      - zichexuelan
 
- - name: use-knowledge-base
-   path: use-knowledge-base
+ - name: cangjie_compiler_knowledge
+   path: cangjie_compiler_knowledge
    description: "仓颉编译器代码知识库检索。【触发场景】TypeChecker/sema/AST2CHIR/AST2CHIRBuilder、CHIR 优化 pass、解糖去虚化、Devirtualization 在哪、目录在哪。【注意】用于源码导航，搜类/函数/文件位置。覆盖 18 模块 714 文件 1036 类。"
    tags:
      - 知识库

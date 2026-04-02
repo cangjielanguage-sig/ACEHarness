@@ -72,7 +72,7 @@ workflow:
             - 不要只写结论，每个实验步骤都必须有完整的命令和输出记录
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 构造边界变体
           agent: stress-tester
           task: |
@@ -202,7 +202,7 @@ workflow:
             - 如果做了编译实验，贴出完整命令和输出
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 攻击定位结论
           agent: fix-breaker
           task: |
@@ -290,7 +290,7 @@ workflow:
             对每个方案给出：修改文件、修改范围、风险评估、回归影响。
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 攻击修复方案
           agent: fix-breaker
           task: >
@@ -383,7 +383,7 @@ workflow:
             - 用复现用例验证修复效果，贴出完整命令和输出
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 审查修复代码
           agent: fix-hunter
           task: |
@@ -513,6 +513,6 @@ context:
   codebase: src/Sema/
   timeoutMinutes: 300
   skills:
-    - use-knowledge-base
+    - cangjie_compiler_knowledge
     - build-cangjie
     - run-cangjie-tests

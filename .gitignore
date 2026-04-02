@@ -54,5 +54,5 @@ runs/
 data/*
 !data/chat-settings.yaml
 !data/users/
-skills/
+# skills/
 configs/x.yaml

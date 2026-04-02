@@ -423,4 +423,4 @@ context:
   skills:
     - build-cangjie
     - run-cangjie-tests
-    - use-knowledge-base
+    - cangjie_compiler_knowledge

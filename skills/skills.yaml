@@ -1,0 +1,860 @@
+# AceFlow Skills 配置
+# 描述所有可用的 skills，每个 skill 对应 .claude/skills/ 下的一个目录
+
+skills:
+ - name: build-cangjie
+   path: build-cangjie
+   description: "仓颉编译器构建。【触发场景】build/编译 cjc/runtime/stdlib/stdx/cjpm/cjfmt/cjlint/cjcov/cjlsp、搭建编译环境、重新编译、用 cjc 编译。【注意】首次构建需完整步骤：1) 依次构建 runtime+stdlib+stdx 并 install；2) source output/envsetup.sh；3) 验证：cjc hello.cj。后续增量编译只需 ninja cjc。输出在 cangjie_compiler/output/。支持 linux/mac x86_64/aarch64。"
+   tags:
+     - 构建
+     - 编译器
+     - 仓颉
+     - 工具链
+   platforms:
+     - linux_x86_64
+     - linux_aarch64
+     - mac_x86_64
+     - mac_aarch64
+   version: "1.1.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+
+ - name: run-cangjie-tests
+   path: run-cangjie-tests
+   description: "仓颉测试用例执行。【触发场景】test case/测试用例、testsuite/testlist、HLT/LLT/cjcov/LSP。【注意】依赖 CANGJIE_HOME 环境变量。参数：-j 并行、--timeout 超时、-pFAIL 只显失败、--retry 重试、--fail_exit 失败退码。"
+   tags:
+     - 测试
+     - 编译器
+     - 仓颉
+   version: "1.1.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+
+ - name: profile-cangjie
+   path: profile-cangjie
+   description: "仓颉编译器性能分析。【触发场景】profile-compile-time、profile-compile-memory、.prof 报告、编译瓶颈。【注意】需先构建 compiler，直接用 --profile 标志无需重编译。"
+   tags:
+     - 性能分析
+     - 编译器
+     - 仓颉
+   version: "1.1.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+
+ - name: cangjie_compiler_knowledge
+   path: cangjie_compiler_knowledge
+   description: "仓颉编译器知识库。【触发场景】编译器架构/模块/概念查询、TypeChecker/sema/AST/CHIR/CodeGen、解糖/去虚化/类型推导、lambda/闭包/泛型实现、编译流程/优化 pass。【注意】提供概念说明、模块详情、关系图、源码导航。覆盖 18 模块 60+ 概念 714 文件 1036 类。"
+   tags:
+     - 知识库
+     - 编译器
+     - 仓颉
+   version: "1.0.0"
+   updatedAt: "2026-04-02"
+   contributors:
+     - zichexuelan
+
+ - name: power-gitcode
+   path: power-gitcode
+   description: "GitCode 全操作。【触发场景】PR 创建/查看/评论/merge/squash、Issue 创建/查看/标签、gitcode 链接、第xxx号 PR/Issue、fork/Release、template、commitlint。【注意】PR/Issue 创建返回 html_url；关联：在 body 写 Issue 链接；commit 必须英文 commitlint。"
+   tags:
+     - GitCode
+     - PR管理
+     - Issue
+     - 仓库管理
+     - commit
+   platforms:
+     - linux_x86_64
+     - linux_aarch64
+     - mac_x86_64
+     - mac_aarch64
+   version: "2.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+
+ - name: aceflow-chat-card
+   path: aceflow-chat-card
+   description: "可视化卡片渲染。【触发场景】用卡片显示、做个卡片展示、生成可视化卡片/PR 卡片/Issue 卡片/card/tabs/badge/徽章/进度条/header/info 行。【注意】无需说 AceFlow，看到卡片需求即触发。输出 card JSON 代码块，支持头部/键值对/徽章/badge/代码块/进度条/tabs/badges/折叠区。"
+   tags:
+     - 卡片
+     - UI
+     - 对话
+     - 可视化
+   platforms:
+     - linux_x86_64
+     - linux_aarch64
+     - mac_x86_64
+     - mac_aarch64
+   version: "1.1.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+
+ - name: aceflow-workflow-creator
+   path: aceflow-workflow-creator
+   description: "AceFlow 工作流配置文件创建技能。【触发场景】每当用户提到：创建工作流、配置 workflow、新建工作流、写工作流配置、设置 agent 执行流程、state-machine/phase-based 工作流。生成前必须用验证脚本校验 YAML 格式和 agent 引用有效性，不要跳过验证直接生成。"
+   tags:
+     - 工作流
+     - 配置
+     - 创建
+     - 对话
+   version: "1.1.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+
+ # ===== 仓颉语言 Skill =====
+
+ - name: cangjie_basic_concepts
+   path: cangjie_basic_concepts
+   description: "仓颉编程语言基本概念和规则，当需要了解关键字、标识符、程序结构、变量定义(let/var/const)、值类型与引用类型、作用域规则、表达式(if/while/for-in/break/continue)、函数等基本概念时，应使用此 Skill"
+   tags:
+     - 仓颉
+     - 基础
+     - 概念
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_basic_data_type
+   path: cangjie_basic_data_type
+   description: "仓颉语言基本数据类型。当需要了解仓颉语言的整数、浮点、布尔、字符(Rune)、字符串(String)、Unit、Nothing、元组(Tuple)、数组(Array/VArray)、区间(Range)类型以及基本运算符的语法和规则时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 数据类型
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_cffi
+   path: cangjie_cffi
+   description: "仓颉程序与C程序互操作指导，包括foreign声明、CFunc、inout参数、unsafe块、调用约定、类型映射(基础类型/结构体/CPointer/VArray/CString)、C回调仓颉、内存管理等特性时，应使用此 Skill"
+   tags:
+     - 仓颉
+     - CFFI
+     - 互操作
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_class
+   path: cangjie_class
+   description: "仓颉语言类。当需要了解仓颉语言的类定义、抽象类、构造函数(init/主构造函数)、终结器(~init)、继承(单继承/sealed)、重写(override)、重定义(redef)、成员变量、成员函数、属性(prop)、访问修饰符、This类型、对象创建等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 类
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_collections
+   path: cangjie_collections
+   description: "提供仓颉集合数据类型使用文档，包括Array/ArrayList/HashMap/HashSet"
+   tags:
+     - 仓颉
+     - 集合
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_concurrency
+   path: cangjie_concurrency
+   description: "仓颉语言并发编程。当需要了解仓颉语言的M:N线程模型、spawn创建线程、sleep、原子操作(Atomic)、互斥锁(Mutex)、条件变量(Condition)、synchronized、Future、线程取消、ThreadLocal等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 并发
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_const
+   path: cangjie_const
+   description: "仓颉语言 const 变量与 const 函数。当需要了解仓颉语言的 const 变量定义、const 表达式、const 函数、编译时求值、const init 构造函数等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - const
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_enum
+   path: cangjie_enum
+   description: "仓颉语言枚举类型。当需要了解仓颉语言的enum定义规则、构造器（有参/无参/同名/非穷举）、枚举的使用与名称冲突、枚举成员函数和属性、递归枚举、枚举实现Equatable接口等特性时，应使用此 Skill"
+   tags:
+     - 仓颉
+     - 枚举
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_error_handle
+   path: cangjie_error_handle
+   description: "仓颉语言错误处理。当需要了解仓颉语言的异常层次(Error/Exception)、自定义异常、throw、try/catch/finally、try-with-resources、CatchPattern、Option类型错误处理(?./??/getOrThrow)、内置运行时异常等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 错误处理
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_extend
+   path: cangjie_extend
+   description: "仓颉语言扩展。当需要了解仓颉语言的直接扩展(extend)、接口扩展、泛型扩展、扩展中的访问规则、孤儿规则、导出与导入规则等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 扩展
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_for
+   path: cangjie_for
+   description: "仓颉语言 for-in 迭代。当需要了解 for-in 循环语法、Iterable/Iterator 接口、Range 区间类型、迭代控制（break/continue/where）、元组解构、自定义迭代器、迭代最优实践等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 迭代
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_full_docs
+   path: cangjie_full_docs
+   description: "当无法从其他Skills中获取有效知识时，请引用此Skill，本Skill所在目录中有仓颉语言/标准库/扩展标准库/工具链的原始文档，提供详细信息"
+   tags:
+     - 仓颉
+     - 文档
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_function
+   path: cangjie_function
+   description: "仓颉语言函数。当需要了解仓颉语言的函数定义、调用、命名参数、默认值、函数类型、Lambda表达式、闭包、嵌套函数、函数重载、运算符重载、尾随Lambda、管道运算符(|>)、组合运算符(~>)、变长参数等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 函数
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_generic
+   path: cangjie_generic
+   description: "仓颉语言泛型。当需要了解仓颉语言的泛型函数、泛型类、泛型接口、泛型结构体、泛型枚举、泛型约束(where)、泛型子类型关系、型变(不变/协变/逆变)等特性时，应使用此 Skill。类型别名相关内容请参见 cangjie-type-system Skill。"
+   tags:
+     - 仓颉
+     - 泛型
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_interface
+   path: cangjie_interface
+   description: "仓颉语言接口。当需要了解仓颉语言的接口定义、接口实现(单个/多个)、接口继承、默认实现(实例/静态)、sealed接口、泛型成员、Any类型、属性(prop)在接口中的使用、菱形继承解决方案等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 接口
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_macro
+   path: cangjie_macro
+   description: "当需要了解仓颉语言宏与元编程、Token/Tokens类型、quote表达式与插值、非属性宏、属性宏、嵌套宏与通信、std.ast包与语法节点解析时，应使用此 Skill"
+   tags:
+     - 仓颉
+     - 宏
+     - 元编程
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_network
+   path: cangjie_network
+   description: "提供仓颉网络编程指导文档，包括socket/tcp/udp/tls/http/https/websocket"
+   tags:
+     - 仓颉
+     - 网络
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_option
+   path: cangjie_option
+   description: "仓颉语言 Option 类型。当需要了解 Option<T> 定义与用法、?T 简写、自动包装、模式匹配解构、coalescing 操作符(??)、问号操作符(?.)、getOrThrow()、if-let 条件解构、while-let 循环解构等特性时，应使用此 Skill"
+   tags:
+     - 仓颉
+     - Option
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_package
+   path: cangjie_package
+   description: "仓颉语言包管理。当需要了解仓颉语言的包声明(package)、程序入口(main)、包导入(import)、重新导出(public import)、顶层访问修饰符(private/internal/protected/public)等特性时，应使用此 Skill"
+   tags:
+     - 仓颉
+     - 包管理
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_pattern_match
+   path: cangjie_pattern_match
+   description: "仓颉语言模式匹配。当需要了解 match 表达式、模式类型（常量/通配符/绑定/元组/类型/枚举）、模式嵌套、模式守卫(where)、穷举性、模式可反驳性、if-let 条件匹配、while-let 循环匹配、模式在变量定义和 for-in 中的使用等特性时，应使用此 Skill"
+   tags:
+     - 仓颉
+     - 模式匹配
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_project_management
+   path: cangjie_project_management
+   description: "仓颉项目管理工具 cjpm 的用法指导，包括创建项目、项目配置(cjpm.toml)、管理依赖、构建、运行、测试、清理、安装、工作区、交叉编译、构建脚本(build.cj)、增量编译、环境变量替换等"
+   tags:
+     - 仓颉
+     - 项目管理
+     - cjpm
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_reflect_and_annotation
+   path: cangjie_reflect_and_annotation
+   description: "仓颉语言反射与注解。当需要了解仓颉语言的整数溢出注解(@OverflowThrowing/@OverflowWrapping/@OverflowSaturating)、自定义注解(@Annotation)、反射(TypeInfo)等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 反射
+     - 注解
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_regulations
+   path: cangjie_regulations
+   description: "仓颉项目规范准则。包括项目结构规范、命名规范、格式化规范、错误处理规范、测试规范、并发规范、安全规范、文档规范、依赖管理规范、版本控制规范等最佳实践指导"
+   tags:
+     - 仓颉
+     - 规范
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_std
+   path: cangjie_std
+   description: "提供仓颉语言标准库常用功能速查文档，包括类型转换/格式化字串/文件系统/IO流/标准输入输出/命令行参数处理/单元测试框架等"
+   tags:
+     - 仓颉
+     - 标准库
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_stdx
+   path: cangjie_stdx
+   description: "提供仓颉语言扩展标准库stdx常用功能速查文档，包括stdx配置构建/json编解码等"
+   tags:
+     - 仓颉
+     - 扩展标准库
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_string
+   path: cangjie_string
+   description: "仓颉标准库 String 类型详细指南。当需要了解 String 的构造、搜索、替换、分割、拼接、裁剪、大小写转换、编码处理、下标访问、迭代等操作的完整 API 和用法时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - String
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_struct
+   path: cangjie_struct
+   description: "仓颉语言结构体。当需要了解仓颉语言的struct定义、构造函数(init/主构造函数)、值语义、成员访问与修改规则、mut函数及其限制等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 结构体
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_toolchains
+   path: cangjie_toolchains
+   description: "提供仓颉语言编译器cjc/调试器cjdb/覆盖率检测工具cjcov/代码格式化工具cjfmt/静态检查工具cjlint/性能分析工具cjprof的使用文档"
+   tags:
+     - 仓颉
+     - 工具链
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie_type_system
+   path: cangjie_type_system
+   description: "仓颉语言类型系统。当需要了解仓颉语言的子类型关系（继承/接口实现/元组/函数类型）、型变规则（协变/逆变/不型变）、类型转换（is/as操作符）、数值类型转换、Rune转换、Nothing/Any/Object等基础类型关系、类型别名(type)等特性时，应使用此 Skill。"
+   tags:
+     - 仓颉
+     - 类型系统
+   version: "1.0.0"
+   updatedAt: "2026-03-25"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ # ===== 仓颉工程与检索 Skill =====
+
+ - name: cangjie-evolution
+   path: cangjie-evolution
+   description: "管理仓颉普通工程（非鸿蒙应用）开发过程中的 Evolution.md 文件，记录和查询在开发过程中遇到的重要问题和解决方案，避免重复踩坑。"
+   tags:
+     - 仓颉
+     - 问题追踪
+     - Evolution
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie-vec-retriever-guide
+   path: cangjie-vec-retriever-guide
+   description: "当 cangjie-kernel 等基础 Skill 无法命中知识点、答案不准确/过时/不适用，或工程出现复杂错误时被调用，使用向量 RAG + BM25 的混合检索，从本地知识库中检索仓颉相关知识点、示例代码和排错思路。"
+   tags:
+     - 仓颉
+     - 知识检索
+     - RAG
+     - 向量搜索
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: cangjie-doc-search-guide
+   path: cangjie-doc-search-guide
+   description: "[考古层] 当基础 Skills 和 cangjie-vec-retriever-guide 的 L1 语义检索无法给出可靠答案或终端返回 NO_RAG_RESULT 时被调用，基于本地离线官方文档进行全量检索与精读，定位权威仓颉语法、标准库与 stdx 扩展库的规范用法。"
+   tags:
+     - 仓颉
+     - 文档搜索
+     - 本地文档
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ # ===== 鸿蒙应用 Skill =====
+
+ - name: base-skill
+   path: base-skill
+   description: "强制前置动作。每当用户要求创建、生成、开发『仓颉 (Cangjie)』项目或『鸿蒙 (HarmonyOS)』应用的任务时，必须首先调用并执行此 Skill。它是后续所有开发步骤的唯一入口指南。"
+   tags:
+     - 仓颉
+     - 鸿蒙
+     - 入口
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: harmonyos-project-init
+   path: harmonyos-project-init
+   description: "当用户要求创建、初始化、新建仓颉鸿蒙项目时，必须首先调用此 Skill。当用户说『创建一个鸿蒙应用』、『新建仓颉鸿蒙工程』、『初始化鸿蒙项目』、『帮我搭建一个鸿蒙App』、『我要开发一个HarmonyOS应用』等表述时，触发此 Skill。此 Skill 提供完整的项目模板结构和文件内容，用于从零开始创建一个可运行的仓颉鸿蒙 Hello World 项目。"
+   tags:
+     - 鸿蒙
+     - 项目初始化
+     - HarmonyOS
+     - 仓颉
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: harmonyos-requirement-analysis
+   path: harmonyos-requirement-analysis
+   description: "当遇到鸿蒙应用开发需求时，首先使用此 Skill 进行需求技术化分析，将业务需求转换为具体的技术实现点，识别需要的 UI 组件、数据结构和交互方式。分析完成后，先使用 skill-B 中的仓颉语言 skills 进行开发，然后再使用 L1/L3 查询和构建流程。"
+   tags:
+     - 鸿蒙
+     - 需求分析
+     - HarmonyOS
+     - 仓颉
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: harmonyos-build
+   path: harmonyos-build
+   description: "当需要构建鸿蒙应用项目时，使用此 Skill 执行构建流程。此 Skill 包含完整的构建命令、构建流程说明、构建失败处理流程。构建脚本会自动执行依赖安装、仓颉预编译、资源生成、编译、打包等步骤。"
+   tags:
+     - 鸿蒙
+     - 构建
+     - HarmonyOS
+     - 仓颉
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: harmonyos-evolution
+   path: harmonyos-evolution
+   description: "当构建成功后需要记录重难点，或构建失败时需要查询已知问题时，使用此 Skill 管理 Evolution.md 文件。此 Skill 负责追踪并分析构建失败日志，将重难点解决方案沉淀至 Evolution.md，打造专属知识库，拒绝重复踩坑。只有在构建成功后才能将新问题添加到 Evolution.md。"
+   tags:
+     - 鸿蒙
+     - 问题追踪
+     - Evolution
+     - HarmonyOS
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: harmonyos-vec-retriever-guide
+   path: harmonyos-vec-retriever-guide
+   description: "当需要快速精准检索鸿蒙应用开发相关的代码片段和概念时，使用此 Skill 进行 L1 RAG 查询。此 Skill 基于向量数据库和 BM25 混合检索，提供最常用的代码片段。注意：这是可选功能，需要配置 API Key 才能启用。"
+   tags:
+     - 鸿蒙
+     - 知识检索
+     - RAG
+     - HarmonyOS
+     - 向量搜索
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: harmonyos-doc-search-guide
+   path: harmonyos-doc-search-guide
+   description: "当 L1 RAG 查询失效或需要更权威的官方文档时，使用此 Skill 进行 L3 本地文档搜索。此 Skill 直接搜索本地下载的官方文档，无需网络，包含最权威的官方信息和完整代码示例。适用于所有类型的问题，特别是UI开发、API参考、语法说明。"
+   tags:
+     - 鸿蒙
+     - 文档搜索
+     - 本地文档
+     - HarmonyOS
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ - name: harmonyos-stdx-dependency
+   path: harmonyos-stdx-dependency
+   description: "在鸿蒙应用（Cangjie）开发中，当需要使用 stdx 拓展库（如 crypto、encoding、net、log、actors 等），或在构建/链接阶段出现 stdx 相关错误时，使用此 Skill 获取/解压 stdx 包，并指导在 entry/cjpm.toml 中正确配置 bin-dependencies.path-option。"
+   tags:
+     - 鸿蒙
+     - stdx
+     - 依赖配置
+     - HarmonyOS
+     - 仓颉
+   version: "1.0.0"
+   updatedAt: "2026-03-26"
+   contributors:
+     - zichexuelan
+   source: cangjie
+
+ # ===== Anthropics Official Skills =====
+
+ - name: algorithmic-art
+   path: algorithmic-art
+   description: Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration
+   descriptionZh: 使用 p5.js 创建算法艺术，支持种子随机数和交互式参数探索
+   tags:
+     - 艺术
+     - 生成式
+     - p5.js
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: brand-guidelines
+   path: brand-guidelines
+   description: Applies Anthropic's official brand colors and typography to artifacts
+   descriptionZh: 将 Anthropic 官方品牌配色和字体应用到各类产出物
+   tags:
+     - 品牌
+     - 设计
+     - 样式
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: canvas-design
+   path: canvas-design
+   description: Create beautiful visual art in .png and .pdf documents using design philosophy
+   descriptionZh: 基于设计哲学创建精美的 PNG/PDF 视觉艺术作品
+   tags:
+     - 设计
+     - 艺术
+     - 画布
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: claude-api
+   path: claude-api
+   description: Build apps with the Claude API or Anthropic SDK
+   descriptionZh: 使用 Claude API 或 Anthropic SDK 构建应用
+   tags:
+     - API
+     - SDK
+     - 开发
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: doc-coauthoring
+   path: doc-coauthoring
+   description: Guide users through a structured workflow for co-authoring documentation
+   descriptionZh: 引导用户通过结构化流程协作撰写文档
+   tags:
+     - 文档
+     - 写作
+     - 协作
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: docx
+   path: docx
+   description: Create, read, edit, or manipulate Word documents (.docx files)
+   descriptionZh: 创建、读取、编辑和处理 Word 文档（.docx 文件）
+   tags:
+     - 文档
+     - Word
+     - 办公
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: frontend-design
+   path: frontend-design
+   description: Create distinctive, production-grade frontend interfaces with high design quality
+   descriptionZh: 创建高品质、生产级别的前端界面设计
+   tags:
+     - 前端
+     - 设计
+     - UI
+     - Web
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: internal-comms
+   path: internal-comms
+   description: Write internal communications using company formats (status reports, updates, newsletters, FAQs)
+   descriptionZh: 使用公司格式撰写内部沟通文档（状态报告、更新、简报、FAQ）
+   tags:
+     - 写作
+     - 沟通
+     - 报告
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: mcp-builder
+   path: mcp-builder
+   description: Guide for creating high-quality MCP servers that enable LLMs to interact with external services
+   descriptionZh: 创建高质量 MCP 服务器的指南，使 LLM 能与外部服务交互
+   tags:
+     - MCP
+     - 服务器
+     - 集成
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: pdf
+   path: pdf
+   description: Read, create, edit, merge, split, and process PDF files
+   descriptionZh: 读取、创建、编辑、合并、拆分和处理 PDF 文件
+   tags:
+     - PDF
+     - 文档
+     - 办公
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: pptx
+   path: pptx
+   description: Create, read, edit, and manipulate PowerPoint presentations (.pptx files)
+   descriptionZh: 创建、读取、编辑和处理 PowerPoint 演示文稿（.pptx 文件）
+   tags:
+     - 演示文稿
+     - PPT
+     - 办公
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: skill-creator
+   path: skill-creator
+   description: Create new skills, modify and improve existing skills, and measure skill performance
+   descriptionZh: 创建新技能、修改和改进现有技能、评估技能性能
+   tags:
+     - 元技能
+     - 开发
+     - 评估
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: slack-gif-creator
+   path: slack-gif-creator
+   description: Create animated GIFs optimized for Slack
+   descriptionZh: 创建针对 Slack 优化的动画 GIF
+   tags:
+     - GIF
+     - Slack
+     - 动画
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: theme-factory
+   path: theme-factory
+   description: Toolkit for styling artifacts with professional themes (colors, fonts, layouts)
+   descriptionZh: 使用专业主题（配色、字体、布局）为产出物添加样式
+   tags:
+     - 主题
+     - 样式
+     - 设计
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: web-artifacts-builder
+   path: web-artifacts-builder
+   description: Build elaborate multi-component HTML artifacts using React, Tailwind CSS, and shadcn/ui
+   descriptionZh: 使用 React、Tailwind CSS 和 shadcn/ui 构建多组件 HTML 产出物
+   tags:
+     - Web
+     - React
+     - 前端
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: webapp-testing
+   path: webapp-testing
+   description: Test local web applications using Playwright with screenshots and browser logs
+   descriptionZh: 使用 Playwright 测试本地 Web 应用，支持截图和浏览器日志
+   tags:
+     - 测试
+     - Playwright
+     - Web
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics
+
+ - name: xlsx
+   path: xlsx
+   description: Create, read, edit, and process spreadsheet files (.xlsx, .csv, .tsv)
+   descriptionZh: 创建、读取、编辑和处理电子表格文件（.xlsx、.csv、.tsv）
+   tags:
+     - 电子表格
+     - Excel
+     - 数据
+   source: anthropics
+   version: "1.0.0"
+   updatedAt: "2026-03-13"
+   contributors:
+     - anthropics

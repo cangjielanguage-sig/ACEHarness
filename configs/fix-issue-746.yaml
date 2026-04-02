@@ -40,7 +40,7 @@ workflow:
             输出：完整源码 + 每步命令和输出 + -O0 vs -O2 对比结论
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 构造边界变体
           agent: stress-tester
           task: |
@@ -54,7 +54,7 @@ workflow:
             每个变体：写出源码、编译运行（-O0 和 -O2）、记录完整输出、标注是否触发 Bug。
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 复现阶段裁判
           agent: fix-judge
           task: |
@@ -119,7 +119,7 @@ workflow:
             输出：根因定位报告（文件路径、行号、代码片段、错误解释）
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 根因挑战验证
           agent: code-auditor
           task: |
@@ -132,7 +132,7 @@ workflow:
             输出：验证报告，确认或修正根因定位
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 根因定位裁判
           agent: fix-judge
           task: |
@@ -180,7 +180,7 @@ workflow:
             每个修复方案说明：修改文件和行号范围、修改前后代码对比、修复理论依据、潜在副作用
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 方案安全性审查
           agent: design-breaker
           task: |
@@ -194,7 +194,7 @@ workflow:
             输出：安全性审查报告，列出风险点和建议
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 方案设计裁判
           agent: design-judge
           task: |
@@ -251,7 +251,7 @@ workflow:
             输出：修改的完整代码片段 + 编译结果 + 验证测试输出
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
             - build-cangjie
         - name: 代码审计
           agent: fix-reviewer
@@ -266,7 +266,7 @@ workflow:
             输出：代码审计报告，列出问题（如有）和改进建议
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 实现阶段裁判
           agent: fix-judge
           task: |
@@ -320,7 +320,7 @@ workflow:
             输出：完整测试报告，包含每个测试用例的命令和结果
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
             - run-cangjie-tests
         - name: 压力测试
           agent: stress-tester
@@ -334,7 +334,7 @@ workflow:
             输出：压力测试报告，标注是否发现新问题
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 最终裁判
           agent: fix-judge
           task: |
@@ -413,6 +413,6 @@ context:
   codebase: src/Sema/
   timeoutMinutes: 300
   skills:
-    - use-knowledge-base
+    - cangjie_compiler_knowledge
     - build-cangjie
     - run-cangjie-tests

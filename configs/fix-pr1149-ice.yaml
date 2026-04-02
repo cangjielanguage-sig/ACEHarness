@@ -60,7 +60,7 @@ workflow:
             输出：完整源码 + O2 编译输出 + O0 对比 + 简化版本结果
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 复现裁判
           agent: compiler_fix-judge
           task: >
@@ -152,7 +152,7 @@ workflow:
             输出：根因验证报告，含每处代码的精确文件:行号、代码片段、验证结论
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 根因挑战审查
           agent: compiler_code-auditor
           task: |
@@ -177,7 +177,7 @@ workflow:
             输出：独立验证报告，确认或修正根因假设
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 根因分析裁判
           agent: compiler_fix-judge
           task: |
@@ -231,7 +231,7 @@ workflow:
             输出：方案对比分析 + 推荐方案 + 风险评估
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 方案安全性审查
           agent: compiler_design-breaker
           task: >
@@ -268,7 +268,7 @@ workflow:
             输出：安全性审查报告，明确正确的修复方案
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 方案设计裁判
           agent: compiler_design-judge
           task: |
@@ -334,7 +334,7 @@ workflow:
             输出：修改的完整 diff + 编译结果 + 验证测试输出
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
             - build-cangjie
         - name: 代码审计
           agent: compiler_fix-reviewer
@@ -352,7 +352,7 @@ workflow:
             输出：代码审计报告
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 实现裁判
           agent: compiler_fix-judge
           task: |
@@ -410,7 +410,7 @@ workflow:
             输出：完整测试报告
           role: defender
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 压力测试
           agent: compiler_performance-breaker
           task: |
@@ -452,7 +452,7 @@ workflow:
             输出：压力测试报告，标注是否发现新问题
           role: attacker
           skills:
-            - use-knowledge-base
+            - cangjie_compiler_knowledge
         - name: 最终裁判
           agent: compiler_fix-judge
           task: |
@@ -546,7 +546,7 @@ context:
   codebase: src/CHIR/IR/
   timeoutMinutes: 300
   skills:
-    - use-knowledge-base
+    - cangjie_compiler_knowledge
     - build-cangjie
     - run-cangjie-tests
     - power-gitcode
