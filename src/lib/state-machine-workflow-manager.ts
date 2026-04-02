@@ -1667,7 +1667,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
           }
           const sessionId = proc?.sessionId;
 
-          const feedbackPrompt = this.liveFeedback.map((fb, i) => `${i + 1}. ${fb}`).join('\n');
+          const feedbackPrompt = this.liveFeedback.join('\n\n');
           this.liveFeedback = [];
           const feedbackTimestamp = new Date().toISOString();
           accumulatedStream += `\n\n<!-- chunk-boundary -->\n\n<!-- human-feedback: ${feedbackTimestamp} -->\n${feedbackPrompt}`;
@@ -1726,7 +1726,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       // Check for pending live feedback after completion
       if (this.liveFeedback.length > 0 && !this.shouldStop) {
-        const feedbackPrompt = this.liveFeedback.map((fb, i) => `${i + 1}. ${fb}`).join('\n');
+        const feedbackPrompt = this.liveFeedback.join('\n\n');
         this.liveFeedback = [];
         const sessionId = result.session_id;
         if (!sessionId) break;

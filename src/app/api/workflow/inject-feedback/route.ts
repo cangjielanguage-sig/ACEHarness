@@ -13,6 +13,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Must specify configFile to avoid sending to wrong workflow
+    if (!configFile) {
+      return NextResponse.json(
+        { error: '必须指定 configFile 参数' },
+        { status: 400 }
+      );
+    }
+
     const manager = workflowRegistry.getRunningManager(configFile);
     if (!manager) {
       return NextResponse.json(

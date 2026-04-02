@@ -1501,7 +1501,7 @@ export class WorkflowManager extends EventEmitter {
             const sessionId = proc?.sessionId;
             if (!sessionId) throw err; // Can't resume without session ID
 
-            const feedbackPrompt = this.liveFeedback.map((fb, i) => `${i + 1}. ${fb}`).join('\n');
+            const feedbackPrompt = this.liveFeedback.join('\n\n');
             this.liveFeedback = [];
             const feedbackTimestamp = new Date().toISOString();
             accumulatedStream += `\n\n<!-- chunk-boundary -->\n\n<!-- human-feedback: ${feedbackTimestamp} -->\n${feedbackPrompt}`;

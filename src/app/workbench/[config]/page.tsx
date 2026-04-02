@@ -1309,6 +1309,14 @@ export default function WorkbenchPage() {
     if (!feedback.trim() || sendingFeedback) return;
     setSendingFeedback(true);
     try {
+      // Add feedback to inline list immediately for display
+      const timestamp = new Date().toISOString();
+      setInlineFeedbacks(prev => [...prev, {
+        message: feedback.trim(),
+        timestamp,
+        streamIndex: liveStream.length, // Insert after current chunks
+      }]);
+      
       const res = await workflowApi.injectFeedback(feedback.trim(), interrupt, configFile);
       if (liveStreamFeedbackRef.current) liveStreamFeedbackRef.current.value = '';
       if (interrupt) {
@@ -1320,6 +1328,8 @@ export default function WorkbenchPage() {
       }
     } catch (error: any) {
       toast('error', `发送反馈失败: ${error.message}`);
+      // Remove feedback from inline list if API call failed
+      setInlineFeedbacks(prev => prev.slice(0, -1));
     }
     setSendingFeedback(false);
   };
@@ -2715,11 +2725,12 @@ export default function WorkbenchPage() {
                     for (const chunk of liveStream) {
                       const parsed = parseChunk(chunk);
                       if (parsed.isHumanFeedback) {
-                        // Stream stores feedback as numbered lines ("1. msg"), extract raw messages
-                        const lines = parsed.content.trim().split('\n');
-                        for (const line of lines) {
-                          const stripped = line.replace(/^\d+\.\s*/, '').trim();
-                          if (stripped) streamFeedbackMessages.add(stripped);
+                        // Extract raw feedback content (without numbering)
+                        const feedbackContent = parsed.content.trim();
+                        // Split by double newlines to handle multiple feedbacks
+                        const feedbacks = feedbackContent.split('\n\n').map(f => f.trim()).filter(Boolean);
+                        for (const fb of feedbacks) {
+                          streamFeedbackMessages.add(fb);
                         }
                       }
                     }
