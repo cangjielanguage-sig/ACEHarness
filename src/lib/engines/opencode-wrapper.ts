@@ -351,15 +351,14 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
       };
       this.engine.on('agent-message', textHandler);
 
-      // Start collecting only after session setup is done, so replayed
-      // history from session/load doesn't leak into the output.
-      collectOutput = true;
-      this.streaming = true;
-
       let stopReason: string | undefined;
       const maxRetries = 3;
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
+          // Start collecting and streaming ONLY after sendPrompt is called,
+          // so replayed history from session/load doesn't leak into the output.
+          collectOutput = true;
+          this.streaming = true;
           stopReason = await this.engine.sendPrompt(fullPrompt);
           break;
         } catch (promptError: any) {
@@ -368,6 +367,9 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
           if (isThrottled && attempt < maxRetries) {
             const delay = attempt * 30;
             this.emit('stream', { type: 'log', content: `⚠️ 服务限流，${delay}s 后重试...` });
+            // Reset streaming flags before retry
+            this.streaming = false;
+            collectOutput = false;
             this.engine.stop();
             this.engine = new OpenCodeEngine({
               workingDirectory: options.workingDirectory,

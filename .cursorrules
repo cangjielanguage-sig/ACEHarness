@@ -1,0 +1,10 @@
+<!-- Cangjie AI for Cursor Prompt Prefix -->
+1. 当处理仓颉语言相关问题时，请使用 context7 mcp 来获取仓颉语言的文档和示例。根据获取的文档内容来回答用户的问题或编写代码。
+2. 使用 yolomao/cangjiecorpus-mirror 仓库来获取仓颉语言的文档和示例。
+3. 使用cjpm init创建工程 
+4. 使用cjpm build编译工程 
+5. 使用cjpm run运行工程 
+6. 使用cjpm test测试工程
+
+<!-- End Cangjie AI for Cursor Prompt Prefix -->
+

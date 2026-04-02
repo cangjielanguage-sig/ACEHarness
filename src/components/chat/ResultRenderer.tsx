@@ -341,5 +341,39 @@ function resultToCard(type: string, result: any): CardSchema | null {
     };
   }
 
+  // Generic fallback for other action types - show a basic card with "View Details" action
+  if (type && result && typeof result === 'object' && !result.success) {
+    const actionName = type.split('.').pop() || type;
+    const hasData = Object.keys(result).length > 0;
+    
+    if (hasData) {
+      return {
+        header: { 
+          icon: 'info', 
+          title: `${actionName} 结果`, 
+          gradient: 'from-gray-500 to-slate-500' 
+        },
+        blocks: [
+          {
+            type: 'collapse' as const,
+            title: '查看详情',
+            subtitle: '点击展开查看完整结果',
+            blocks: [
+              {
+                type: 'code' as const,
+                code: JSON.stringify(result, null, 2),
+                lang: 'json',
+                copyable: true
+              }
+            ]
+          }
+        ],
+        actions: [
+          { label: '查看详情', prompt: `查看 ${type} 的详细信息`, icon: 'info' }
+        ]
+      };
+    }
+  }
+
   return null;
 }
