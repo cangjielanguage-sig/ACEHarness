@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { configApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -100,9 +101,11 @@ export default function WorkflowsPage() {
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="sm" onClick={() => router.back()}>
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                返回首页
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/dashboard">
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  返回首页
+                </Link>
               </Button>
               <div className="h-6 w-px bg-border" />
               <div>

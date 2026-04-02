@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Cpu, Plus, Trash2, ArrowLeft, Edit2, Check, X, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -351,9 +352,11 @@ export default function ModelsPage() {
           <div className="container mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <Button variant="ghost" size="sm" onClick={() => router.back()}>
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  {t('common.back')}
+                <Button variant="ghost" size="sm" asChild>
+                  <Link href="/dashboard">
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    {t('common.back')}
+                  </Link>
                 </Button>
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-gradient-to-br from-primary to-blue-600 rounded-lg">

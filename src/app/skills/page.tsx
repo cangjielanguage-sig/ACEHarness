@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -178,15 +179,11 @@ export default function SkillsPage() {
       {/* Header */}
       <div className="h-14 border-b bg-card flex items-center justify-between px-6">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => {
-            if (window.history.length > 1) {
-              router.back();
-            } else {
-              router.push('/');
-            }
-          }}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            返回
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/dashboard">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              返回首页
+            </Link>
           </Button>
           <h1 className="text-lg font-semibold">Skills 管理</h1>
         </div>
