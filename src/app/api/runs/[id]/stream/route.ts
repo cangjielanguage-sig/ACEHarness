@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { loadStreamContent } from '@/lib/run-state-persistence';
+import { loadStreamContent, loadRunState } from '@/lib/run-state-persistence';
 import { processManager } from '@/lib/process-manager';
 
 export const dynamic = 'force-dynamic';
@@ -28,6 +28,8 @@ export async function GET(
   const stream = new ReadableStream({
     start(controller) {
       let closed = false;
+      /** Bytes already sent to client from persisted stream file (SDK Plan / non-processManager paths) */
+      let lastFileSentLen = 0;
 
       const send = (event: string, data: any) => {
         if (closed) return;
@@ -38,43 +40,87 @@ export async function GET(
         }
       };
 
-      // Send any already-accumulated content first (prefer running process over completed ones)
+      const flushPersistedStream = async () => {
+        const c = await loadStreamContent(id, step);
+        if (!c || c.length <= lastFileSentLen) return;
+        send('delta', { content: c.slice(lastFileSentLen) });
+        lastFileSentLen = c.length;
+      };
+
+      // Send any already-accumulated content first — must match `step` (状态-步骤名)
       const allProcs = processManager.getAllProcesses();
-      const existing = allProcs.find((p: any) => p.runId === id && p.status === 'running' && p.streamContent)
-        || allProcs.find((p: any) => p.runId === id && p.streamContent);
+      const existing =
+        allProcs.find(
+          (p: any) =>
+            p.runId === id && p.step === step && p.status === 'running' && p.streamContent,
+        ) ||
+        allProcs.find((p: any) => p.runId === id && p.step === step && p.streamContent);
       if (existing?.streamContent) {
         send('delta', { content: existing.streamContent });
       }
 
+      // Initial snapshot from disk (Claude SDK Plan writes here, no processManager stream)
+      void flushPersistedStream();
+
+      // Poll persisted stream file — SDK Plan / engines that only use saveStreamContent
+      const filePoll = setInterval(() => {
+        void flushPersistedStream();
+      }, 800);
+
       // Listen for live stream events
       const onStream = (evt: any) => {
         if (closed) return;
-        // Match by runId — processManager stream events carry { id, step, delta, total }
-        // The process id contains the runId, or we match by step name
         const proc = processManager.getProcessRaw?.(evt.id);
-        if (proc?.runId === id) {
-          if (evt.delta) {
-            send('delta', { content: evt.delta });
-          }
-          if (evt.thinking) {
-            send('thinking', { content: evt.thinking });
-          }
+        if (proc?.runId !== id || proc.step !== step) return;
+        if (evt.delta) {
+          send('delta', { content: evt.delta });
+        }
+        if (evt.thinking) {
+          send('thinking', { content: evt.thinking });
         }
       };
 
       processManager.on('stream', onStream);
 
-      // Only signal done when no running processes remain for this runId
+      // Done when: no running proc AND run state no longer running, OR a finished proc exists for this run
       const checkDone = setInterval(() => {
-        if (closed) { clearInterval(checkDone); return; }
-        const procs = processManager.getAllProcesses();
-        const hasRunning = procs.some((p: any) => p.runId === id && p.status === 'running');
-        if (hasRunning) return;
-        const finished = procs.find((p: any) => p.runId === id && (p.status === 'completed' || p.status === 'failed' || p.status === 'killed'));
-        if (finished) {
-          send('done', { status: finished.status });
-          cleanup();
-        }
+        void (async () => {
+          if (closed) return;
+          const procs = processManager.getAllProcesses();
+          const hasRunningProc = procs.some((p: any) => p.runId === id && p.status === 'running');
+          let runStillActive = false;
+          try {
+            const rs = await loadRunState(id);
+            runStillActive = rs?.status === 'running';
+          } catch {
+            /* ignore */
+          }
+          if (hasRunningProc || runStillActive) return;
+
+          await flushPersistedStream();
+
+          const finished = procs.find(
+            (p: any) =>
+              p.runId === id &&
+              p.step === step &&
+              (p.status === 'completed' || p.status === 'failed' || p.status === 'killed'),
+          );
+          if (finished) {
+            send('done', { status: finished.status });
+            cleanup();
+            return;
+          }
+
+          try {
+            const rs = await loadRunState(id);
+            if (rs && rs.status !== 'running') {
+              send('done', { status: rs.status });
+              cleanup();
+            }
+          } catch {
+            /* ignore */
+          }
+        })();
       }, 2000);
 
       const cleanup = () => {
@@ -82,6 +128,7 @@ export async function GET(
         closed = true;
         processManager.off('stream', onStream);
         clearInterval(checkDone);
+        clearInterval(filePoll);
         try { controller.close(); } catch {}
       };
 

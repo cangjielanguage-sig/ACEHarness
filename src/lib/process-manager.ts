@@ -218,6 +218,8 @@ interface ExecuteOptions {
   timeoutMs?: number;
   runId?: string;
   stepId?: string;
+  /** 与状态机 currentStep / 流文件名一致，例如「架构设计-架构与目录约定」；用于 SSE 与落盘对齐 */
+  streamStepLabel?: string;
   agents?: Record<string, any>; // For review panel mode
   frontendSessionId?: string; // For tracking active streams per frontend session
   mcpServers?: McpServerConfig[];
@@ -289,7 +291,9 @@ class ProcessManager extends EventEmitter {
     options: ExecuteOptions = {}
   ): Promise<ClaudeJsonResult> {
     const proc: ProcessInfo = {
-      id, agent, step,
+      id,
+      agent,
+      step: options.streamStepLabel || step,
       stepId: options.stepId,
       status: 'queued',
       startTime: new Date(),
@@ -313,7 +317,7 @@ class ProcessManager extends EventEmitter {
     if (this.running >= this.maxConcurrent) {
       this.queue.push(id);
       proc.logLines.push(`[${ts()}] 排队中 (当前并发: ${this.running}/${this.maxConcurrent})`);
-      this.emit('queued', { id, agent, step, position: this.queue.length });
+      this.emit('queued', { id, agent, step: proc.step, position: this.queue.length });
       await new Promise<void>((resolve) => {
         const check = () => {
           if (this.running < this.maxConcurrent && this.queue[0] === id) {
@@ -565,7 +569,7 @@ class ProcessManager extends EventEmitter {
             } else if (delta?.type === 'thinking_delta' && delta.thinking && inThinking) {
               // Accumulate thinking text
               thinkingText += delta.thinking;
-              this.emit('stream', { id, step, thinking: delta.thinking });
+              this.emit('stream', { id, step: proc.step, thinking: delta.thinking });
             } else if (evt?.type === 'content_block_stop' && inThinking) {
               // Thinking block ended
               inThinking = false;
@@ -574,7 +578,7 @@ class ProcessManager extends EventEmitter {
               if (lastBlockWasTool) {
                 const sep = '\n\n<!-- chunk-boundary -->\n\n';
                 proc.streamContent += sep;
-                this.emit('stream', { id, step, delta: sep, total: proc.streamContent });
+                this.emit('stream', { id, step: proc.step, delta: sep, total: proc.streamContent });
               }
               lastBlockWasTool = false;
             } else if (delta?.type === 'text_delta' && delta.text) {
@@ -582,11 +586,11 @@ class ProcessManager extends EventEmitter {
               if (lastBlockWasTool) {
                 const sep = '\n\n<!-- chunk-boundary -->\n\n';
                 proc.streamContent += sep;
-                this.emit('stream', { id, step, delta: sep, total: proc.streamContent });
+                this.emit('stream', { id, step: proc.step, delta: sep, total: proc.streamContent });
                 lastBlockWasTool = false;
               }
               proc.streamContent += delta.text;
-              this.emit('stream', { id, step, delta: delta.text, total: proc.streamContent });
+              this.emit('stream', { id, step: proc.step, delta: delta.text, total: proc.streamContent });
             } else if (evt?.type === 'content_block_start' && evt.content_block?.type === 'tool_use') {
               // Tool call started — show tool name
               const toolName = evt.content_block.name || 'unknown';
@@ -594,7 +598,7 @@ class ProcessManager extends EventEmitter {
               currentToolUse = { name: toolName, inputJson: '', id: toolId };
               const header = `\n\n**🔧 ${toolName}**\n`;
               proc.streamContent += header;
-              this.emit('stream', { id, step, delta: header, total: proc.streamContent });
+              this.emit('stream', { id, step: proc.step, delta: header, total: proc.streamContent });
             } else if (delta?.type === 'input_json_delta' && delta.partial_json && currentToolUse) {
               // Accumulate tool input JSON for rendering
               currentToolUse.inputJson += delta.partial_json;
@@ -603,7 +607,7 @@ class ProcessManager extends EventEmitter {
               const toolBlock = formatToolUseSummary(currentToolUse.name, currentToolUse.inputJson);
               if (toolBlock) {
                 proc.streamContent += toolBlock;
-                this.emit('stream', { id, step, delta: toolBlock, total: proc.streamContent });
+                this.emit('stream', { id, step: proc.step, delta: toolBlock, total: proc.streamContent });
               }
               lastToolName = currentToolUse.name;
               // Save Task description for labeling subagent results
@@ -709,14 +713,14 @@ class ProcessManager extends EventEmitter {
               }
               if (resultBlock) {
                 proc.streamContent += resultBlock;
-                this.emit('stream', { id, step, delta: resultBlock, total: proc.streamContent });
+                this.emit('stream', { id, step: proc.step, delta: resultBlock, total: proc.streamContent });
               }
             }
           } else if (obj.type === 'assistant') {
             // Insert chunk boundary so live stream viewers see visual separation between turns
             if (proc.streamContent && !proc.streamContent.endsWith('\n\n<!-- chunk-boundary -->\n\n')) {
               proc.streamContent += '\n\n<!-- chunk-boundary -->\n\n';
-              this.emit('stream', { id, step, delta: '\n\n<!-- chunk-boundary -->\n\n', total: proc.streamContent });
+              this.emit('stream', { id, step: proc.step, delta: '\n\n<!-- chunk-boundary -->\n\n', total: proc.streamContent });
             }
             // Full completed message block — use as final output
             if (obj.message?.content) {

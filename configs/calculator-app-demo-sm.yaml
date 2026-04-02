@@ -1,0 +1,179 @@
+# 演示 / 测试用：计算器应用 — 四状态（一状态一阶段，可流转）
+# 需求分析 → 架构设计 → 编码实现 → 测试验证
+# 需求阶段：useSdkPlan + enablePlanLoop，便于与用户交互澄清需求后再进入下一状态
+# 工作台: /workbench/calculator-app-demo-sm.yaml?mode=run
+
+workflow:
+  name: 计算器应用演示（状态机 · 四状态）
+  description: |
+    每阶段独立状态，状态机按 verdict 流转；需求阶段单独停留，充分分析与 SDK Plan 交互。
+    产出目录：demos/calculator-app/
+  mode: state-machine
+  maxTransitions: 24
+  states:
+    - name: 需求分析
+      description: 澄清范围与验收标准；可与用户多轮交互（SDK Plan / Supervisor-Lite）
+      requireHumanApproval: false
+      isInitial: true
+      isFinal: false
+      maxSelfTransitions: 5
+      position:
+        x: 120
+        y: 220
+      steps:
+        - name: 需求确认
+          agent: calc-req-analyst
+          role: defender
+          useSdkPlan: true
+          enablePlanLoop: true
+          maxPlanRounds: 5
+          task: >
+            本状态专注「需求分析」：对简单计算器应用做充分澄清（目标用户、必做功能：加减乘除/清除/小数/错误提示、
+            非目标与假设），与 context.requirements 对齐。
+            输出可交付的《需求摘要》（要点列表 + 验收口径），写入 demos/calculator-app/REQUIREMENTS.md（若目录不存在则创建）。
+            在进入下一状态前，应已尽量消除歧义；不要在本状态编写架构或实现代码。
+            除非确有必要，不要创建额外子代理/子任务；优先在同一会话内单线程完成需求澄清与 AskUserQuestion，避免任务树扩散。
+      transitions:
+        - to: 架构设计
+          condition:
+            verdict: pass
+          priority: 1
+          label: 需求已收敛，进入架构
+        - to: 架构设计
+          condition:
+            verdict: conditional_pass
+          priority: 2
+          label: 有条件通过，进入架构
+        - to: 需求分析
+          condition:
+            verdict: fail
+          priority: 10
+          label: 需求不足，本状态内迭代（自转）
+
+    - name: 架构设计
+      description: 在已确认需求上给出目录与技术选型（不开 SDK Plan）
+      requireHumanApproval: false
+      isInitial: false
+      isFinal: false
+      position:
+        x: 340
+        y: 220
+      steps:
+        - name: 架构与目录约定
+          agent: calc-architect
+          role: defender
+          task: >
+            读取 demos/calculator-app/REQUIREMENTS.md（若存在）与前置状态产出，给出 demos/calculator-app/ 下
+            架构说明、目录约定与技术选型（如纯 HTML+JS）；输出 ARCHITECTURE.md，不写业务实现代码。
+      transitions:
+        - to: 编码实现
+          condition:
+            verdict: pass
+          priority: 1
+        - to: 编码实现
+          condition:
+            verdict: conditional_pass
+          priority: 2
+        - to: 需求分析
+          condition:
+            verdict: fail
+          priority: 5
+          label: 需求不清，退回需求分析
+
+    - name: 编码实现
+      description: 按架构落地可运行代码
+      requireHumanApproval: false
+      isInitial: false
+      isFinal: false
+      position:
+        x: 560
+        y: 220
+      steps:
+        - name: 编码交付
+          agent: calc-developer
+          role: defender
+          task: >
+            按 ARCHITECTURE.md 与需求在 demos/calculator-app/ 实现可打开运行的计算器（优先 index.html + 同目录 JS），
+            README.md 说明如何验证。
+      transitions:
+        - to: 测试验证
+          condition:
+            verdict: pass
+          priority: 1
+        - to: 测试验证
+          condition:
+            verdict: conditional_pass
+          priority: 2
+        - to: 架构设计
+          condition:
+            verdict: fail
+          priority: 5
+          label: 实现偏离，退回架构
+
+    - name: 测试验证
+      description: 验收测试与结论
+      requireHumanApproval: false
+      isInitial: false
+      isFinal: true
+      position:
+        x: 780
+        y: 220
+      steps:
+        - name: 测试与报告
+          agent: calc-tester
+          role: defender
+          task: >
+            对 demos/calculator-app/ 做测试验证：对照 REQUIREMENTS.md 检查功能；记录步骤与结果；
+            写入 TEST_REPORT.md，并在回复中给出明确结论。
+      transitions: []
+
+roles:
+  - name: calc-req-analyst
+    team: blue
+    model: gpt-5.4
+    capabilities:
+      - 需求分析
+      - 范围澄清
+      - 用户故事整理
+    systemPrompt: >
+      你是需求分析师。通过对话与结构化输出澄清计算器类小型应用的需求边界、验收标准与约束；
+      不写实现代码，产出可供架构师使用的需求摘要。
+      在 SDK Plan 模式下：除非用户或任务明确要求，不要主动拆分子代理或并行子任务；优先单线程澄清需求，
+      需要用户选择时使用 AskUserQuestion，避免不必要的子任务扩散导致上下文碎片化。
+
+  - name: calc-architect
+    team: blue
+    model: gpt-5.4
+    capabilities:
+      - 系统设计
+      - 模块划分
+      - 技术选型说明
+    systemPrompt: >
+      你是软件架构师。基于已确认需求，给出简洁可落地的架构与目录结构约定，便于开发直接实现。
+
+  - name: calc-developer
+    team: blue
+    model: gpt-5.4
+    capabilities:
+      - 前端实现
+      - 单元与手工验证
+    systemPrompt: >
+      你是开发工程师。严格按架构与需求在约定目录交付可运行代码与 README，保持实现简单可维护。
+
+  - name: calc-tester
+    team: blue
+    model: gpt-5.4
+    capabilities:
+      - 功能测试
+      - 验收验证
+      - 测试记录
+    systemPrompt: >
+      你是测试工程师。对交付物做针对性验证，记录步骤与结果，明确通过/不通过与遗留问题。
+
+context:
+  projectRoot: .
+  requirements: |
+    演示任务流：开发一个最小可用的浏览器端计算器（四则运算、清除、基本错误处理），用于验证分状态工作流与需求阶段 SDK Plan。
+  timeoutMinutes: 60
+  routerModel: gpt-5.4
+  skills: []

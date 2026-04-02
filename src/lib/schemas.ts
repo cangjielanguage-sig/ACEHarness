@@ -27,6 +27,8 @@ export const workflowStepSchema = z.object({
   // ---- Supervisor-Lite 新增 ----
   enablePlanLoop: z.boolean().optional(), // 是否启用 Plan 循环
   maxPlanRounds: z.number().min(1).max(10).default(3).optional(), // 最大 Plan 轮次
+  /** Claude Agent SDK plan 模式（AskUserQuestion + plan 文件）；需 SDK 可用，否则降级 */
+  useSdkPlan: z.boolean().optional(),
 });
 
 // 检查点 Schema
