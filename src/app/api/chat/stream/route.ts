@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processManager } from '@/lib/process-manager';
-import { createEngine, getConfiguredEngine } from '@/lib/engines/engine-factory';
+import { getOrCreateEngine, getConfiguredEngine } from '@/lib/engines/engine-factory';
 import { buildDashboardSystemPrompt } from '@/lib/chat-system-prompt';
 import { loadChatSettings } from '@/lib/chat-settings';
 import type { Engine } from '@/lib/engines/engine-interface';
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
 
     const chatSettings = mode === 'dashboard' ? await loadChatSettings() : null;
     const configuredEngine = await getConfiguredEngine();
-    const engine = await createEngine(configuredEngine);
+    const engine = await getOrCreateEngine(configuredEngine, frontendSessionId);
 
     // Non-Claude engines: stream through Engine wrapper events
     if (engine) {
@@ -158,9 +158,6 @@ export async function POST(request: NextRequest) {
         };
       }).finally(() => {
         engine.off('stream', onEngineStream);
-        if (typeof (engine as any).cleanup === 'function') {
-          (engine as any).cleanup();
-        }
       });
 
       const entry = {

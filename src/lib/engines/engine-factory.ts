@@ -38,6 +38,42 @@ export async function getConfiguredEngine(): Promise<EngineType> {
   return 'claude-code';
 }
 
+// Engine pool: reuse engine instances across messages in the same chat session
+const enginePool = new Map<string, { engine: Engine; lastUsed: number }>();
+const ENGINE_POOL_TTL = 10 * 60 * 1000; // 10 minutes idle timeout
+
+// Periodically clean up idle engines
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of enginePool) {
+    if (now - entry.lastUsed > ENGINE_POOL_TTL) {
+      if (typeof (entry.engine as any).cleanup === 'function') {
+        (entry.engine as any).cleanup();
+      }
+      enginePool.delete(key);
+    }
+  }
+}, 60_000);
+
+/**
+ * Get or create an engine instance for a session.
+ * When sessionKey is provided, engines are pooled and reused across messages.
+ */
+export async function getOrCreateEngine(type?: EngineType, sessionKey?: string): Promise<Engine | null> {
+  if (sessionKey) {
+    const cached = enginePool.get(sessionKey);
+    if (cached) {
+      cached.lastUsed = Date.now();
+      return cached.engine;
+    }
+  }
+  const engine = await createEngine(type);
+  if (engine && sessionKey) {
+    enginePool.set(sessionKey, { engine, lastUsed: Date.now() });
+  }
+  return engine;
+}
+
 /**
  * Create an engine instance based on type
  */
