@@ -4,21 +4,25 @@
 Supports platforms: linux_x86_64, linux_aarch64, mac_x86_64, mac_aarch64
 
 Usage:
-    python3 build-cangjie.py [--platform PLATFORM] [--build-type TYPE] [--version VERSION]
+    python3 build-cangjie.py [--platform PLATFORM] [-t TYPE] [--version VERSION]
                              [--component COMPONENT] [--no-tests] [--incremental]
+                             [--workspace WORKSPACE]
 
 Examples:
-    python3 build-cangjie.py --platform linux_x86_64 --build-type release
-    python3 build-cangjie.py --platform mac_aarch64 --component compiler
+    python3 build-cangjie.py --platform linux_x86_64 -t relwithdebinfo --no-tests
+    python3 build-cangjie.py --platform mac_aarch64 --component compiler -t release --no-tests
     python3 build-cangjie.py --incremental --component cjc
+    python3 build-cangjie.py --workspace /path/to/workspace -t debug
 """
 
 import argparse
+import multiprocessing
 import os
 import subprocess
 import sys
 
 SUPPORTED_PLATFORMS = ["linux_x86_64", "linux_aarch64", "mac_x86_64", "mac_aarch64"]
+BUILD_TYPES = ["release", "relwithdebinfo", "debug"]
 COMPONENTS = ["all", "compiler", "cjc", "runtime", "stdlib", "stdx", "tools"]
 
 PLATFORM_CONFIG = {
@@ -75,12 +79,35 @@ def detect_platform():
     return f"{os_name}_{arch}"
 
 
-def find_workspace_root():
-    """Find workspace root (parent of cangjie_compiler)."""
+def find_workspace_root(custom_workspace=None):
+    """Find workspace root (parent of cangjie_compiler).
+    
+    Args:
+        custom_workspace: Optional custom workspace path provided by user
+        
+    Returns:
+        tuple: (workspace_root, compiler_root)
+    """
+    if custom_workspace:
+        workspace_root = os.path.abspath(custom_workspace)
+        compiler_root = os.path.join(workspace_root, "cangjie_compiler")
+        if not os.path.exists(compiler_root):
+            print(f"[build] ERROR: cangjie_compiler not found in {workspace_root}", file=sys.stderr)
+            print(f"[build] Please check the workspace path or specify --workspace", file=sys.stderr)
+            sys.exit(1)
+        return workspace_root, compiler_root
+    
     script_dir = os.path.dirname(os.path.abspath(__file__))
     # scripts/ -> build-cangjie/ -> skills/ -> .claude/ -> cangjie_compiler/ -> workspace
     compiler_root = os.path.abspath(os.path.join(script_dir, "..", "..", "..", ".."))
     workspace_root = os.path.dirname(compiler_root)
+    
+    # Verify compiler_root exists
+    if not os.path.exists(os.path.join(compiler_root, "build.py")):
+        print(f"[build] ERROR: cangjie_compiler not found at {compiler_root}", file=sys.stderr)
+        print(f"[build] Please specify workspace path using --workspace", file=sys.stderr)
+        sys.exit(1)
+    
     return workspace_root, compiler_root
 
 
@@ -106,9 +133,17 @@ def build_compiler(compiler_root, build_type, version, no_tests):
 
 
 def build_cjc_incremental(compiler_root):
-    """Incremental build of cjc only."""
+    """Incremental build of cjc only with parallel compilation."""
     build_dir = os.path.join(compiler_root, "build", "build")
-    run("ninja cjc", cwd=build_dir)
+    if not os.path.exists(build_dir):
+        print(f"[build] ERROR: Build directory not found at {build_dir}", file=sys.stderr)
+        print(f"[build] Please run a full build first (without --incremental)", file=sys.stderr)
+        sys.exit(1)
+    
+    # Use all available CPU cores for parallel compilation
+    num_jobs = multiprocessing.cpu_count()
+    print(f"[build] Using {num_jobs} parallel jobs for incremental build")
+    run(f"ninja cjc -j{num_jobs}", cwd=build_dir)
 
 
 def build_runtime(workspace_root, compiler_root, platform, build_type, version):
@@ -236,30 +271,62 @@ def verify_build(compiler_root):
     run(f"bash -c 'source {envsetup} && cd /tmp && echo \\'{test_code}\\' > hello.cj && cjc hello.cj -o hello && ./hello'")
 
 
+def prompt_build_type():
+    """Prompt user for build type if running interactively."""
+    if not sys.stdin.isatty():
+        return "relwithdebinfo"
+    
+    print("\n[build] Select build type:")
+    print("  1. release         - Optimized, no debug info")
+    print("  2. relwithdebinfo  - Optimized with debug info (default)")
+    print("  3. debug           - No optimization, full debug info")
+    
+    choice = input("\nEnter choice [1-3] (default: 2): ").strip()
+    
+    if choice == "1":
+        return "release"
+    elif choice == "3":
+        return "debug"
+    else:
+        return "relwithdebinfo"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build Cangjie compiler and dependencies")
     parser.add_argument("--platform", choices=SUPPORTED_PLATFORMS, default=None,
                         help="Target platform (auto-detected if omitted)")
-    parser.add_argument("--build-type", choices=["release", "debug"], default="release",
-                        help="Build type (default: release)")
+    parser.add_argument("-t", "--build-type", choices=BUILD_TYPES, default=None,
+                        help="Build type: release, relwithdebinfo, debug (default: relwithdebinfo, prompted if interactive)")
     parser.add_argument("--version", default="1.1.0.beta.999",
                         help="Version string (default: 1.1.0.beta.999)")
     parser.add_argument("--component", choices=COMPONENTS, default="all",
                         help="Component to build (default: all)")
     parser.add_argument("--no-tests", action="store_true",
-                        help="Skip unittest compilation")
+                        help="Skip unittest compilation (recommended for faster builds)")
     parser.add_argument("--incremental", action="store_true",
-                        help="Incremental build (only for cjc component)")
+                        help="Incremental build with parallel compilation (only for cjc component)")
     parser.add_argument("--verify", action="store_true",
                         help="Run verification after build")
+    parser.add_argument("--workspace", default=None,
+                        help="Workspace root path (auto-detected if omitted)")
     args = parser.parse_args()
+
+    # Determine build type
+    build_type = args.build_type
+    if build_type is None and not args.incremental:
+        build_type = prompt_build_type()
+    elif build_type is None:
+        build_type = "relwithdebinfo"
 
     platform = args.platform or detect_platform()
     print(f"[build] Platform: {platform}")
-    print(f"[build] Build type: {args.build_type}")
+    print(f"[build] Build type: {build_type}")
     print(f"[build] Component: {args.component}")
+    print(f"[build] Skip tests: {args.no_tests}")
 
-    workspace_root, compiler_root = find_workspace_root()
+    workspace_root, compiler_root = find_workspace_root(args.workspace)
+    print(f"[build] Workspace: {workspace_root}")
+    print(f"[build] Compiler: {compiler_root}")
 
     if args.incremental and args.component == "cjc":
         build_cjc_incremental(compiler_root)
@@ -267,21 +334,21 @@ def main():
 
     if args.component in ("all", "compiler"):
         prepare_llvm(workspace_root, compiler_root)
-        build_compiler(compiler_root, args.build_type, args.version, args.no_tests)
+        build_compiler(compiler_root, build_type, args.version, args.no_tests)
 
     if args.component in ("all", "runtime"):
         # Use dash version for runtime
         rt_version = args.version.replace(".beta.", "-beta.")
-        build_runtime(workspace_root, compiler_root, platform, args.build_type, rt_version)
+        build_runtime(workspace_root, compiler_root, platform, build_type, rt_version)
 
     if args.component in ("all", "stdlib"):
-        build_stdlib(workspace_root, compiler_root, args.build_type)
+        build_stdlib(workspace_root, compiler_root, build_type)
 
     if args.component in ("all", "stdx"):
-        build_stdx(workspace_root, compiler_root, platform, args.build_type)
+        build_stdx(workspace_root, compiler_root, platform, build_type)
 
     if args.component in ("all", "tools"):
-        build_cangjie_tools(workspace_root, compiler_root, args.build_type, platform)
+        build_cangjie_tools(workspace_root, compiler_root, build_type, platform)
 
     if args.verify or args.component == "all":
         verify_build(compiler_root)
@@ -291,5 +358,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

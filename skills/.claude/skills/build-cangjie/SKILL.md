@@ -18,7 +18,7 @@ description: "仓颉编译器构建技能。"
 2. **source envsetup.sh** — `source cangjie_compiler/output/envsetup.sh`
 3. **验证构建** — `cjc hello.cj -o hello && ./hello`，预期输出 `Hello, Cangjie`
 
-**首次构建**需完整步骤（runtime → stdlib → stdx → tools）。**后续增量编译**只需 `cd cangjie_compiler/build/build && ninja cjc`。
+**首次构建**需完整步骤（runtime → stdlib → stdx → tools）。**后续增量编译**只需 `cd cangjie_compiler/build/build && ninja cjc -j$(nproc)`（使用并行编译加速）。
 
 **构建产物路径：** `{compiler-project}/output/`（包含 envsetup.sh）
 
@@ -52,15 +52,30 @@ description: "仓颉编译器构建技能。"
 
 ## 快速构建（推荐）
 
+**使用此 skill 时必须遵循以下流程：**
+
+1. **优先增量编译** — 若已有构建产物（存在 `cangjie_compiler/build/build` 目录），直接使用增量编译（`--incremental --component cjc`），无需询问任何参数
+2. **首次构建时询问用户构建类型** — 询问用户选择 `-t` 参数：`release`/`relwithdebinfo`/`debug`，默认使用 `relwithdebinfo`
+3. **检查代码仓位置** — 若未找到相关代码仓（cangjie_compiler/cangjie_runtime/cangjie_stdx），询问用户代码仓位置（使用 `--workspace` 参数）
+4. **推荐跳过测试** — 构建 compiler 时推荐使用 `--no-tests` 参数（加快构建速度）
+
+**构建类型说明：**
+- `release` — 完全优化，无调试信息
+- `relwithdebinfo` — 优化 + 调试信息（默认，推荐）
+- `debug` — 无优化，完整调试信息
+
 ```bash
-# 完整构建（所有组件）
-python3 .claude/skills/build-cangjie/scripts/build-cangjie.py --platform linux_x86_64
-
-# 指定平台和组件
-python3 .claude/skills/build-cangjie/scripts/build-cangjie.py --platform mac_aarch64 --component compiler
-
-# 增量构建（仅 cjc）
+# 增量构建（仅 cjc，自动并行编译，最快，推荐）
 python3 .claude/skills/build-cangjie/scripts/build-cangjie.py --incremental --component cjc
+
+# 完整构建（所有组件，跳过单元测试，推荐）
+python3 .claude/skills/build-cangjie/scripts/build-cangjie.py --platform linux_x86_64 -t relwithdebinfo --no-tests
+
+# 指定工作区路径
+python3 .claude/skills/build-cangjie/scripts/build-cangjie.py --workspace /path/to/workspace -t release --no-tests
+
+# 构建时包含单元测试（耗时较长）
+python3 .claude/skills/build-cangjie/scripts/build-cangjie.py -t debug
 ```
 
 ## 组件构建顺序

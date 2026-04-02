@@ -5,12 +5,35 @@
 | Argument | Values | Default | Description |
 |----------|--------|---------|-------------|
 | `--platform` | `linux_x86_64`, `linux_aarch64`, `mac_x86_64`, `mac_aarch64` | auto-detect | Target platform |
-| `--build-type` | `release`, `debug` | `release` | Build type |
+| `-t`, `--build-type` | `release`, `relwithdebinfo`, `debug` | `relwithdebinfo` (prompted if interactive) | Build type |
 | `--version` | version string | `1.1.0.beta.999` | Version number |
 | `--component` | `all`, `compiler`, `cjc`, `runtime`, `stdlib`, `stdx`, `tools` | `all` | Component to build |
-| `--no-tests` | flag | off | Skip unittest compilation |
-| `--incremental` | flag | off | Incremental build (cjc only) |
+| `--no-tests` | flag | off | Skip unittest compilation (recommended for faster builds) |
+| `--incremental` | flag | off | Incremental build with parallel compilation (cjc only) |
 | `--verify` | flag | off | Run verification after build |
+| `--workspace` | path | auto-detect | Workspace root path (parent of cangjie_compiler) |
+
+## Build Type Details
+
+| Build Type | Optimization | Debug Info | Use Case |
+|------------|--------------|------------|----------|
+| `release` | Full (-O3) | None | Production builds, performance testing |
+| `relwithdebinfo` | Full (-O3) | Yes | Development (default, recommended) |
+| `debug` | None (-O0) | Full | Debugging, development |
+
+## Incremental Build
+
+The `--incremental` flag enables fast incremental compilation:
+- Only rebuilds changed files
+- Uses all available CPU cores (`ninja cjc -j$(nproc)`)
+- Requires previous full build
+- Only works with `--component cjc`
+
+Example:
+```bash
+# After making changes to compiler source
+python3 build-cangjie.py --incremental --component cjc
+```
 
 ## Platform Configuration
 
