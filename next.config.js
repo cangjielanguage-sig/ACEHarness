@@ -6,6 +6,9 @@ process.stderr.write = ((chunk, ...args) => {
   if (str.includes('chat-system-prompt') && str.includes('file pattern')) return true;
   // instrumentation-nodejs.ts dynamic import
   if (str.includes('instrumentation-nodejs') && str.includes('Can\'t resolve')) return true;
+  // workflow-manager.ts and state-machine-workflow-manager.ts use dynamic resolve for skills directory
+  if (str.includes('workflow-manager') && str.includes('file pattern')) return true;
+  if (str.includes('state-machine-workflow-manager') && str.includes('file pattern')) return true;
   return originalStderrWrite(chunk, ...args);
 });
 
