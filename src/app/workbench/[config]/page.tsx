@@ -1857,7 +1857,9 @@ export default function WorkbenchPage() {
                     {requirements && (
                       <div>
                         <Label className="text-xs font-medium text-muted-foreground">需求描述</Label>
-                        <p className="text-sm mt-1 leading-relaxed">{requirements}</p>
+                        <div className="text-sm mt-1 leading-relaxed prose prose-sm dark:prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
+                          <Markdown>{requirements}</Markdown>
+                        </div>
                       </div>
                     )}
                     <div>
@@ -1895,7 +1897,9 @@ export default function WorkbenchPage() {
                     <div>
                       <div>
                         <h3 className="text-base font-semibold mb-2">{workflowConfig.workflow.name}</h3>
-                        <p className="text-sm text-muted-foreground mb-4 leading-relaxed">{workflowConfig.workflow.description}</p>
+                        <div className="text-sm text-muted-foreground mb-4 leading-relaxed prose prose-sm dark:prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
+                          <Markdown>{workflowConfig.workflow.description}</Markdown>
+                        </div>
                         <div className="flex gap-3">
                           <div className="flex-1 bg-muted p-3 rounded-md text-center"><span className="block text-xs text-muted-foreground mb-1">{workflowConfig.workflow.mode === 'state-machine' ? '状态' : '阶段'}</span><span className="block text-xl font-semibold">{workflowConfig.workflow.mode === 'state-machine' ? (workflowConfig.workflow.states?.length ?? 0) : (workflowConfig.workflow.phases?.length ?? 0)}</span></div>
                           <div className="flex-1 bg-muted p-3 rounded-md text-center"><span className="block text-xs text-muted-foreground mb-1">步骤</span><span className="block text-xl font-semibold">{totalSteps}</span></div>
