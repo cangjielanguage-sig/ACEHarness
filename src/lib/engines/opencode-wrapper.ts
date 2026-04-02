@@ -20,6 +20,8 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
   private lastBlockWasTool = false;
   /** Track tool IDs that have already emitted their header. */
   private seenToolIds = new Set<string>();
+  /** Gate: only emit stream events when actively processing a new prompt. */
+  private streaming = false;
 
   /**
    * Resolve the actual tool name from ACP event data.
@@ -201,6 +203,7 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
     if (!this.engine) return;
 
     this.engine.on('agent-message', (content) => {
+      if (!this.streaming) return;
       if (content.type === 'text') {
         let prefix = '';
         if (this.lastBlockWasTool) {
@@ -212,12 +215,14 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
     });
 
     this.engine.on('agent-thought', (content) => {
+      if (!this.streaming) return;
       if (content.type === 'text') {
         this.emit('stream', { type: 'thought', content: content.text } as EngineStreamEvent);
       }
     });
 
     this.engine.on('tool-call', (toolCall) => {
+      if (!this.streaming) return;
       const toolId = toolCall.id || '';
       const hasInput = toolCall.rawInput && Object.keys(toolCall.rawInput).length > 0;
       if (toolId && !this.seenToolIds.has(toolId) && hasInput) {
@@ -229,6 +234,7 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
     });
 
     this.engine.on('tool-call-update', (toolUpdate) => {
+      if (!this.streaming) return;
       const toolId = toolUpdate.id || '';
 
       // If this is the first time we see this tool, emit the header — but only if rawInput
@@ -337,12 +343,18 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
       fullPrompt += options.sessionId ? options.prompt : `# Task\n\n${options.prompt}`;
 
       const outputChunks: string[] = [];
+      let collectOutput = false;
       const textHandler = (content: any) => {
-        if (content.type === 'text') {
+        if (collectOutput && content.type === 'text') {
           outputChunks.push(content.text);
         }
       };
       this.engine.on('agent-message', textHandler);
+
+      // Start collecting only after session setup is done, so replayed
+      // history from session/load doesn't leak into the output.
+      collectOutput = true;
+      this.streaming = true;
 
       let stopReason: string | undefined;
       const maxRetries = 3;
@@ -373,6 +385,7 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
       }
 
       this.engine.off('agent-message', textHandler);
+      this.streaming = false;
 
       return {
         success: stopReason === 'end_turn',
@@ -381,6 +394,7 @@ export class OpenCodeEngineWrapper extends EventEmitter implements Engine {
         stopReason,
       };
     } catch (error: any) {
+      this.streaming = false;
       console.error(`[OpenCodeWrapper] execute() error:`, error.message || error);
       return {
         success: false,
