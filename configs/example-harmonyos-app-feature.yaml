@@ -1,11 +1,13 @@
 workflow:
-  name: AIChat账号管理功能开发
-  description: 状态机驱动的红蓝对抗开发流程
+  name: 鸿蒙应用功能开发（红蓝对抗）
+  description: 状态机驱动的红蓝对抗开发流程，适用于鸿蒙应用功能开发
   mode: state-machine
   maxTransitions: 50
+  
   states:
     - name: 设计
-      description: 设计账号管理功能完整方案
+      description: 设计功能完整方案
+      requireHumanApproval: true
       isInitial: true
       isFinal: false
       position:
@@ -14,22 +16,21 @@ workflow:
       steps:
         - name: 架构设计
           agent: architect
+          role: defender
           task: |
             设计AIChat账号管理功能完整方案：
             1. UI布局（账号管理页面结构、头像预览80x80圆形、颜色选择器两行布局）
             2. 数据结构（UserProfile：头像、背景颜色、用户名）
             3. 页面路由（首页头像点击入口、列表项入口）
             4. 状态管理（偏好设置持久化）
-          role: defender
         - name: 攻击设计方案
           agent: design-breaker
-          task: 攻击设计方案，寻找设计缺陷、安全问题、边界条件遗漏、UI/UX问题
-          type: adversarial
           role: attacker
+          task: 攻击设计方案，寻找设计缺陷、安全问题、边界条件遗漏、UI/UX问题
         - name: 评审设计方案
           agent: design-judge
-          task: 评估方案和攻击发现，给出裁决：通过/修复/拒绝
           role: judge
+          task: 评估方案和攻击发现，给出裁决：通过/修复/拒绝
       transitions:
         - to: 实施
           condition:
@@ -46,55 +47,53 @@ workflow:
             verdict: fail
           priority: 3
           label: 设计不可用，终止
-      requireHumanApproval: true
 
     - name: 实施
-      description: 实现账号管理页面代码
+      description: 实现功能代码
+      requireHumanApproval: true
       isInitial: false
       isFinal: false
       position:
         x: 300
         y: 200
       steps:
-        - name: 编写账号管理页面
+        - name: 编写功能页面
           agent: developer
+          role: defender
           task: |
             实现account_page.cj：
             1. 头像预览组件（80x80圆形，显示用户头像或默认图标）
             2. 背景颜色选择器（两行色板，每行5-6个颜色选项，点击切换）
             3. 用户名输入框（校验：非空、长度2-20字符）
             4. 保存按钮（持久化到偏好设置）
-          role: defender
-        - name: 修改ProfilePage入口
+        - name: 修改入口页面
           agent: developer
+          role: defender
           task: |
             修改profile_page.cj：
             1. 在"设置"和"关于"之间添加"账号管理"列表项
             2. 头像点击进入账号管理页面
             3. 列表项点击导航到账号管理页面
-          role: defender
         - name: 攻击实现代码
           agent: code-hunter
-          task: 攻击代码实现，寻找逻辑错误、安全漏洞、边界条件问题、内存泄漏
-          type: adversarial
           role: attacker
+          task: 攻击代码实现，寻找逻辑错误、安全漏洞、边界条件问题、内存泄漏
         - name: 验证修复
           agent: code-judge
-          task: 验证修复有效性，裁决是否可以进入构建
           role: judge
+          task: 验证修复有效性，裁决是否可以进入构建
         - name: 实施修复
           agent: fix-developer
-          task: 根据裁决修复所有发现的问题
           role: defender
+          task: 根据裁决修复所有发现的问题
         - name: 审查修复代码
           agent: fix-hunter
-          task: 再次攻击修复后代码，验证修复完整性
-          type: adversarial
           role: attacker
+          task: 再次攻击修复后代码，验证修复完整性
         - name: 最终代码裁决
           agent: fix-reviewer
-          task: 最终裁决，输出：通过/需继续修复
           role: judge
+          task: 最终裁决，输出：通过/需继续修复
       transitions:
         - to: 构建
           condition:
@@ -106,7 +105,6 @@ workflow:
             verdict: conditional_pass
           priority: 2
           label: 需继续修复
-      requireHumanApproval: true
 
     - name: 构建
       description: 构建项目验证编译通过
@@ -118,14 +116,14 @@ workflow:
       steps:
         - name: 执行项目构建
           agent: developer
+          role: defender
           task: |
             执行项目构建验证编译通过。
             项目路径：C:/Users/Shawn/xwechat_files/wxid_8pxeudez26yn22_c6c8/msg/file/2026-03/AIChat_old/ai_chat
-          role: defender
         - name: 构建结果验证
           agent: tester
-          task: 验证构建成功，输出HAP包
           role: judge
+          task: 验证构建成功，输出HAP包
       transitions:
         - to: 完成
           condition:
@@ -137,7 +135,6 @@ workflow:
             verdict: fail
           priority: 2
           label: 构建失败，返回修复
-      requireHumanApproval: false
 
     - name: 完成
       description: 功能开发完成
@@ -149,8 +146,8 @@ workflow:
       steps:
         - name: 生成交付报告
           agent: documentation-writer
-          task: 生成功能交付报告，包含实现的功能点、修改的文件列表
           role: defender
+          task: 生成功能交付报告，包含实现的功能点、修改的文件列表
       transitions: []
 
     - name: 终止
@@ -163,8 +160,8 @@ workflow:
       steps:
         - name: 记录终止原因
           agent: documentation-writer
-          task: 记录工作流终止原因和未解决问题
           role: defender
+          task: 记录工作流终止原因和未解决问题
       transitions: []
 
 context:

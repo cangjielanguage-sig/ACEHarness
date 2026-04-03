@@ -1,7 +1,8 @@
 workflow:
-  name: 仓颉Unreachable告警触发场景总结
-  description: 在 ~/ace/cangjie_compiler 执行 envsetup 后，基于源码和仓颉语法技能梳理所有触发 unreachable 告警的场景
+  name: 仓颉 Unreachable 告警场景总结
+  description: 基于源码和仓颉语法技能梳理所有触发 unreachable 告警的场景（阶段工作流示例）
   mode: phase-based
+  
   phases:
     - name: 触发场景总结
       steps:
@@ -10,11 +11,11 @@ workflow:
           role: defender
           task: >-
             在 ~/ace/cangjie_compiler 中先执行 `source output/envsetup.sh`，再完成以下工作：
-            1) 在编译器源码中定位 unreachable 告警相关检测逻辑、诊断 ID、触发路径与关键条件； 2)
-            结合已启用的仓颉技能文档（语法、控制流、模式匹配、类型系统、错误处理等）枚举所有可能导致 unreachable 告警的语言层触发模式；
-            3) 为每个触发模式提供最小可复现代码、触发原因、预期告警位置和是否属于误报风险； 4)
-            输出《Unreachable触发场景草案》，按“语法类别 -> 触发条件 -> 示例 -> 备注”结构组织。
-
+            1) 在编译器源码中定位 unreachable 告警相关检测逻辑、诊断 ID、触发路径与关键条件；
+            2) 结合已启用的仓颉技能文档（语法、控制流、模式匹配、类型系统、错误处理等）枚举所有可能导致 unreachable 告警的语言层触发模式；
+            3) 为每个触发模式提供最小可复现代码、触发原因、预期告警位置和是否属于误报风险；
+            4) 输出《Unreachable触发场景草案》，按"语法类别 -> 触发条件 -> 示例 -> 备注"结构组织。
+            
             要尽可能多的列举各种情况，组合各种情况来完善文档
           skills:
             - cangjie_basic_concepts
@@ -28,10 +29,11 @@ workflow:
           agent: compiler_tester
           role: attacker
           task: >
-            在同一环境（先 `source output/envsetup.sh`）下复核《Unreachable触发场景草案》： 1)
-            检查是否遗漏常见与边界路径（嵌套控制流、常量条件、穷尽匹配、返回/抛出后的分支等）； 2)
-            对每个场景验证“能否稳定触发”与“告警定位是否符合预期”； 3) 标注重复场景、弱证据场景和需要补证的场景； 4)
-            产出《Unreachable触发场景验证报告》，包含补充清单和风险分级。
+            在同一环境（先 `source output/envsetup.sh`）下复核《Unreachable触发场景草案》：
+            1) 检查是否遗漏常见与边界路径（嵌套控制流、常量条件、穷尽匹配、返回/抛出后的分支等）；
+            2) 对每个场景验证"能否稳定触发"与"告警定位是否符合预期"；
+            3) 标注重复场景、弱证据场景和需要补证的场景；
+            4) 产出《Unreachable触发场景验证报告》，包含补充清单和风险分级。
           skills:
             - cangjie_toolchains
             - cangjie_pattern_match
@@ -40,25 +42,32 @@ workflow:
           agent: compiler_fix-judge
           role: judge
           task: |
-            基于“草案 + 验证报告”进行最终裁决： 1) 判定场景清单是否完整、证据是否充分、分类是否清晰； 2) 对争议场景给出保留/剔除结论； 3) 输出最终《Unreachable告警触发场景总表（定稿）》； 4) 输出 JSON： {"verdict":"pass|conditional_pass|fail","summary":"定稿结论摘要","gaps":[],"next_action":"发布|补充验证"}
+            基于"草案 + 验证报告"进行最终裁决：
+            1) 判定场景清单是否完整、证据是否充分、分类是否清晰；
+            2) 对争议场景给出保留/剔除结论；
+            3) 输出最终《Unreachable告警触发场景总表（定稿）》；
+            4) 输出 JSON：
+            {"verdict":"pass|conditional_pass|fail","summary":"定稿结论摘要","gaps":[],"next_action":"发布|补充验证"}
       checkpoint:
         name: 是否达到要求
-        message: ？
+        message: 场景总结是否完整？
       iteration:
         enabled: true
         maxIterations: 5
         exitCondition: no_new_bugs_3_rounds
         consecutiveCleanRounds: 3
         escalateToHuman: true
-    - name: 新阶段 2
+        
+    - name: 文档生成
       steps:
         - name: 总结
           agent: documentation-writer
-          task: 负责总结全部的情况的总结文档，包含代码、告警信息和描述，并包含一个总结的表格。
           role: defender
+          task: 负责总结全部的情况的总结文档，包含代码、告警信息和描述，并包含一个总结的表格。
           enableReviewPanel: false
       iteration:
         enabled: false
+
 context:
   projectRoot: ../cangjie_compiler
   requirements: 总结所有会触发 unreachable 告警的场景，工作流仅一个环节，包含开发/验证/裁判三个角色

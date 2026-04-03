@@ -66,16 +66,16 @@ description: "仓颉编译器构建技能。"
 
 ```bash
 # 增量构建（仅 cjc，自动并行编译，最快，推荐）
-python3 .claude/skills/build-cangjie/scripts/build-cangjie.py --incremental --component cjc
+python3 scripts/build-cangjie.py --incremental --component cjc
 
 # 完整构建（所有组件，跳过单元测试，推荐）
-python3 .claude/skills/build-cangjie/scripts/build-cangjie.py --platform linux_x86_64 -t relwithdebinfo --no-tests
+python3 scripts/build-cangjie.py --platform linux_x86_64 -t relwithdebinfo --no-tests
 
 # 指定工作区路径
-python3 .claude/skills/build-cangjie/scripts/build-cangjie.py --workspace /path/to/workspace -t release --no-tests
+python3 scripts/build-cangjie.py --workspace /path/to/workspace -t release --no-tests
 
 # 构建时包含单元测试（耗时较长）
-python3 .claude/skills/build-cangjie/scripts/build-cangjie.py -t debug
+python3 scripts/build-cangjie.py -t debug
 ```
 
 ## 组件构建顺序

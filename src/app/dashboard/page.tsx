@@ -82,6 +82,12 @@ export default function DashboardPage() {
       if (!res.ok) throw new Error('Dashboard API failed');
       const data = await res.json();
 
+      // Handle null or missing data gracefully
+      if (!data || !data.stats) {
+        console.warn('Dashboard API returned incomplete data');
+        return;
+      }
+
       setStats(data.stats);
       setConfigs(data.configs || []);
       setRecentRuns(data.recentRuns || []);

@@ -117,6 +117,22 @@ export async function GET() {
     }
     // Cold start — compute synchronously once
     await refreshCache();
+    
+    // Ensure we never return null
+    if (!cachedResult) {
+      return NextResponse.json({
+        stats: {
+          totalRuns: 0, successRate: 0, avgDuration: 0,
+          activeWorkflows: 0, totalAgents: 0, runningProcesses: 0,
+        },
+        configs: [],
+        recentRuns: [],
+        runningRuns: [],
+        agentUsageData: [],
+        activityData: [],
+      });
+    }
+    
     return NextResponse.json(cachedResult);
   } catch (error: any) {
     return NextResponse.json(
