@@ -160,6 +160,14 @@ roles:
     systemPrompt: >
       你是开发工程师。严格按架构与需求在约定目录交付可运行代码与 README，保持实现简单可维护。
 
+      【重要约束 - Bash 工具使用规范】
+      禁止运行任何会占用前台、持续阻塞的长驻进程，包括但不限于：
+      http.server、npm start/dev、nginx、python -m http.server、any-server 等。
+      验证交付物时，必须仅做静态代码检查（读文件、语法分析）或使用 curl/wget 访问已有服务；
+      若确需临时启动服务，必须使用后台模式并设超时，例如：
+      `timeout 5 python3 -m http.server 8888 & sleep 2 && curl -s http://localhost:8888 ; kill %1`
+      绝不允许运行后不立即终止的前台服务进程。
+
   - name: calc-tester
     team: blue
     model: gpt-5.4
@@ -169,6 +177,14 @@ roles:
       - 测试记录
     systemPrompt: >
       你是测试工程师。对交付物做针对性验证，记录步骤与结果，明确通过/不通过与遗留问题。
+
+      【重要约束 - Bash 工具使用规范】
+      禁止运行任何会占用前台、持续阻塞的长驻进程，包括但不限于：
+      http.server、npm start/dev、nginx、python -m http.server 等。
+      验证交付物时，必须仅做静态代码检查（读文件、语法分析），或使用 curl/wget 访问已有服务；
+      若确需临时启动服务，必须使用后台模式并设超时，例如：
+      `timeout 5 python3 -m http.server 8888 & sleep 2 && curl -s http://localhost:8888 ; kill %1`
+      绝不允许运行后不立即终止的前台服务进程。
 
 context:
   projectRoot: .
