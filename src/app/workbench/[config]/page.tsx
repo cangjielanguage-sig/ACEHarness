@@ -127,6 +127,43 @@ export default function WorkbenchPage() {
   const [currentPlanRound, setCurrentPlanRound] = useState<number>(0);
   const [planAnswer, setPlanAnswer] = useState('');
   const [sendingPlanAnswer, setSendingPlanAnswer] = useState(false);
+  /** Claude Agent SDK AskUserQuestion */
+  const [pendingSdkPlanQuestion, setPendingSdkPlanQuestion] = useState<{
+    questions: Array<{
+      question: string;
+      header?: string;
+      options: Array<{ label: string; description?: string; preview?: string }>;
+      multiSelect?: boolean;
+    }>;
+    fromAgent: string;
+    stateName: string;
+    stepName: string;
+  } | null>(null);
+  const [sdkPlanSingle, setSdkPlanSingle] = useState<Record<string, string>>({});
+  const [sdkPlanMulti, setSdkPlanMulti] = useState<Record<string, string[]>>({});
+  const [sdkPlanOther, setSdkPlanOther] = useState<Record<string, string>>({});
+  const [sendingSdkPlanAnswer, setSendingSdkPlanAnswer] = useState(false);
+  /** SDK Plan Review（审批弹窗） */
+  const [pendingPlanReview, setPendingPlanReview] = useState<{
+    planContent: string;
+    stepKey: string;
+    agent: string;
+    stateName: string;
+    stepName: string;
+  } | null>(null);
+  const [planReviewMode, setPlanReviewMode] = useState<'view' | 'edit' | 'reject'>('view');
+  const [planReviewEditContent, setPlanReviewEditContent] = useState('');
+  const [planReviewFeedback, setPlanReviewFeedback] = useState('');
+  const [sendingPlanReview, setSendingPlanReview] = useState(false);
+  /** SDK Plan 子任务 / 工具执行遥测（横幅） */
+  const [sdkPlanSubtaskBanner, setSdkPlanSubtaskBanner] = useState<{
+    phase: string;
+    taskId: string;
+    title: string;
+    subtitle?: string;
+    elapsedSec: number;
+    terminal?: string;
+  } | null>(null);
   const liveStreamFeedbackRef = useRef<HTMLInputElement>(null);
   const [sendingFeedback, setSendingFeedback] = useState(false);
   const [inlineFeedbacks, setInlineFeedbacks] = useState<{ message: string; timestamp: string; streamIndex: number }[]>([]);
@@ -207,6 +244,48 @@ export default function WorkbenchPage() {
         }
         if ((status as any).agentFlow) {
           setAgentFlow((status as any).agentFlow);
+        }
+
+        if (status.pendingSdkPlanQuestion) {
+          setPendingSdkPlanQuestion(status.pendingSdkPlanQuestion as any);
+        } else {
+          setPendingSdkPlanQuestion(null);
+        }
+
+        if (status.pendingPlanReview) {
+          setPendingPlanReview(status.pendingPlanReview as any);
+          setPlanReviewMode('view');
+          setPlanReviewEditContent((status.pendingPlanReview as any).planContent || '');
+          setPlanReviewFeedback('');
+        } else {
+          setPendingPlanReview(null);
+        }
+
+        const pst = (status as { pendingSdkPlanSubtask?: unknown }).pendingSdkPlanSubtask as
+          | {
+              phase: string;
+              taskId: string;
+              description: string;
+              elapsedSec: number;
+              detail?: string;
+              toolName?: string;
+              terminalStatus?: string;
+              summary?: string;
+            }
+          | undefined;
+        if (pst && pst.phase) {
+          const tid = pst.taskId || '';
+          const shortId = tid.length <= 10 ? tid : `${tid.slice(0, 8)}…`;
+          setSdkPlanSubtaskBanner({
+            phase: pst.phase,
+            taskId: tid,
+            title: pst.phase === 'tool' ? `工具：${pst.toolName || '?'}` : `子任务 #${shortId}`,
+            subtitle: [pst.description, pst.detail].filter(Boolean).join(' · ') || undefined,
+            elapsedSec: pst.elapsedSec ?? 0,
+            terminal: pst.terminalStatus,
+          });
+        } else {
+          setSdkPlanSubtaskBanner(null);
         }
 
         {
@@ -543,6 +622,7 @@ export default function WorkbenchPage() {
         addLog('system', 'info', `📍 ${event.data.message}`);
         break;
       case 'step':
+        setSdkPlanSubtaskBanner(null);
         dispatch({ type: 'SET_CURRENT_STEP', payload: event.data.step });
         if (event.data.id) {
           dispatch({ type: 'MAP_STEP_ID', payload: { stepName: event.data.step, stepId: event.data.id } });
@@ -550,6 +630,7 @@ export default function WorkbenchPage() {
         addLog(event.data.agent, 'info', `开始执行: ${event.data.step}`);
         break;
       case 'result': {
+        setSdkPlanSubtaskBanner(null);
         const resultKey = event.data.id || event.data.step;
         if (event.data.error) {
           addLog(event.data.agent, 'error', event.data.output);
@@ -707,6 +788,59 @@ export default function WorkbenchPage() {
       case 'agent-flow':
         setAgentFlow(event.data.agentFlow || []);
         break;
+      case 'sdk-plan-subtask': {
+        if (event.data.configFile && event.data.configFile !== configFile) break;
+        const d = event.data;
+        if (!d.phase) break;
+        const tid = String(d.taskId || '');
+        const shortId = tid.length <= 10 ? tid : `${tid.slice(0, 8)}…`;
+        const subtitleParts = [d.description, d.detail].filter(Boolean);
+        setSdkPlanSubtaskBanner({
+          phase: d.phase,
+          taskId: tid,
+          title: d.phase === 'tool' ? `工具：${d.toolName || '?'}` : `子任务 #${shortId || '?'}`,
+          subtitle: subtitleParts.length ? subtitleParts.join(' · ') : undefined,
+          elapsedSec: typeof d.elapsedSec === 'number' ? d.elapsedSec : 0,
+          terminal: d.terminalStatus,
+        });
+        break;
+      }
+      case 'sdk-plan-question':
+        setPendingSdkPlanQuestion({
+          questions: Array.isArray(event.data.questions) ? event.data.questions : [],
+          fromAgent: event.data.fromAgent || '',
+          stateName: event.data.stateName || '',
+          stepName: event.data.stepName || '',
+        });
+        setSdkPlanSingle({});
+        setSdkPlanMulti({});
+        setSdkPlanOther({});
+        addLog(
+          'system',
+          'warning',
+          `SDK Plan 需要确认: ${event.data.questions?.[0]?.question?.slice(0, 80) || '(结构化问题)'}`
+        );
+        break;
+      case 'sdk-plan-captured':
+        addLog(
+          'system',
+          'success',
+          `Plan 已捕获 (${event.data.via || '?'}): ${event.data.length ?? 0} 字符`
+        );
+        break;
+      case 'sdk-plan-review':
+        setPendingPlanReview({
+          planContent: event.data.planContent || '',
+          stepKey: event.data.stepKey || '',
+          agent: event.data.agent || '',
+          stateName: event.data.stateName || '',
+          stepName: event.data.stepName || '',
+        });
+        setPlanReviewMode('view');
+        setPlanReviewEditContent(event.data.planContent || '');
+        setPlanReviewFeedback('');
+        addLog('system', 'warning', `Plan 待审批: ${event.data.stepKey || ''}`);
+        break;
     }
   }, [selectedAgent, addLog, currentPhase]);
 
@@ -750,6 +884,11 @@ export default function WorkbenchPage() {
       setSupervisorFlow([]);
       setAgentFlow([]);
       setCurrentPlanRound(0);
+      setPendingSdkPlanQuestion(null);
+      setSdkPlanSubtaskBanner(null);
+      setSdkPlanSingle({});
+      setSdkPlanMulti({});
+      setSdkPlanOther({});
       addLog('system', 'info', '正在启动工作流...');
       await workflowApi.start(configFile);
       addLog('system', 'success', '工作流启动成功，等待执行...');
@@ -1875,6 +2014,36 @@ export default function WorkbenchPage() {
                   </div>
                 )}
               </div>
+              {sdkPlanSubtaskBanner && workflowStatus === 'running' && (
+                <div className="border-b bg-muted/50 px-4 py-2.5 text-sm shrink-0">
+                  <div className="flex items-start gap-2">
+                    <span
+                      className="material-symbols-outlined text-amber-600 dark:text-amber-400 shrink-0"
+                      style={{ fontSize: 20 }}
+                    >
+                      {sdkPlanSubtaskBanner.phase === 'end' ? 'task_alt' : 'hourglass_top'}
+                    </span>
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="font-medium text-foreground leading-snug">
+                        {sdkPlanSubtaskBanner.phase === 'end'
+                          ? `子任务已结束 · ${
+                              sdkPlanSubtaskBanner.terminal === 'failed'
+                                ? '失败'
+                                : sdkPlanSubtaskBanner.terminal === 'stopped'
+                                  ? '已停止'
+                                  : '完成'
+                            }（${sdkPlanSubtaskBanner.elapsedSec.toFixed(1)}s）`
+                          : `正在执行 ${sdkPlanSubtaskBanner.title}（${sdkPlanSubtaskBanner.elapsedSec.toFixed(1)}s）`}
+                      </div>
+                      {sdkPlanSubtaskBanner.subtitle ? (
+                        <div className="text-xs text-muted-foreground break-words">
+                          {sdkPlanSubtaskBanner.subtitle}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )}
               <Tabs value={activeTab} onValueChange={(val) => dispatch({ type: 'SET_ACTIVE_TAB', payload: val })} className="flex flex-col flex-1 overflow-hidden">
                 <TabsList className="w-full rounded-none border-b flex-shrink-0">
                   <TabsTrigger value="workflow" className="flex-1 flex items-center justify-center gap-1 text-xs">
@@ -2692,6 +2861,286 @@ export default function WorkbenchPage() {
               >
                 {sendingPlanAnswer ? '提交中...' : '提交回答'}
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {pendingSdkPlanQuestion && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60]">
+          <div className="bg-card rounded-lg w-[640px] max-w-[95%] max-h-[90vh] overflow-y-auto border" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b">
+              <h3 className="text-lg font-semibold">
+                <span className="material-symbols-outlined text-lg mr-2 align-middle">quiz</span>
+                Claude 需要确认（SDK Plan）
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Agent: <strong className="text-foreground">{pendingSdkPlanQuestion.fromAgent}</strong>
+                {' · '}
+                {pendingSdkPlanQuestion.stateName} / {pendingSdkPlanQuestion.stepName}
+              </p>
+            </div>
+            <div className="p-5 space-y-8">
+              {pendingSdkPlanQuestion.questions.map((q, qi) => (
+                <div key={qi} className="border rounded-md p-4 space-y-3">
+                  {q.header ? (
+                    <Badge variant="outline" className="text-xs">{q.header}</Badge>
+                  ) : null}
+                  <p className="font-medium whitespace-pre-wrap">{q.question}</p>
+                  <div className="space-y-2">
+                    {q.multiSelect ? (
+                      q.options.map((opt, oi) => {
+                        const selected = sdkPlanMulti[q.question]?.includes(opt.label) ?? false;
+                        return (
+                          <label key={oi} className="flex items-start gap-2 cursor-pointer rounded-md border p-2 hover:bg-muted/50">
+                            <Checkbox
+                              checked={selected}
+                              onCheckedChange={(c) => {
+                                setSdkPlanMulti((prev) => {
+                                  const cur = [...(prev[q.question] || [])];
+                                  if (c) {
+                                    if (!cur.includes(opt.label)) cur.push(opt.label);
+                                  } else {
+                                    const i = cur.indexOf(opt.label);
+                                    if (i >= 0) cur.splice(i, 1);
+                                  }
+                                  return { ...prev, [q.question]: cur };
+                                });
+                              }}
+                            />
+                            <span>
+                              <span className="font-medium">{opt.label}</span>
+                              {opt.description ? (
+                                <span className="block text-sm text-muted-foreground">{opt.description}</span>
+                              ) : null}
+                            </span>
+                          </label>
+                        );
+                      })
+                    ) : (
+                      q.options.map((opt, oi) => {
+                        const picked = sdkPlanSingle[q.question] === opt.label;
+                        return (
+                          <button
+                            key={oi}
+                            type="button"
+                            className={`w-full text-left rounded-md border p-3 transition-colors ${picked ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'}`}
+                            onClick={() => setSdkPlanSingle((prev) => ({ ...prev, [q.question]: opt.label }))}
+                          >
+                            <span className="font-medium">{opt.label}</span>
+                            {opt.description ? (
+                              <span className="block text-sm text-muted-foreground mt-1">{opt.description}</span>
+                            ) : null}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">其他（自由填写，若填写则优先于上方选项）</Label>
+                    <Input
+                      className="mt-1"
+                      placeholder="可选：自定义回答"
+                      value={sdkPlanOther[q.question] || ''}
+                      onChange={(e) => setSdkPlanOther((prev) => ({ ...prev, [q.question]: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="p-5 border-t flex gap-3 justify-end">
+              <Button
+                onClick={async () => {
+                  const answers: Record<string, string> = {};
+                  for (const q of pendingSdkPlanQuestion.questions) {
+                    const other = sdkPlanOther[q.question]?.trim();
+                    if (other) {
+                      answers[q.question] = other;
+                      continue;
+                    }
+                    if (q.multiSelect) {
+                      const labels = sdkPlanMulti[q.question] || [];
+                      answers[q.question] = labels.join(', ');
+                    } else {
+                      answers[q.question] = sdkPlanSingle[q.question] || '';
+                    }
+                  }
+                  const incomplete = pendingSdkPlanQuestion.questions.some((q) => !answers[q.question]?.trim());
+                  if (incomplete) {
+                    addLog('system', 'warning', '请回答所有问题后再提交');
+                    return;
+                  }
+                  setSendingSdkPlanAnswer(true);
+                  try {
+                    const res = await fetch('/api/workflow/plan-answer', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        type: 'sdk-plan',
+                        answers,
+                        configFile,
+                      }),
+                    });
+                    if (res.ok) {
+                      setPendingSdkPlanQuestion(null);
+                      setSdkPlanSingle({});
+                      setSdkPlanMulti({});
+                      setSdkPlanOther({});
+                      addLog('system', 'success', '✓ SDK Plan 回答已提交');
+                    } else {
+                      const data = await res.json();
+                      addLog('system', 'error', `提交失败: ${data.error}`);
+                    }
+                  } catch (err: any) {
+                    addLog('system', 'error', `提交失败: ${err.message}`);
+                  } finally {
+                    setSendingSdkPlanAnswer(false);
+                  }
+                }}
+                disabled={sendingSdkPlanAnswer}
+              >
+                {sendingSdkPlanAnswer ? '提交中...' : '提交回答'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {pendingPlanReview && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60]">
+          <div className="bg-card rounded-lg w-[800px] max-w-[95%] max-h-[90vh] flex flex-col border shadow-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b shrink-0 bg-muted/30">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary">fact_check</span>
+                  Plan 待审批
+                </h3>
+                <div className="flex bg-muted rounded-md p-1">
+                  <button
+                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${planReviewMode === 'view' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                    onClick={() => setPlanReviewMode('view')}
+                  >预览</button>
+                  <button
+                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${planReviewMode === 'edit' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                    onClick={() => setPlanReviewMode('edit')}
+                  >编辑</button>
+                  <button
+                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${planReviewMode === 'reject' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                    onClick={() => setPlanReviewMode('reject')}
+                  >驳回修改</button>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
+                <span className="material-symbols-outlined text-sm">smart_toy</span> <strong className="text-foreground">{pendingPlanReview.agent}</strong>
+                <span className="text-border">|</span>
+                <span className="material-symbols-outlined text-sm">route</span> {pendingPlanReview.stateName} / {pendingPlanReview.stepName}
+              </p>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-5 bg-muted/10">
+              {planReviewMode === 'view' && (
+                <div className={`${styles.markdownContent} bg-background border rounded-md p-4 text-sm leading-relaxed max-w-none`}>
+                  <Markdown>{planReviewEditContent}</Markdown>
+                </div>
+              )}
+              {planReviewMode === 'edit' && (
+                <div className="h-full flex flex-col min-h-[300px]">
+                  <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">edit_note</span>
+                    您可以直接修改 Plan 内容，保存后工作流将使用修改后的版本继续执行。
+                  </div>
+                  <textarea
+                    className="flex-1 w-full bg-background border rounded-md p-3 text-sm font-mono leading-relaxed resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                    value={planReviewEditContent}
+                    onChange={(e) => setPlanReviewEditContent(e.target.value)}
+                    placeholder="Plan 内容..."
+                  />
+                </div>
+              )}
+              {planReviewMode === 'reject' && (
+                <div className="h-full flex flex-col min-h-[300px]">
+                  <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">feedback</span>
+                    请填写修改意见，模型将根据您的反馈重新生成 Plan。
+                  </div>
+                  <textarea
+                    className="flex-1 w-full bg-background border rounded-md p-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-1 focus:ring-destructive"
+                    value={planReviewFeedback}
+                    onChange={(e) => setPlanReviewFeedback(e.target.value)}
+                    placeholder="例如：请补充异常处理逻辑；或者：不要使用 Redis 而是直接写本地文件..."
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t bg-muted/30 flex justify-between items-center shrink-0">
+              <div className="text-xs text-muted-foreground">
+                {planReviewMode === 'view' && '确认无误后点击右侧按钮继续执行。'}
+                {planReviewMode === 'edit' && '编辑完成后点击右侧按钮保存并继续执行。'}
+                {planReviewMode === 'reject' && '填写完意见后点击右侧按钮打回重做。'}
+              </div>
+              <div className="flex gap-3">
+                {planReviewMode === 'reject' ? (
+                  <Button 
+                    variant="destructive"
+                    onClick={async () => {
+                      if (!planReviewFeedback.trim()) {
+                        addLog('system', 'warning', '请填写驳回意见');
+                        return;
+                      }
+                      setSendingPlanReview(true);
+                      try {
+                        const res = await fetch('/api/workflow/plan-answer', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ type: 'sdk-plan-review', action: 'reject', feedback: planReviewFeedback, configFile })
+                        });
+                        if (res.ok) {
+                          setPendingPlanReview(null);
+                          addLog('system', 'warning', '已驳回 Plan，模型将重新生成');
+                        } else {
+                          const data = await res.json();
+                          addLog('system', 'error', `提交失败: ${data.error}`);
+                        }
+                      } catch (err: any) {
+                        addLog('system', 'error', `提交失败: ${err.message}`);
+                      } finally {
+                        setSendingPlanReview(false);
+                      }
+                    }}
+                    disabled={!planReviewFeedback.trim() || sendingPlanReview}
+                  >
+                    {sendingPlanReview ? '提交中...' : '提交驳回意见'}
+                  </Button>
+                ) : (
+                  <Button 
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                    onClick={async () => {
+                      setSendingPlanReview(true);
+                      const action = planReviewMode === 'edit' && planReviewEditContent !== pendingPlanReview.planContent ? 'edit' : 'approve';
+                      try {
+                        const res = await fetch('/api/workflow/plan-answer', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ type: 'sdk-plan-review', action, content: planReviewEditContent, configFile })
+                        });
+                        if (res.ok) {
+                          setPendingPlanReview(null);
+                          addLog('system', 'success', `Plan 已${action === 'edit' ? '修改并' : ''}通过`);
+                        } else {
+                          const data = await res.json();
+                          addLog('system', 'error', `提交失败: ${data.error}`);
+                        }
+                      } catch (err: any) {
+                        addLog('system', 'error', `提交失败: ${err.message}`);
+                      } finally {
+                        setSendingPlanReview(false);
+                      }
+                    }}
+                    disabled={sendingPlanReview}
+                  >
+                    {sendingPlanReview ? '提交中...' : (planReviewMode === 'edit' ? '保存并继续' : '确认并继续')}
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         </div>

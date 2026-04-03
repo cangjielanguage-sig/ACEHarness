@@ -5,7 +5,7 @@
 
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
-import { readFile, readdir, stat, mkdir, cp, rm } from 'fs/promises';
+import { readFile, readdir, stat, mkdir, cp, rm, writeFile } from 'fs/promises';
 import { resolve, join } from 'path';
 import { existsSync } from 'fs';
 
@@ -28,6 +28,7 @@ import { formatTimestamp } from './utils';
 import { createEngine, getConfiguredEngine, type Engine, type EngineType } from './engines';
 import { getEngineSkillsSubdir } from './engines/engine-config';
 import type { EngineStreamEvent } from './engines/engine-interface';
+import type { SdkPlanSubtaskTelemetry } from './engines/claude-sdk-plan';
 import {
   parseNeedInfo,
   isPlanDone,
@@ -138,6 +139,33 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private pendingUserQuestionResolver: ((answer: string) => void) | null = null;
   /** 当前等待解答的问题 */
   private pendingUserQuestion: { question: string; fromAgent: string; round: number } | null = null;
+
+  // ========== Claude SDK Plan（useSdkPlan）==========
+  private _sdkPlanAvailable: boolean | null = null;
+  private activeSdkPlanEngine: import('./engines/claude-sdk-plan').ClaudeSdkPlanEngine | null = null;
+  /** 供 getStatus / 刷新后恢复 sdk-plan-question 弹窗 */
+  private pendingSdkPlanQuestionPayload: {
+    questions: unknown[];
+    fromAgent: string;
+    stateName: string;
+    stepName: string;
+  } | null = null;
+  /** 最近一次 SDK 子任务遥测（刷新页面时可从 getStatus 恢复横幅） */
+  private pendingSdkPlanSubtaskPayload: SdkPlanSubtaskTelemetry | null = null;
+
+  // ========== SDK Plan Review（审批）==========
+  private pendingPlanReviewPayload: {
+    planContent: string;
+    stepKey: string;
+    agent: string;
+    stateName: string;
+    stepName: string;
+  } | null = null;
+  private pendingPlanReviewResolver: ((result: {
+    action: 'approve' | 'edit' | 'reject';
+    content?: string;
+    feedback?: string;
+  }) => void) | null = null;
 
   constructor() {
     super();
@@ -369,6 +397,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
       supervisorFlow: this.supervisorFlow,
       agentFlow: this.agentFlow,
       stepLogs: this.stepLogs,
+      pendingSdkPlanQuestion: this.pendingSdkPlanQuestionPayload,
+      pendingSdkPlanSubtask: this.pendingSdkPlanSubtaskPayload,
+      pendingPlanReview: this.pendingPlanReviewPayload,
     };
   }
 
@@ -396,6 +427,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.pendingForceTransition = null;
       this.pendingForceInstruction = null;
       this.pendingApprovalInfo = null;
+      this._sdkPlanAvailable = null;
+      this.pendingSdkPlanQuestionPayload = null;
+      this.pendingSdkPlanSubtaskPayload = null;
+      this.pendingPlanReviewPayload = null;
+      this.pendingPlanReviewResolver = null;
       this.interruptFlag = false;
       this.feedbackInterrupt = false;
       this.liveFeedback = [];
@@ -663,6 +699,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
             availableStates: this.pendingApprovalInfo.availableStates,
           },
         } : {}),
+        // 等待 Plan 审批时持久化，以便页面刷新后恢复弹窗
+        pendingPlanReview: !finalStatus ? (this.pendingPlanReviewPayload || null) : null,
       });
     } catch (err) {
       console.error('[StateMachine] persistState failed:', err);
@@ -708,15 +746,33 @@ export class StateMachineWorkflowManager extends EventEmitter {
   ): Promise<ClaudeJsonResult> {
     if (this.engineType === 'claude-code' || !this.currentEngine) {
       return await processManager.executeClaudeCli(
-        processId, agent, step, prompt, systemPrompt, model, options
+        processId,
+        agent,
+        step,
+        prompt,
+        systemPrompt,
+        model,
+        {
+          ...options,
+          streamStepLabel: options.streamStepName || options.streamStepLabel,
+        }
       );
     }
 
     // Use alternative engine (Kiro CLI, etc.)
     console.log(`[StateMachineWorkflowManager] 使用 ${this.engineType} 引擎执行: ${step}`);
 
+    const displayStep =
+      options.streamStepName || options.streamStepLabel || step;
+
     // Register process in processManager so it's visible to the frontend
-    const proc = processManager.registerExternalProcess(processId, agent, step, options.runId, options.stepId);
+    const proc = processManager.registerExternalProcess(
+      processId,
+      agent,
+      displayStep,
+      options.runId,
+      options.stepId
+    );
 
     const streamHandler = (event: EngineStreamEvent) => {
       // 'thought' events are forwarded separately (matching Claude Code's { thinking } field),
@@ -724,7 +780,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       if (event.type === 'thought') {
         processManager.emit('stream', {
           id: processId,
-          step,
+          step: displayStep,
           thinking: event.content,
         });
         return;
@@ -740,13 +796,16 @@ export class StateMachineWorkflowManager extends EventEmitter {
       }
       processManager.emit('stream', {
         id: processId,
-        step,
+        step: displayStep,
         delta: event.content,
         total: rawProc?.streamContent || event.content,
       });
       // Persist stream content periodically
       if (this.currentRunId && rawProc?.streamContent) {
-        const smStepName = this.currentState ? `${this.currentState}-${step}` : step;
+        const smStepName =
+          options.streamStepName ||
+          options.streamStepLabel ||
+          (this.currentState ? `${this.currentState}-${step}` : step);
         saveStreamContent(this.currentRunId, smStepName, rawProc.streamContent).catch(() => {});
       }
     };
@@ -1106,9 +1165,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
       }
 
       try {
-        // ========== Supervisor-Lite: 判断是否启用 Plan 循环 ==========
+        // ========== SDK Plan → Supervisor-Lite → 普通步骤 ==========
         let output: string;
-        if (step.enablePlanLoop) {
+        if (step.useSdkPlan && (await this.canUseSdkPlan())) {
+          output = await this.executeStepWithSdkPlan(step, state, config, requirements);
+        } else if (step.enablePlanLoop) {
           output = await this.executeStepWithInfoGathering(step, state, config, requirements);
         } else {
           output = await this.executeStep(step, state, config, requirements);
@@ -1640,6 +1701,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
             stepId,
             resumeSessionId: currentSessionId,
             appendSystemPrompt: !!currentSessionId,
+            streamStepName,
           }
         );
       } catch (err) {
@@ -2663,6 +2725,414 @@ export class StateMachineWorkflowManager extends EventEmitter {
       console.error('[SupervisorRouter] LLM 调用失败:', error);
       return '';
     }
+  }
+
+  private async canUseSdkPlan(): Promise<boolean> {
+    if (this._sdkPlanAvailable !== null) return this._sdkPlanAvailable;
+    try {
+      const { ClaudeSdkPlanEngine } = await import('./engines/claude-sdk-plan');
+      const engine = new ClaudeSdkPlanEngine();
+      this._sdkPlanAvailable = await engine.isAvailable();
+    } catch {
+      this._sdkPlanAvailable = false;
+    }
+    if (!this._sdkPlanAvailable) {
+      console.warn(
+        '[StateMachineWorkflowManager] Claude SDK Plan 不可用（缺少 @anthropic-ai/claude-agent-sdk 或 ANTHROPIC_API_KEY），将降级'
+      );
+    }
+    return this._sdkPlanAvailable;
+  }
+
+  /**
+   * 使用 Claude Agent SDK 的 plan 模式执行步骤（AskUserQuestion → 前端弹窗 → 捕获 .claude/plans）。
+   * 失败时降级：enablePlanLoop → executeStepWithInfoGathering，否则 executeStep。
+   */
+  private async executeStepWithSdkPlan(
+    step: WorkflowStep,
+    state: StateMachineState,
+    config: StateMachineWorkflowConfig,
+    requirements?: string
+  ): Promise<string> {
+    const { ClaudeSdkPlanEngine } = await import('./engines/claude-sdk-plan');
+    const planEngine = new ClaudeSdkPlanEngine();
+    this.activeSdkPlanEngine = planEngine;
+
+    const agent = this.agents.find(a => a.name === step.agent);
+    if (!agent) {
+      this.activeSdkPlanEngine = null;
+      throw new Error(`找不到 agent: ${step.agent}`);
+    }
+
+    const stepId = randomUUID();
+    const stepKey = `${state.name}-${step.name}`;
+    const streamStepName = this.currentState ? `${this.currentState}-${step.name}` : step.name;
+    const startedAt = Date.now();
+
+    agent.status = 'running';
+    agent.currentTask = step.name;
+    this.currentStep = stepKey;
+    this.emit('agents', { agents: this.agents });
+
+    this.agentFlow.push({
+      id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'stream',
+      fromAgent: step.agent,
+      toAgent: step.agent,
+      message: `SDK Plan 模式执行步骤: ${step.name}`,
+      stateName: state.name,
+      stepName: step.name,
+      round: 0,
+      timestamp: new Date().toISOString(),
+    });
+    this.emit('agent-flow', { agentFlow: this.agentFlow });
+    await this.persistState();
+
+    this.emit('step-start', {
+      id: stepId,
+      state: state.name,
+      step: step.name,
+      agent: step.agent,
+    });
+
+    let accumulatedStream = '';
+
+    const onAsk = (data: { questions?: unknown[] }) => {
+      this.pendingSdkPlanQuestionPayload = {
+        questions: data.questions ?? [],
+        fromAgent: step.agent,
+        stateName: state.name,
+        stepName: step.name,
+      };
+      this.emit('sdk-plan-question', {
+        ...this.pendingSdkPlanQuestionPayload,
+        configFile: this.currentConfigFile,
+      });
+      void this.persistState();
+    };
+    const onCaptured = (data: { path?: string; length?: number; via?: string }) => {
+      this.emit('sdk-plan-captured', { ...data, configFile: this.currentConfigFile });
+    };
+    const onStream = (ev: EngineStreamEvent) => {
+      const chunk = ev.content || '';
+      if (!chunk) return;
+      accumulatedStream += chunk;
+      if (this.currentRunId) {
+        void saveStreamContent(this.currentRunId, streamStepName, accumulatedStream);
+      }
+    };
+
+    const onSubtask = (data: SdkPlanSubtaskTelemetry) => {
+      this.pendingSdkPlanSubtaskPayload = data;
+      this.emit('sdk-plan-subtask', {
+        ...data,
+        configFile: this.currentConfigFile,
+      });
+    };
+
+    const planEv = planEngine as EventEmitter;
+    planEv.on('ask-user-question', onAsk);
+    planEv.on('plan-file-captured', onCaptured);
+    planEv.on('stream', onStream);
+    planEv.on('sdk-plan-subtask', onSubtask);
+
+    try {
+      this.lastPreCommandOutput = null;
+      if (Array.isArray((step as any).preCommands) && (step as any).preCommands.length > 0) {
+        try {
+          const preOutput = await this.runPreCommands((step as any).preCommands as string[], config);
+          this.lastPreCommandOutput = preOutput || null;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          this.lastPreCommandOutput = `预执行命令执行异常（不会中断步骤，请你据此判断是否 fail）：\n${msg}`;
+        }
+      }
+
+      const context = await this.buildStepContext(step, state, config, requirements);
+      const roleConfig =
+        this.agentConfigs.find(r => r.name === step.agent) ||
+        config.roles?.find(r => r.name === step.agent);
+      const model = roleConfig?.model || 'claude-opus-4-6';
+      const systemPrompt =
+        roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
+      const workingDirectory = config.context?.projectRoot
+        ? resolve(process.cwd(), config.context.projectRoot)
+        : process.cwd();
+
+      const result = await planEngine.execute({
+        agent: step.agent,
+        step: step.name,
+        prompt: context,
+        systemPrompt,
+        model,
+        workingDirectory,
+        timeoutMs: (config.context?.timeoutMinutes || 60) * 60 * 1000,
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || 'SDK plan 执行失败');
+      }
+
+      const planContent = planEngine.capturedDeliverable;
+      const via = planEngine.capturedVia;
+      const output = planContent
+        ? `[SDK-Plan 交付物] (${via || 'result'})\n${planContent}\n\n---\n\n[模型输出]\n${result.output}`
+        : result.output;
+
+      // Persist plan file to runs/{runId}/plans/
+      if (this.currentRunId) {
+        const planText = planContent || result.output;
+        if (planText?.trim()) {
+          try {
+            const planDir = resolve(process.cwd(), 'runs', this.currentRunId, 'plans');
+            await mkdir(planDir, { recursive: true });
+            await writeFile(resolve(planDir, `${stepKey}.md`), planText, 'utf-8');
+          } catch { /* best-effort */ }
+        }
+      }
+
+      // ========== Plan 审批 ==========
+      let finalOutput = output;
+      const planForReview = planContent || result.output;
+      if (planForReview?.trim()) {
+        const reviewResult = await this.waitForPlanApproval(
+          stepKey, step, state, config, planForReview, planEngine, requirements
+        );
+        if (reviewResult.action === 'edit' && reviewResult.content?.trim()) {
+          finalOutput = reviewResult.content;
+          // Overwrite persisted plan with edited version
+          if (this.currentRunId) {
+            try {
+              const planDir = resolve(process.cwd(), 'runs', this.currentRunId, 'plans');
+              await writeFile(resolve(planDir, `${stepKey}.md`), reviewResult.content, 'utf-8');
+            } catch { /* best-effort */ }
+          }
+        }
+        // 'approve' → keep finalOutput as-is; 'reject' loop is handled inside waitForPlanApproval
+      }
+
+      agent.status = 'completed';
+      agent.completedTasks++;
+      agent.lastOutput = finalOutput;
+      if (result.sessionId) {
+        agent.sessionId = result.sessionId;
+      }
+      this.currentStep = null;
+      this.completedSteps.push(stepKey);
+      this.pendingSdkPlanQuestionPayload = null;
+      this.pendingPlanReviewPayload = null;
+      this.currentProcesses = [];
+
+      const durationMs = Date.now() - startedAt;
+      this.stepLogs.push({
+        id: stepId,
+        stepName: stepKey,
+        agent: step.agent,
+        status: 'completed',
+        output: finalOutput,
+        error: '',
+        costUsd: 0,
+        durationMs,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.emit('agents', { agents: this.agents });
+      await this.persistState();
+
+      this.emit('step-complete', {
+        id: stepId,
+        state: state.name,
+        step: step.name,
+        agent: step.agent,
+        output: finalOutput,
+        costUsd: 0,
+        durationMs,
+      });
+
+      const currentStepIndex = state.steps.findIndex(s => s.name === step.name);
+      if (currentStepIndex >= 0 && currentStepIndex < state.steps.length - 1) {
+        const nextStep = state.steps[currentStepIndex + 1];
+        if (nextStep && nextStep.agent !== step.agent) {
+          this.agentFlow.push({
+            id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'stream',
+            fromAgent: step.agent,
+            toAgent: nextStep.agent,
+            message: `步骤流转: ${step.name} -> ${nextStep.name}`,
+            stateName: state.name,
+            stepName: step.name,
+            round: 0,
+            timestamp: new Date().toISOString(),
+          });
+          this.emit('agent-flow', { agentFlow: this.agentFlow });
+        }
+      }
+
+      if (this.currentRunId) {
+        await saveProcessOutput(this.currentRunId, stepKey, finalOutput).catch(() => {});
+      }
+
+      return finalOutput;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn('[StateMachineWorkflowManager] SDK Plan 步骤失败，降级:', msg);
+      this.pendingSdkPlanQuestionPayload = null;
+      this.currentStep = stepKey;
+      if (step.enablePlanLoop) {
+        return await this.executeStepWithInfoGathering(step, state, config, requirements);
+      }
+      return await this.executeStep(step, state, config, requirements);
+    } finally {
+      planEv.off('ask-user-question', onAsk);
+      planEv.off('plan-file-captured', onCaptured);
+      planEv.off('stream', onStream);
+      planEv.off('sdk-plan-subtask', onSubtask);
+      this.pendingSdkPlanSubtaskPayload = null;
+      this.activeSdkPlanEngine = null;
+    }
+  }
+
+  // ========== Plan Review（审批）==========
+
+  /**
+   * Pause execution and wait for user to approve / edit / reject the plan.
+   * On reject, re-runs the SDK Plan engine with user feedback injected, then asks again.
+   */
+  private async waitForPlanApproval(
+    stepKey: string,
+    step: WorkflowStep,
+    state: StateMachineState,
+    config: StateMachineWorkflowConfig,
+    planContent: string,
+    planEngine: import('./engines/claude-sdk-plan').ClaudeSdkPlanEngine,
+    requirements?: string,
+  ): Promise<{ action: 'approve' | 'edit' | 'reject'; content?: string; feedback?: string }> {
+    const MAX_REJECT_ROUNDS = 5;
+    let currentPlan = planContent;
+
+    for (let round = 0; round < MAX_REJECT_ROUNDS; round++) {
+      this.pendingPlanReviewPayload = {
+        planContent: currentPlan,
+        stepKey,
+        agent: step.agent,
+        stateName: state.name,
+        stepName: step.name,
+      };
+
+      this.emit('sdk-plan-review', {
+        planContent: currentPlan,
+        stepKey,
+        agent: step.agent,
+        stateName: state.name,
+        stepName: step.name,
+      });
+      await this.persistState();
+
+      // Wait for user response (10 min timeout)
+      const result = await new Promise<{
+        action: 'approve' | 'edit' | 'reject';
+        content?: string;
+        feedback?: string;
+      }>((resolve) => {
+        this.pendingPlanReviewResolver = resolve;
+        setTimeout(() => {
+          if (this.pendingPlanReviewResolver) {
+            this.pendingPlanReviewResolver({ action: 'approve' });
+            this.pendingPlanReviewResolver = null;
+            this.pendingPlanReviewPayload = null;
+          }
+        }, 600_000);
+      });
+
+      this.pendingPlanReviewPayload = null;
+      this.pendingPlanReviewResolver = null;
+
+      if (result.action === 'approve' || result.action === 'edit') {
+        return result;
+      }
+
+      // reject → re-run SDK Plan with feedback
+      const feedback = result.feedback || '用户驳回，请修改 plan';
+      this.emit('stream', {
+        type: 'text',
+        content: `\n🔄 用户驳回 plan（第 ${round + 1} 轮），反馈: ${feedback}\n重新生成中…\n`,
+      });
+
+      const context = await this.buildStepContext(step, state, config, requirements);
+      const roleConfig =
+        this.agentConfigs.find(r => r.name === step.agent) ||
+        config.roles?.find(r => r.name === step.agent);
+      const model = roleConfig?.model || 'claude-opus-4-6';
+      const systemPrompt =
+        roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
+      const workingDirectory = config.context?.projectRoot
+        ? resolve(process.cwd(), config.context.projectRoot)
+        : process.cwd();
+
+      const retryPrompt = `${context}\n\n---\n\n# 用户对上一版 Plan 的修改意见\n\n${feedback}\n\n# 上一版 Plan（需修改）\n\n${currentPlan}\n\n请根据用户意见修改 plan 并重新输出。`;
+
+      const retryResult = await planEngine.execute({
+        agent: step.agent,
+        step: step.name,
+        prompt: retryPrompt,
+        systemPrompt,
+        model,
+        workingDirectory,
+        timeoutMs: (config.context?.timeoutMinutes || 60) * 60 * 1000,
+      });
+
+      if (retryResult.success) {
+        currentPlan = planEngine.capturedDeliverable || retryResult.output;
+        // Persist updated plan
+        if (this.currentRunId && currentPlan?.trim()) {
+          try {
+            const planDir = resolve(process.cwd(), 'runs', this.currentRunId, 'plans');
+            await mkdir(planDir, { recursive: true });
+            await writeFile(resolve(planDir, `${stepKey}.md`), currentPlan, 'utf-8');
+          } catch { /* best-effort */ }
+        }
+      } else {
+        // Engine failed on retry, auto-approve previous plan
+        return { action: 'approve' };
+      }
+    }
+
+    // Exhausted reject rounds, auto-approve
+    return { action: 'approve' };
+  }
+
+  submitPlanReview(result: { action: 'approve' | 'edit' | 'reject'; content?: string; feedback?: string }): void {
+    if (this.pendingPlanReviewResolver) {
+      this.pendingPlanReviewResolver(result);
+      this.pendingPlanReviewResolver = null;
+      this.pendingPlanReviewPayload = null;
+      void this.persistState();
+    }
+  }
+
+  getPendingPlanReview(): {
+    planContent: string;
+    stepKey: string;
+    agent: string;
+    stateName: string;
+    stepName: string;
+  } | null {
+    return this.pendingPlanReviewPayload;
+  }
+
+  submitSdkPlanAnswers(answers: Record<string, string>): void {
+    this.activeSdkPlanEngine?.submitAnswers(answers);
+    this.pendingSdkPlanQuestionPayload = null;
+    void this.persistState();
+  }
+
+  getPendingSdkPlanQuestion(): {
+    questions: unknown[];
+    fromAgent: string;
+    stateName: string;
+    stepName: string;
+  } | null {
+    return this.pendingSdkPlanQuestionPayload;
   }
 
   private async waitForUserAnswer(question: string, fromAgent: string, round: number): Promise<string> {

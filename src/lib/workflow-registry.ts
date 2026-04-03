@@ -35,6 +35,7 @@ class WorkflowRegistry extends EventEmitter {
     'status', 'agents', 'escalation', 'token-usage',
     'feedback-injected', 'feedback-recalled',
     'plan-question', 'plan-round', 'route-decision', 'agent-flow',
+    'sdk-plan-question', 'sdk-plan-captured', 'sdk-plan-subtask',
   ];
 
   /**

@@ -121,6 +121,14 @@ export interface PersistedRunState {
     round: number;
     timestamp: string;
   }>;
+  /** 若 SDK Plan 步骤正在等待审批，保存待审批内容以便页面刷新后恢复弹窗 */
+  pendingPlanReview?: {
+    planContent: string;
+    stepKey: string;
+    agent: string;
+    stateName: string;
+    stepName: string;
+  } | null;
 }
 
 function runDir(runId: string): string {

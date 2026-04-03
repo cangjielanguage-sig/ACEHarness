@@ -69,6 +69,19 @@ interface WorkflowStatusResponse {
     round: number;
     timestamp: string;
   }>;
+  pendingSdkPlanQuestion?: {
+    questions: unknown[];
+    fromAgent: string;
+    stateName: string;
+    stepName: string;
+  } | null;
+  pendingPlanReview?: {
+    planContent: string;
+    stepKey: string;
+    agent: string;
+    stateName: string;
+    stepName: string;
+  } | null;
 }
 
 interface RunRecord {

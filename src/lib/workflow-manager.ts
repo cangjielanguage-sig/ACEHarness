@@ -2647,6 +2647,15 @@ export class WorkflowManager extends EventEmitter {
   getPendingUserQuestion(): { question: string; fromAgent: string; round: number } | null {
     return this.pendingUserQuestion;
   }
+
+  /** Phase 模式无 SDK Plan；与 StateMachineWorkflowManager 接口对齐 */
+  submitSdkPlanAnswers(_answers: Record<string, string>): void {
+    /* no-op */
+  }
+
+  getPendingSdkPlanQuestion(): null {
+    return null;
+  }
 }
 
 // 全局单例 — use globalThis to survive Next.js dev HMR
