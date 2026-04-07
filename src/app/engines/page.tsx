@@ -328,9 +328,8 @@ export default function EnginesPage() {
             </Button>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed mb-3">
-            不同的 AI 引擎提供不同的能力和特性。Claude Code 提供完整的代码编辑和执行能力。
-            Kiro CLI 基于 ACP 协议，支持自定义 Agent 配置。
-            CangjieMagic 是仓颉语言 AI Agent 框架，通过 MCP 协议提供工具调用能力。
+            Aceharness 提供包括 CangjieMagic、Opencode、Claude Code、Kiro CLI等 AI Agent 框架以提供完整的代码编辑和执行能力。
+            Aceharness 目前已支持完全支持 ACP和MCP的能力，后续将提供更多工具的支持。
           </p>
           <div className="text-sm text-muted-foreground leading-relaxed space-y-2">
             <p><strong>安装 Claude Code：</strong></p>

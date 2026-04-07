@@ -1,4 +1,4 @@
-# AceFlow Skills 配置
+# AceHarness Skills 配置
 # 描述所有可用的 skills，每个 skill 对应 .claude/skills/ 下的一个目录
 
 skills:
@@ -75,9 +75,9 @@ skills:
    contributors:
      - zichexuelan
 
- - name: aceflow-chat-card
-   path: aceflow-chat-card
-   description: "可视化卡片渲染。【触发场景】用卡片显示、做个卡片展示、生成可视化卡片/PR 卡片/Issue 卡片/card/tabs/badge/徽章/进度条/header/info 行。【注意】无需说 AceFlow，看到卡片需求即触发。输出 card JSON 代码块，支持头部/键值对/徽章/badge/代码块/进度条/tabs/badges/折叠区。"
+ - name: aceharness-chat-card
+   path: aceharness-chat-card
+   description: "可视化卡片渲染。【触发场景】用卡片显示、做个卡片展示、生成可视化卡片/PR 卡片/Issue 卡片/card/tabs/badge/徽章/进度条/header/info 行。【注意】无需说 AceHarness，看到卡片需求即触发。输出 card JSON 代码块，支持头部/键值对/徽章/badge/代码块/进度条/tabs/badges/折叠区。"
    tags:
      - 卡片
      - UI
@@ -93,9 +93,9 @@ skills:
    contributors:
      - zichexuelan
 
- - name: aceflow-workflow-creator
-   path: aceflow-workflow-creator
-   description: "AceFlow 工作流配置文件创建技能。【触发场景】每当用户提到：创建工作流、配置 workflow、新建工作流、写工作流配置、设置 agent 执行流程、state-machine/phase-based 工作流。生成前必须用验证脚本校验 YAML 格式和 agent 引用有效性，不要跳过验证直接生成。"
+ - name: aceharness-workflow-creator
+   path: aceharness-workflow-creator
+   description: "AceHarness 工作流配置文件创建技能。【触发场景】每当用户提到：创建工作流、配置 workflow、新建工作流、写工作流配置、设置 agent 执行流程、state-machine/phase-based 工作流。生成前必须用验证脚本校验 YAML 格式和 agent 引用有效性，不要跳过验证直接生成。"
    tags:
      - 工作流
      - 配置
