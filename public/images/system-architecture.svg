@@ -23,7 +23,7 @@
   <circle cx="260" cy="130" r="180" fill="#2563eb" fill-opacity="0.10"/>
   <circle cx="1320" cy="1080" r="220" fill="#22c55e" fill-opacity="0.10"/>
 
-  <text x="112" y="92" fill="#93c5fd" font-size="16" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" letter-spacing="3">ACEFLOW PLATFORM</text>
+  <text x="112" y="92" fill="#93c5fd" font-size="16" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" letter-spacing="3">ACEHARNESS PLATFORM</text>
   <text x="112" y="140" fill="#f8fafc" font-size="44" font-weight="700" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif">系统架构</text>
   <g filter="url(#shadow)">
     <rect x="96" y="220" width="1408" height="292" rx="36" fill="url(#panel)" stroke="#334155" stroke-width="1.5"/>

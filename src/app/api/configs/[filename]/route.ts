@@ -67,7 +67,7 @@ export async function POST(
       return NextResponse.json(
         {
           error: '配置验证失败',
-          details: validationResult.error.errors,
+          details: validationResult.error,
         },
         { status: 400 }
       );

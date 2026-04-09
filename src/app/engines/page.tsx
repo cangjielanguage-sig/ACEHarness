@@ -61,19 +61,19 @@ const engines: Engine[] = [
   {
     id: 'codex',
     name: 'Codex',
-    description: 'OpenAI Codex 引擎，专注于代码生成和理解',
+    description: 'OpenAI Codex 引擎，专注于代码生成和理解，支持 ACP 协议',
     icon: '🔮',
-    status: 'coming-soon',
-    features: ['代码生成', '代码补全', '多语言支持', 'API 集成'],
+    status: 'available',
+    features: ['ACP 协议', '代码生成', '代码补全', '多语言支持', 'API 集成'],
     endpoints: ['openai'],
   },
   {
     id: 'cursor',
     name: 'Cursor CLI',
-    description: 'Cursor 命令行工具，提供智能代码编辑和 AI 辅助能力',
+    description: 'Cursor 命令行工具，提供智能代码编辑和 AI 辅助能力，支持 ACP 协议',
     icon: '✨',
-    status: 'coming-soon',
-    features: ['智能补全', '代码重构', '命令行集成', '上下文感知'],
+    status: 'available',
+    features: ['ACP 协议', '智能补全', '代码重构', '命令行集成', '上下文感知'],
     endpoints: ['anthropic', 'openai'],
   },
 ];
@@ -355,6 +355,16 @@ CANGJIE_STDX_PATH — stdx 动态库路径`}
               npm install -g opencode-ai
             </code>
             <p className="text-xs">安装后刷新可用性检查，即可切换使用 OpenCode 引擎。</p>
+            <p className="mt-2"><strong>安装 Codex：</strong></p>
+            <code className="block bg-background/50 p-2 rounded text-xs">
+              npm install -g @openai/codex-cli
+            </code>
+            <p className="text-xs">安装后刷新可用性检查，即可切换使用 Codex 引擎。</p>
+            <p className="mt-2"><strong>安装 Cursor CLI：</strong></p>
+            <code className="block bg-background/50 p-2 rounded text-xs">
+              curl -fsSL https://cursor.sh/install | bash
+            </code>
+            <p className="text-xs">安装后刷新可用性检查，即可切换使用 Cursor CLI 引擎。</p>
           </div>
         </motion.div>
       </div>

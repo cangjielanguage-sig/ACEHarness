@@ -187,7 +187,7 @@ export default function LoginPage() {
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
                   ACEHarness
                 </h1>
-                <p className="text-xs text-muted-foreground">全流程 Multi-Agent 智能编排系统</p>
+                <p className="text-xs text-muted-foreground">全流程 AI Multi-Agent 智能协作系统</p>
               </div>
             </div>
 

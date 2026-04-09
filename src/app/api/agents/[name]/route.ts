@@ -34,7 +34,7 @@ export async function POST(
     const validationResult = roleConfigSchema.safeParse(agent);
     if (!validationResult.success) {
       return NextResponse.json(
-        { error: 'Agent 配置验证失败', details: validationResult.error.errors },
+        { error: 'Agent 配置验证失败', details: validationResult.error },
         { status: 400 }
       );
     }

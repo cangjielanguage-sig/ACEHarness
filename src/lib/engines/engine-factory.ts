@@ -11,6 +11,8 @@ import type { Engine } from './engine-interface';
 import { KiroCliEngineWrapper } from './kiro-cli-wrapper';
 import { CangjieMagicEngineWrapper } from './cangjie-magic-wrapper';
 import { OpenCodeEngineWrapper } from './opencode-wrapper';
+import { CodexEngineWrapper } from './codex-wrapper';
+import { CursorEngineWrapper } from './cursor-wrapper';
 
 export type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode';
 
@@ -83,8 +85,8 @@ export async function createEngine(type?: EngineType): Promise<Engine | null> {
   switch (engineType) {
     case 'kiro-cli':
       const kiroEngine = new KiroCliEngineWrapper();
-      const isAvailable = await kiroEngine.isAvailable();
-      if (!isAvailable) {
+      const kiroAvailable = await kiroEngine.isAvailable();
+      if (!kiroAvailable) {
         console.warn('[EngineFactory] Kiro CLI is not available, falling back to Claude Code');
         return null;
       }
@@ -95,9 +97,22 @@ export async function createEngine(type?: EngineType): Promise<Engine | null> {
       return null;
 
     case 'codex':
+      const codexEngine = new CodexEngineWrapper();
+      const codexAvailable = await codexEngine.isAvailable();
+      if (!codexAvailable) {
+        console.warn('[EngineFactory] Codex is not available, falling back to Claude Code');
+        return null;
+      }
+      return codexEngine;
+
     case 'cursor':
-      console.warn(`Engine ${engineType} is not yet implemented`);
-      return null;
+      const cursorEngine = new CursorEngineWrapper();
+      const cursorAvailable = await cursorEngine.isAvailable();
+      if (!cursorAvailable) {
+        console.warn('[EngineFactory] Cursor CLI is not available, falling back to Claude Code');
+        return null;
+      }
+      return cursorEngine;
 
     case 'cangjie-magic':
       const cjEngine = new CangjieMagicEngineWrapper();
@@ -157,6 +172,14 @@ export async function isEngineAvailable(type: EngineType): Promise<boolean> {
     case 'opencode':
       const ocCheck = new OpenCodeEngineWrapper();
       return await ocCheck.isAvailable();
+
+    case 'codex':
+      const codexCheck = new CodexEngineWrapper();
+      return await codexCheck.isAvailable();
+
+    case 'cursor':
+      const cursorCheck = new CursorEngineWrapper();
+      return await cursorCheck.isAvailable();
 
     default:
       return false;

@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: '表单验证失败',
-          details: validationResult.error.errors,
+          details: validationResult.error,
         },
         { status: 400 }
       );
