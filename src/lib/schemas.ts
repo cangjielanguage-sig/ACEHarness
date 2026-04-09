@@ -48,9 +48,7 @@ export const workflowPhaseSchema = z.object({
 // 角色配置 Schema
 export const roleConfigSchema = z.object({
   name: z.string().min(1, '角色名称不能为空'),
-  team: z.enum(['blue', 'red', 'judge'], {
-    errorMap: () => ({ message: '团队必须是 blue、red 或 judge' }),
-  }),
+  team: z.enum(['blue', 'red', 'judge']),
   model: z.string().min(1, '模型名称不能为空'),
   temperature: z.number().optional(),
   capabilities: z.array(z.string()).min(1, '至少需要一个能力'),
@@ -66,7 +64,7 @@ export const roleConfigSchema = z.object({
   reviewPanel: z.object({
     enabled: z.boolean(),
     description: z.string().optional(),
-    subAgents: z.record(z.object({
+    subAgents: z.record(z.string(), z.object({
       description: z.string(),
       prompt: z.string(),
       tools: z.array(z.string()),
@@ -78,7 +76,7 @@ export const roleConfigSchema = z.object({
     type: z.enum(['cangjie-magic', 'stdio']),
     command: z.string().min(1),
     projectDir: z.string().optional(),
-    env: z.record(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
   })).optional(),
 });
 

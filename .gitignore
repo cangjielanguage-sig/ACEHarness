@@ -44,6 +44,10 @@ vite.config.ts
 runs/
 
 .claude/
+.kiro/
+.opencode/
+.codex/
+.cursor/
 
 /configs/agents/simple-reviewer.yaml
 /configs/agents/simple-tester.yaml
