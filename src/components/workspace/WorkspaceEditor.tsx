@@ -26,6 +26,21 @@ interface WorkspaceEditorProps {
   workspacePath: string
 }
 
+const PREVIEW_EXTENSIONS = new Set([
+  "pdf", "docx", "xlsx", "pptx",
+  "png", "jpg", "jpeg", "gif",
+  "mp4", "webm", "mp3",
+])
+
+function isPreviewFile(filePath: string): boolean {
+  const ext = filePath.split(".").pop()?.toLowerCase() || ""
+  return PREVIEW_EXTENSIONS.has(ext)
+}
+
+function getFileType(filePath: string): string {
+  return filePath.split(".").pop()?.toLowerCase() || ""
+}
+
 export function WorkspaceEditor({
   open,
   onOpenChange,
@@ -38,6 +53,7 @@ export function WorkspaceEditor({
   const [fileSize, setFileSize] = React.useState<number | null>(null)
   const [fileLoading, setFileLoading] = React.useState(false)
   const [oversize, setOversize] = React.useState(false)
+  const [fileBlob, setFileBlob] = React.useState<Blob | null>(null)
   const [searchOpen, setSearchOpen] = React.useState(false)
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -60,22 +76,36 @@ export function WorkspaceEditor({
     if (!selectedFile || !workspacePath) return
     setFileLoading(true)
     setOversize(false)
-    workspaceApi
-      .getFile(workspacePath, selectedFile)
-      .then((data) => {
-        setFileContent(data.content)
-        setFileSize(data.size)
-      })
-      .catch((err: Error & { size?: number }) => {
-        if (err.message?.includes("KB 限制")) {
-          setOversize(true)
-          setFileContent(null)
-          if (err.size != null) setFileSize(err.size)
-        } else {
-          setFileContent(null)
-        }
-      })
-      .finally(() => setFileLoading(false))
+    setFileBlob(null)
+    setFileContent(null)
+
+    if (isPreviewFile(selectedFile)) {
+      // Binary preview files: fetch as blob
+      workspaceApi
+        .getFileBlob(workspacePath, selectedFile)
+        .then((blob) => {
+          setFileBlob(blob)
+        })
+        .catch(() => {
+          setFileBlob(null)
+        })
+        .finally(() => setFileLoading(false))
+    } else {
+      // Text files: fetch as text
+      workspaceApi
+        .getFile(workspacePath, selectedFile)
+        .then((data) => {
+          setFileContent(data.content)
+          setFileSize(data.size)
+        })
+        .catch((err: Error & { size?: number }) => {
+          if (err.message?.includes("KB 限制")) {
+            setOversize(true)
+            if (err.size != null) setFileSize(err.size)
+          }
+        })
+        .finally(() => setFileLoading(false))
+    }
   }, [selectedFile, workspacePath])
 
   // Ctrl+P / Cmd+P to open file search
@@ -111,6 +141,7 @@ export function WorkspaceEditor({
         setFileContent(null)
         setFileSize(null)
         setOversize(false)
+        setFileBlob(null)
         setTree([])
       }
       onOpenChange(newOpen)
@@ -159,6 +190,8 @@ export function WorkspaceEditor({
                   loading={fileLoading}
                   onSave={handleSave}
                   oversize={oversize}
+                  fileBlob={fileBlob}
+                  fileType={selectedFile ? getFileType(selectedFile) : undefined}
                 />
               </ResizablePanel>
             </ResizablePanelGroup>

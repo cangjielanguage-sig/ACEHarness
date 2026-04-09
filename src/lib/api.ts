@@ -607,4 +607,11 @@ export const workspaceApi = {
     }
     return res.json();
   },
+  async getFileBlob(workspace: string, file: string): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/workspace/file?workspace=${encodeURIComponent(workspace)}&file=${encodeURIComponent(file)}&mode=blob`);
+    if (!res.ok) {
+      throw new Error('获取文件失败');
+    }
+    return res.blob();
+  },
 };

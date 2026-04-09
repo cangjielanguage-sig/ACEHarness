@@ -33,6 +33,24 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ),
 })
 
+const FileViewer = dynamic(
+  () => import("react-file-viewer-v2").then((mod) => mod.FileViewer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    ),
+  }
+)
+
+const PREVIEW_EXTENSIONS = new Set([
+  "pdf", "docx", "xlsx", "pptx",
+  "png", "jpg", "jpeg", "gif",
+  "mp4", "webm", "mp3",
+])
+
 interface EditorPanelProps {
   filePath: string | null
   content: string | null
@@ -40,6 +58,8 @@ interface EditorPanelProps {
   loading: boolean
   onSave: (content: string) => Promise<void>
   oversize?: boolean
+  fileBlob?: Blob | null
+  fileType?: string
 }
 
 const EXT_LANG_MAP: Record<string, string> = {
@@ -71,6 +91,8 @@ export function EditorPanel({
   loading,
   onSave,
   oversize,
+  fileBlob,
+  fileType,
 }: EditorPanelProps) {
   const { resolvedTheme } = useTheme()
   const editorRef = React.useRef<any>(null)
@@ -191,6 +213,10 @@ export function EditorPanel({
           <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
             <FileCode2 className="h-12 w-12" />
             <p className="text-sm">文件过大（{fileSize ? (fileSize >= 1024 * 1024 ? `${(fileSize / 1024 / 1024).toFixed(1)}MB` : `${(fileSize / 1024).toFixed(1)}KB`) : ""}），仅支持预览和编辑 100KB 以下的文件</p>
+          </div>
+        ) : fileBlob && fileType && PREVIEW_EXTENSIONS.has(fileType) ? (
+          <div className="h-full overflow-auto">
+            <FileViewer file={fileBlob} fileType={fileType} />
           </div>
         ) : (
           <MonacoEditor

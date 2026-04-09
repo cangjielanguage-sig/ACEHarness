@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const workspace = searchParams.get('workspace');
     const file = searchParams.get('file');
+    const mode = searchParams.get('mode'); // 'blob' for binary download
 
     if (!workspace || !file) {
       return NextResponse.json({ error: '缺少 workspace 或 file 参数' }, { status: 400 });
@@ -30,6 +31,26 @@ export async function GET(request: NextRequest) {
     const stat = await fs.stat(realPath);
     if (!stat.isFile()) {
       return NextResponse.json({ error: '不是文件' }, { status: 400 });
+    }
+
+    // Binary mode: return raw file for preview (no size limit)
+    if (mode === 'blob') {
+      const buffer = await fs.readFile(realPath);
+      const ext = path.extname(file).toLowerCase();
+      const mimeMap: Record<string, string> = {
+        '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+        '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg',
+      };
+      return new NextResponse(buffer, {
+        headers: {
+          'Content-Type': mimeMap[ext] || 'application/octet-stream',
+          'Content-Length': String(stat.size),
+        },
+      });
     }
 
     if (stat.size > MAX_FILE_SIZE) {
