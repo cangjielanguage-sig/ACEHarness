@@ -1,7 +1,13 @@
 'use client';
 
-import { useState, useRef, useEffect, ReactNode } from 'react';
+import { ReactNode, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from '@/components/ui/resizable';
+import { usePanelRef, useDefaultLayout } from 'react-resizable-panels';
 
 interface ResizableThreePanelsProps {
   leftPanel: ReactNode;
@@ -27,201 +33,115 @@ export default function ResizablePanels({
   maxLeftWidth = 500,
   minRightWidth = 300,
   maxRightWidth = 800,
-  storageKeyLeft = 'resizable-left-panel-width',
-  storageKeyRight = 'resizable-right-panel-width',
 }: ResizableThreePanelsProps) {
-  const [leftWidth, setLeftWidth] = useState(defaultLeftWidth);
-  const [rightWidth, setRightWidth] = useState(defaultRightWidth);
-  const [isResizingLeft, setIsResizingLeft] = useState(false);
-  const [isResizingRight, setIsResizingRight] = useState(false);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const leftPanelRef = usePanelRef();
+  const rightPanelRef = usePanelRef();
 
-  // Load saved widths from localStorage
-  useEffect(() => {
-    const savedLeft = localStorage.getItem(storageKeyLeft);
-    if (savedLeft) {
-      const width = parseInt(savedLeft, 10);
-      if (width >= minLeftWidth && width <= maxLeftWidth) {
-        setLeftWidth(width);
-      }
+  // Convert pixel defaults to approximate percentages (assume ~1400px viewport)
+  const totalEstimate = 1400;
+  const leftDefault = `${Math.round((defaultLeftWidth / totalEstimate) * 100)}%`;
+  const rightDefault = `${Math.round((defaultRightWidth / totalEstimate) * 100)}%`;
+  const centerDefault = `${100 - Math.round((defaultLeftWidth / totalEstimate) * 100) - Math.round((defaultRightWidth / totalEstimate) * 100)}%`;
+
+  const leftMin = `${Math.round((minLeftWidth / totalEstimate) * 100)}%`;
+  const leftMax = `${Math.round((maxLeftWidth / totalEstimate) * 100)}%`;
+  const rightMin = `${Math.round((minRightWidth / totalEstimate) * 100)}%`;
+  const rightMax = `${Math.round((maxRightWidth / totalEstimate) * 100)}%`;
+
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "workbench-panels",
+  });
+
+  const toggleLeftCollapse = useCallback(() => {
+    if (leftCollapsed) {
+      leftPanelRef.current?.expand();
+    } else {
+      leftPanelRef.current?.collapse();
     }
-    const savedRight = localStorage.getItem(storageKeyRight);
-    if (savedRight) {
-      const width = parseInt(savedRight, 10);
-      if (width >= minRightWidth && width <= maxRightWidth) {
-        setRightWidth(width);
-      }
+  }, [leftCollapsed, leftPanelRef]);
+
+  const toggleRightCollapse = useCallback(() => {
+    if (rightCollapsed) {
+      rightPanelRef.current?.expand();
+    } else {
+      rightPanelRef.current?.collapse();
     }
-  }, [storageKeyLeft, storageKeyRight, minLeftWidth, maxLeftWidth, minRightWidth, maxRightWidth]);
+  }, [rightCollapsed, rightPanelRef]);
 
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!containerRef.current) return;
+  const handleLeftResize = useCallback(() => {
+    setLeftCollapsed(leftPanelRef.current?.isCollapsed() ?? false);
+  }, [leftPanelRef]);
 
-      if (isResizingLeft) {
-        const containerRect = containerRef.current.getBoundingClientRect();
-        const newWidth = e.clientX - containerRect.left;
-
-        if (newWidth >= minLeftWidth && newWidth <= maxLeftWidth) {
-          setLeftWidth(newWidth);
-          localStorage.setItem(storageKeyLeft, newWidth.toString());
-        }
-      }
-
-      if (isResizingRight) {
-        const containerRect = containerRef.current.getBoundingClientRect();
-        const newWidth = containerRect.right - e.clientX;
-
-        if (newWidth >= minRightWidth && newWidth <= maxRightWidth) {
-          setRightWidth(newWidth);
-          localStorage.setItem(storageKeyRight, newWidth.toString());
-        }
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsResizingLeft(false);
-      setIsResizingRight(false);
-    };
-
-    if (isResizingLeft || isResizingRight) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    }
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-  }, [isResizingLeft, isResizingRight, minLeftWidth, maxLeftWidth, minRightWidth, maxRightWidth, storageKeyLeft, storageKeyRight]);
+  const handleRightResize = useCallback(() => {
+    setRightCollapsed(rightPanelRef.current?.isCollapsed() ?? false);
+  }, [rightPanelRef]);
 
   return (
-    <div ref={containerRef} className="flex-1 flex gap-0 overflow-hidden">
-      {/* Left Panel */}
-      <div
-        className={`bg-card border-r flex flex-col transition-all duration-300 overflow-hidden ${
-          leftCollapsed ? 'w-12' : ''
-        }`}
-        style={{ width: leftCollapsed ? '48px' : `${leftWidth}px` }}
+    <ResizablePanelGroup id="workbench-panels" orientation="horizontal" className="flex-1" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+      <ResizablePanel
+        id="wb-left"
+        panelRef={leftPanelRef}
+        defaultSize={leftDefault}
+        minSize={leftMin}
+        maxSize={leftMax}
+        collapsible
+        collapsedSize="3%"
+        onResize={handleLeftResize}
+        className="bg-card"
       >
         {leftCollapsed ? (
           <div className="h-full flex items-center justify-center">
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setLeftCollapsed(false)}
+              onClick={toggleLeftCollapse}
               className="h-6 w-6"
             >
-              <span className="material-symbols-outlined text-base">chevron_right</span>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>chevron_right</span>
             </Button>
           </div>
         ) : (
           leftPanel
         )}
-      </div>
+      </ResizablePanel>
 
-      {/* Left Resizer with collapse button */}
-      {!leftCollapsed && (
-        <div className="relative flex-shrink-0">
-          <div
-            className={`w-1 h-full hover:w-2 bg-border hover:bg-primary transition-all cursor-col-resize ${
-              isResizingLeft ? 'bg-primary w-2' : ''
-            }`}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              setIsResizingLeft(true);
-            }}
-          />
-          <div className="absolute top-1/2 -translate-y-1/2 -right-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setLeftCollapsed(true)}
-              className="h-6 w-6 bg-background/80 hover:bg-background border shadow-sm"
-            >
-              <span className="material-symbols-outlined text-sm">chevron_left</span>
-            </Button>
-          </div>
+      <ResizableHandle withHandle />
+
+      <ResizablePanel id="wb-center" defaultSize={centerDefault} minSize="20%">
+        <div className="flex flex-col h-full overflow-hidden">
+          {centerPanel}
         </div>
-      )}
+      </ResizablePanel>
 
-      {/* Collapsed left button */}
-      {leftCollapsed && (
-        <div className="relative flex-shrink-0 w-0">
-          <div className="absolute top-1/2 -translate-y-1/2 left-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setLeftCollapsed(false)}
-              className="h-6 w-6 bg-background/80 hover:bg-background border shadow-sm"
-            >
-              <span className="material-symbols-outlined text-sm">chevron_right</span>
-            </Button>
-          </div>
-        </div>
-      )}
+      <ResizableHandle withHandle />
 
-      {/* Center Panel */}
-      <div className="flex-1 flex flex-col border-r overflow-hidden">
-        {centerPanel}
-      </div>
-
-      {/* Right Resizer with collapse button */}
-      {!rightCollapsed && (
-        <div className="relative flex-shrink-0">
-          <div
-            className={`w-1 h-full hover:w-2 bg-border hover:bg-primary transition-all cursor-col-resize ${
-              isResizingRight ? 'bg-primary w-2' : ''
-            }`}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              setIsResizingRight(true);
-            }}
-          />
-          <div className="absolute top-1/2 -translate-y-1/2 -left-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setRightCollapsed(true)}
-              className="h-6 w-6 bg-background/80 hover:bg-background border shadow-sm"
-            >
-              <span className="material-symbols-outlined text-sm">chevron_right</span>
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Collapsed right button */}
-      {rightCollapsed && (
-        <div className="relative flex-shrink-0 w-0">
-          <div className="absolute top-1/2 -translate-y-1/2 -left-7">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setRightCollapsed(false)}
-              className="h-6 w-6 bg-background/80 hover:bg-background border shadow-sm"
-            >
-              <span className="material-symbols-outlined text-sm">chevron_left</span>
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Right Panel */}
-      <div
-        className={`flex flex-col transition-all duration-300 overflow-hidden ${
-          rightCollapsed ? 'w-0' : ''
-        }`}
-        style={{ width: rightCollapsed ? '0px' : `${rightWidth}px` }}
+      <ResizablePanel
+        id="wb-right"
+        panelRef={rightPanelRef}
+        defaultSize={rightDefault}
+        minSize={rightMin}
+        maxSize={rightMax}
+        collapsible
+        collapsedSize="0%"
+        onResize={handleRightResize}
       >
-        {!rightCollapsed && rightPanel}
-      </div>
-    </div>
+        {rightCollapsed ? (
+          <div className="h-full flex items-center justify-center">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleRightCollapse}
+              className="h-6 w-6"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>chevron_left</span>
+            </Button>
+          </div>
+        ) : (
+          rightPanel
+        )}
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

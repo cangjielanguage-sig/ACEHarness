@@ -566,3 +566,45 @@ export const scheduleApi = {
     return res.json();
   },
 };
+
+// ==================== Workspace API ====================
+
+export interface TreeNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  children?: TreeNode[];
+}
+
+export const workspaceApi = {
+  async getTree(workspacePath: string): Promise<{ tree: TreeNode[] }> {
+    const res = await fetch(`${API_BASE}/workspace/tree?path=${encodeURIComponent(workspacePath)}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '获取文件树失败');
+    }
+    return res.json();
+  },
+  async getFile(workspace: string, file: string): Promise<{ content: string; size: number; path: string }> {
+    const res = await fetch(`${API_BASE}/workspace/file?workspace=${encodeURIComponent(workspace)}&file=${encodeURIComponent(file)}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const err = new Error(data.error || '读取文件失败') as Error & { size?: number };
+      if (data.size != null) err.size = data.size;
+      throw err;
+    }
+    return res.json();
+  },
+  async saveFile(workspace: string, file: string, content: string): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_BASE}/workspace/file`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace, file, content }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '保存文件失败');
+    }
+    return res.json();
+  },
+};

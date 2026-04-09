@@ -28,6 +28,8 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
+import { WorkspaceEditor } from '@/components/workspace/WorkspaceEditor';
+import { ButtonGroup } from '@/components/ui/button-group';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -82,6 +84,7 @@ export default function WorkbenchPage() {
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [smStateHistory, setSmStateHistory] = useState<any[]>([]);
+  const [workspaceEditorOpen, setWorkspaceEditorOpen] = useState(false);
   const [smIssueTracker, setSmIssueTracker] = useState<any[]>([]);
   const [smTransitionCount, setSmTransitionCount] = useState(0);
   const [runStartTime, setRunStartTime] = useState<string | null>(null);
@@ -1926,20 +1929,27 @@ export default function WorkbenchPage() {
               {starting ? (
                 <ClipLoader color="currentColor" size={14} className="mr-1" />
               ) : (
-                <span className="material-symbols-outlined text-sm mr-1">play_arrow</span>
+                <span className="material-symbols-outlined mr-1" style={{ fontSize: '16px' }}>play_arrow</span>
               )}
               <span className="hidden sm:inline">{starting ? '启动中...' : '启动工作流'}</span>
               <span className="sm:hidden">{starting ? '...' : '启动'}</span>
             </Button>
             <Button variant="destructive" size="sm" onClick={stopWorkflow} disabled={!isRunning && workflowStatus !== 'running'}>
-              <span className="material-symbols-outlined text-sm">stop</span><span className="hidden sm:inline">停止</span>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>stop</span><span className="hidden sm:inline">停止</span>
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => dispatch({ type: 'SET_SHOW_PROCESS_PANEL', payload: !showProcessPanel })}>
-              <span className="material-symbols-outlined text-sm">settings</span><span className="hidden sm:inline">进程</span>
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => openContextEditor('global')} title="全局上下文">
-              <span className="material-symbols-outlined text-sm">edit_note</span><span className="hidden sm:inline">上下文</span>
-            </Button>
+            <ButtonGroup>
+              <Button variant="outline" size="sm" onClick={() => dispatch({ type: 'SET_SHOW_PROCESS_PANEL', payload: !showProcessPanel })}>
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>settings</span><span className="hidden sm:inline">进程</span>
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => openContextEditor('global')} title="全局上下文">
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit_note</span><span className="hidden sm:inline">上下文</span>
+              </Button>
+              {projectRoot && (
+                <Button variant="outline" size="sm" onClick={() => setWorkspaceEditorOpen(true)} title="打开工作区编辑器">
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_open</span><span className="hidden sm:inline">工作区</span>
+                </Button>
+              )}
+            </ButtonGroup>
           </>)}
           {isDesignMode && (
             <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={handleSaveConfig} disabled={saving}>
@@ -3616,6 +3626,14 @@ export default function WorkbenchPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {projectRoot && (
+        <WorkspaceEditor
+          open={workspaceEditorOpen}
+          onOpenChange={setWorkspaceEditorOpen}
+          workspacePath={projectRoot}
+        />
       )}
     </div>
   );
