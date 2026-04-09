@@ -255,7 +255,8 @@ export default function FlowDiagram({
               <div className={styles.phaseName}>{phase.name}</div>
               {isIterative && (
                 <div className={styles.iterationBadge}>
-                  🔄 {iterState ? `${iterState.currentIteration}/${iterState.maxIterations}` : `max ${phase.iteration!.maxIterations}`}
+                  <span className="material-symbols-outlined" style={{ fontSize: '12px' }}>loop</span>
+                  {iterState ? `${iterState.currentIteration}/${iterState.maxIterations}` : `max ${phase.iteration!.maxIterations}`}
                 </div>
               )}
             </div>

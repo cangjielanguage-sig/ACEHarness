@@ -139,6 +139,12 @@
   .thin-scrollbar::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }
 }
 
+/* Override react-resizable-panels cursor on handle button */
+button[data-resize-btn][data-resize-btn],
+button[data-resize-btn][data-resize-btn]:hover {
+  cursor: pointer !important;
+}
+
 /* Sci-fi grid overlay for dark mode */
 .dark .sci-fi-grid {
   position: fixed;

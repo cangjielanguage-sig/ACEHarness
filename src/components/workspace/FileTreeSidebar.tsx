@@ -109,7 +109,7 @@ export function FileTreeSidebar({
     <div className="flex flex-col h-full bg-card">
       <div className="flex items-center gap-2 px-3 py-2 border-b shrink-0">
         <Folder className="h-4 w-4 shrink-0" />
-        <span className="text-sm font-semibold truncate">{workspaceName}</span>
+        <span className="text-sm font-semibold truncate flex-1">{workspaceName}</span>
       </div>
       <div className="flex-1 overflow-auto py-1">
         {loading ? (

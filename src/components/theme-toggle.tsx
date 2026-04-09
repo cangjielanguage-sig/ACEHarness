@@ -12,8 +12,8 @@ export function ThemeToggle() {
       size="icon"
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
     >
-      <span className="material-symbols-outlined text-xl dark:hidden">light_mode</span>
-      <span className="material-symbols-outlined text-xl hidden dark:inline">dark_mode</span>
+      <span className="material-symbols-outlined dark:hidden" style={{ fontSize: '18px' }}>light_mode</span>
+      <span className="material-symbols-outlined hidden dark:inline" style={{ fontSize: '18px' }}>dark_mode</span>
       <span className="sr-only">Toggle theme</span>
     </Button>
   )

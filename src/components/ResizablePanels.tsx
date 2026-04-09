@@ -1,146 +1,103 @@
 'use client';
 
-import { ReactNode, useState, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
+import { ReactNode, useState, useCallback, useEffect } from 'react';
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
 } from '@/components/ui/resizable';
-import { usePanelRef, useDefaultLayout } from 'react-resizable-panels';
+import { useDefaultLayout, usePanelRef } from 'react-resizable-panels';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ResizableThreePanelsProps {
   leftPanel: ReactNode;
   centerPanel: ReactNode;
   rightPanel: ReactNode;
-  defaultLeftWidth?: number;
-  defaultRightWidth?: number;
-  minLeftWidth?: number;
-  maxLeftWidth?: number;
-  minRightWidth?: number;
-  maxRightWidth?: number;
-  storageKeyLeft?: string;
-  storageKeyRight?: string;
 }
 
 export default function ResizablePanels({
   leftPanel,
   centerPanel,
   rightPanel,
-  defaultLeftWidth = 280,
-  defaultRightWidth = 400,
-  minLeftWidth = 200,
-  maxLeftWidth = 500,
-  minRightWidth = 300,
-  maxRightWidth = 800,
 }: ResizableThreePanelsProps) {
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: 'three-panels',
+  });
   const leftPanelRef = usePanelRef();
   const rightPanelRef = usePanelRef();
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
 
-  // Convert pixel defaults to approximate percentages (assume ~1400px viewport)
-  const totalEstimate = 1400;
-  const leftDefault = `${Math.round((defaultLeftWidth / totalEstimate) * 100)}%`;
-  const rightDefault = `${Math.round((defaultRightWidth / totalEstimate) * 100)}%`;
-  const centerDefault = `${100 - Math.round((defaultLeftWidth / totalEstimate) * 100) - Math.round((defaultRightWidth / totalEstimate) * 100)}%`;
-
-  const leftMin = `${Math.round((minLeftWidth / totalEstimate) * 100)}%`;
-  const leftMax = `${Math.round((maxLeftWidth / totalEstimate) * 100)}%`;
-  const rightMin = `${Math.round((minRightWidth / totalEstimate) * 100)}%`;
-  const rightMax = `${Math.round((maxRightWidth / totalEstimate) * 100)}%`;
-
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "workbench-panels",
-  });
-
-  const toggleLeftCollapse = useCallback(() => {
-    if (leftCollapsed) {
-      leftPanelRef.current?.expand();
-    } else {
-      leftPanelRef.current?.collapse();
-    }
-  }, [leftCollapsed, leftPanelRef]);
-
-  const toggleRightCollapse = useCallback(() => {
-    if (rightCollapsed) {
-      rightPanelRef.current?.expand();
-    } else {
-      rightPanelRef.current?.collapse();
-    }
-  }, [rightCollapsed, rightPanelRef]);
-
-  const handleLeftResize = useCallback(() => {
+  // Sync collapsed state on mount (for restored layouts)
+  useEffect(() => {
     setLeftCollapsed(leftPanelRef.current?.isCollapsed() ?? false);
+    setRightCollapsed(rightPanelRef.current?.isCollapsed() ?? false);
+  }, [leftPanelRef, rightPanelRef]);
+
+  const toggleLeft = useCallback(() => {
+    const panel = leftPanelRef.current;
+    if (!panel) return;
+    panel.isCollapsed() ? panel.expand() : panel.collapse();
   }, [leftPanelRef]);
 
-  const handleRightResize = useCallback(() => {
-    setRightCollapsed(rightPanelRef.current?.isCollapsed() ?? false);
+  const toggleRight = useCallback(() => {
+    const panel = rightPanelRef.current;
+    if (!panel) return;
+    panel.isCollapsed() ? panel.expand() : panel.collapse();
   }, [rightPanelRef]);
 
   return (
-    <ResizablePanelGroup id="workbench-panels" orientation="horizontal" className="flex-1" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+    <ResizablePanelGroup
+      id="three-panels"
+      orientation="horizontal"
+      className="h-full"
+      defaultLayout={defaultLayout}
+      onLayoutChanged={onLayoutChanged}
+    >
       <ResizablePanel
-        id="wb-left"
+        id="left-panel"
         panelRef={leftPanelRef}
-        defaultSize={leftDefault}
-        minSize={leftMin}
-        maxSize={leftMax}
-        collapsible
-        collapsedSize="3%"
-        onResize={handleLeftResize}
-        className="bg-card"
-      >
-        {leftCollapsed ? (
-          <div className="h-full flex items-center justify-center">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleLeftCollapse}
-              className="h-6 w-6"
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>chevron_right</span>
-            </Button>
-          </div>
-        ) : (
-          leftPanel
-        )}
-      </ResizablePanel>
-
-      <ResizableHandle withHandle />
-
-      <ResizablePanel id="wb-center" defaultSize={centerDefault} minSize="20%">
-        <div className="flex flex-col h-full overflow-hidden">
-          {centerPanel}
-        </div>
-      </ResizablePanel>
-
-      <ResizableHandle withHandle />
-
-      <ResizablePanel
-        id="wb-right"
-        panelRef={rightPanelRef}
-        defaultSize={rightDefault}
-        minSize={rightMin}
-        maxSize={rightMax}
+        defaultSize="20%"
+        minSize="12%"
+        maxSize="35%"
         collapsible
         collapsedSize="0%"
-        onResize={handleRightResize}
+        onResize={() => setLeftCollapsed(leftPanelRef.current?.isCollapsed() ?? false)}
       >
-        {rightCollapsed ? (
-          <div className="h-full flex items-center justify-center">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleRightCollapse}
-              className="h-6 w-6"
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>chevron_left</span>
-            </Button>
-          </div>
-        ) : (
-          rightPanel
-        )}
+        {leftPanel}
+      </ResizablePanel>
+      <ResizableHandle
+        withHandle
+        collapsed={leftCollapsed}
+        onClickHandle={toggleLeft}
+        handleIcon={leftCollapsed
+          ? <ChevronRight className="h-2.5 w-2.5" />
+          : <ChevronLeft className="h-2.5 w-2.5" />
+        }
+      />
+      <ResizablePanel id="center-panel" defaultSize="50%" minSize="30%">
+        {centerPanel}
+      </ResizablePanel>
+      <ResizableHandle
+        withHandle
+        collapsed={rightCollapsed}
+        onClickHandle={toggleRight}
+        handleIcon={rightCollapsed
+          ? <ChevronLeft className="h-2.5 w-2.5" />
+          : <ChevronRight className="h-2.5 w-2.5" />
+        }
+      />
+      <ResizablePanel
+        id="right-panel"
+        panelRef={rightPanelRef}
+        defaultSize="30%"
+        minSize="15%"
+        maxSize="50%"
+        collapsible
+        collapsedSize="0%"
+        onResize={() => setRightCollapsed(rightPanelRef.current?.isCollapsed() ?? false)}
+      >
+        {rightPanel}
       </ResizablePanel>
     </ResizablePanelGroup>
   );

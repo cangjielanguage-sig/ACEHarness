@@ -2,8 +2,8 @@
 
 import * as React from "react"
 import { workspaceApi, type TreeNode } from "@/lib/api"
-import { X } from "lucide-react"
-import { useDefaultLayout } from "react-resizable-panels"
+import { X, ChevronLeft, ChevronRight } from "lucide-react"
+import { useDefaultLayout, usePanelRef } from "react-resizable-panels"
 import { Button } from "@/components/ui/button"
 import {
   Drawer,
@@ -55,6 +55,14 @@ export function WorkspaceEditor({
   const [oversize, setOversize] = React.useState(false)
   const [fileBlob, setFileBlob] = React.useState<Blob | null>(null)
   const [searchOpen, setSearchOpen] = React.useState(false)
+  const [treeCollapsed, setTreeCollapsed] = React.useState(false)
+  const treePanelRef = usePanelRef()
+
+  const toggleTree = React.useCallback(() => {
+    const panel = treePanelRef.current
+    if (!panel) return
+    panel.isCollapsed() ? panel.expand() : panel.collapse()
+  }, [treePanelRef])
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "workspace-editor",
@@ -172,7 +180,16 @@ export function WorkspaceEditor({
               </Button>
             </div>
             <ResizablePanelGroup id="workspace-editor" orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-              <ResizablePanel id="workspace-tree" defaultSize="20%" minSize="12%" maxSize="40%">
+              <ResizablePanel
+                id="workspace-tree"
+                panelRef={treePanelRef}
+                defaultSize="20%"
+                minSize="12%"
+                maxSize="40%"
+                collapsible
+                collapsedSize="0%"
+                onResize={() => setTreeCollapsed(treePanelRef.current?.isCollapsed() ?? false)}
+              >
                 <FileTreeSidebar
                   workspacePath={workspacePath}
                   tree={tree}
@@ -181,7 +198,15 @@ export function WorkspaceEditor({
                   loading={treeLoading}
                 />
               </ResizablePanel>
-              <ResizableHandle withHandle />
+              <ResizableHandle
+                withHandle
+                collapsed={treeCollapsed}
+                onClickHandle={toggleTree}
+                handleIcon={treeCollapsed
+                  ? <ChevronRight className="h-2.5 w-2.5" />
+                  : <ChevronLeft className="h-2.5 w-2.5" />
+                }
+              />
               <ResizablePanel id="workspace-editor-panel" defaultSize="80%" minSize="40%">
                 <EditorPanel
                   filePath={selectedFile}

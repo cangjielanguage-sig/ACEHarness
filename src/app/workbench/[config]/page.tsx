@@ -105,6 +105,7 @@ export default function WorkbenchPage() {
   const [showAgentDrawer, setShowAgentDrawer] = useState(false);
   const [showDesignRequirements, setShowDesignRequirements] = useState(true);
   const [showRunRequirements, setShowRunRequirements] = useState(true);
+  const [showAllSkills, setShowAllSkills] = useState(false);
   const [iterationFeedback, setIterationFeedback] = useState('');
   const [pendingPlanQuestion, setPendingPlanQuestion] = useState<{ question: string; fromAgent: string; round: number } | null>(null);
   const [supervisorFlow, setSupervisorFlow] = useState<{
@@ -1876,12 +1877,12 @@ export default function WorkbenchPage() {
   return (
     <div className="flex flex-col h-screen bg-background/80 text-foreground">
       <div className="shrink-0 bg-muted border-b flex flex-wrap items-center px-4 py-2 gap-x-4 gap-y-2">
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 min-w-0">
           <Button variant="outline" size="sm" onClick={() => router.push('/workflows')}>
             <span className="material-symbols-outlined text-sm">arrow_back</span><span className="hidden sm:inline"> 返回</span>
           </Button>
-          <h1 className="text-sm sm:text-base font-semibold m-0 flex items-center gap-1.5 truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
-            <RobotLogo size={20} />
+          <h1 className="text-sm sm:text-base font-semibold m-0 flex items-center gap-1.5 min-w-0 max-w-[160px] sm:max-w-[240px] lg:max-w-none">
+            <RobotLogo size={20} className="shrink-0" />
             {isDesignMode ? (
               editingName ? (
                 <Input
@@ -1898,14 +1899,15 @@ export default function WorkbenchPage() {
               ) : (
                 <button
                   onClick={() => { setEditingName(true); setNameValue(workflowConfig?.workflow?.name || ''); }}
-                  className="flex items-center gap-1 text-sm font-semibold hover:bg-background/50 px-2 py-0.5 rounded truncate"
+                  className="flex items-center gap-1 text-sm font-semibold hover:bg-background/50 px-2 py-0.5 rounded min-w-0 max-w-full"
+                  title={workflowConfig?.workflow?.name || configFile}
                 >
                   <span className="truncate">{workflowConfig?.workflow?.name || configFile}</span>
-                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>edit</span>
+                  <span className="material-symbols-outlined shrink-0" style={{ fontSize: 14 }}>edit</span>
                 </button>
               )
             ) : (
-              <span className="truncate">{workflowConfig?.workflow?.name || configFile}</span>
+              <span className="truncate" title={workflowConfig?.workflow?.name || configFile}>{workflowConfig?.workflow?.name || configFile}</span>
             )}
           </h1>
         </div>
@@ -1985,7 +1987,7 @@ export default function WorkbenchPage() {
             leftPanel={
               <div className="flex flex-col h-full overflow-hidden">
               {/* Requirements panel - prominent at top */}
-              <div className="border-b shrink-0">
+              <div className="border-b shrink-0 max-h-[50%] overflow-y-auto overflow-x-hidden">
                 <button
                   className="w-full flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent hover:from-primary/15 transition-colors"
                   onClick={() => setShowRunRequirements(!showRunRequirements)}
@@ -2017,8 +2019,20 @@ export default function WorkbenchPage() {
                     </div>
                     {skills.length > 0 && (
                       <div>
-                        <Label className="text-xs font-medium text-muted-foreground">Skills</Label>
-                        <p className="text-sm mt-1">{skills.join(', ')}</p>
+                        <Label className="text-xs font-medium text-muted-foreground">Skills ({skills.length})</Label>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {skills.slice(0, showAllSkills ? skills.length : 6).map((s) => (
+                            <Badge key={s} variant="secondary" className="text-[10px] font-normal">{s}</Badge>
+                          ))}
+                          {skills.length > 6 && (
+                            <button
+                              className="text-[10px] text-muted-foreground hover:text-foreground px-1"
+                              onClick={() => setShowAllSkills(!showAllSkills)}
+                            >
+                              {showAllSkills ? '收起' : `+${skills.length - 6} 更多`}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2055,18 +2069,18 @@ export default function WorkbenchPage() {
                 </div>
               )}
               <Tabs value={activeTab} onValueChange={(val) => dispatch({ type: 'SET_ACTIVE_TAB', payload: val })} className="flex flex-col flex-1 overflow-hidden">
-                <TabsList className="w-full rounded-none border-b flex-shrink-0">
-                  <TabsTrigger value="workflow" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                <TabsList className="w-full rounded-none border-b flex-shrink-0 px-1 !flex flex-wrap h-auto gap-0.5 py-1">
+                  <TabsTrigger value="workflow" className="flex items-center justify-center gap-1 text-xs px-2 py-1">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>monitoring</span>工作流
                   </TabsTrigger>
-                  <TabsTrigger value="agents" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                  <TabsTrigger value="agents" className="flex items-center justify-center gap-1 text-xs px-2 py-1">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>smart_toy</span>Agents
                   </TabsTrigger>
-        {(isDesignMode) && <TabsTrigger value="config" className="flex-1 flex items-center justify-center gap-1 text-xs"><span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span>配置</TabsTrigger>}
-                  <TabsTrigger value="documents" className="flex-1 flex items-center justify-center gap-1 text-xs">
+        {(isDesignMode) && <TabsTrigger value="config" className="flex items-center justify-center gap-1 text-xs px-2 py-1"><span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span>配置</TabsTrigger>}
+                  <TabsTrigger value="documents" className="flex items-center justify-center gap-1 text-xs px-2 py-1">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>description</span>文档
                   </TabsTrigger>
-                  <TabsTrigger value="schedules" className="flex-1 flex items-center justify-center gap-1 text-xs">
+                  <TabsTrigger value="schedules" className="flex items-center justify-center gap-1 text-xs px-2 py-1">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>schedule</span>定时
                   </TabsTrigger>
                 </TabsList>
@@ -2161,9 +2175,9 @@ export default function WorkbenchPage() {
             </div>
             }
             centerPanel={
-              <>
-                <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">工作流可视化</h2></div>
-                <div className="flex-1 overflow-auto">
+              <div className="flex flex-col h-full">
+                <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">运行状态图</h2></div>
+                <div className="flex-1 min-h-0 overflow-auto">
                   {workflowConfig ? (
                     workflowConfig.workflow.mode === 'state-machine' ? (
                       isDesignMode ? (
@@ -2215,10 +2229,10 @@ export default function WorkbenchPage() {
                     )
                   ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">monitoring</span><p>加载中...</p></div>)}
                 </div>
-              </>
+              </div>
             }
             rightPanel={
-              <>
+              <div className="flex flex-col h-full">
                 {(() => {
                   // Resolve the latest iteration key for the selected step
                   const stepKey = selectedStep ? getLatestStepKey(selectedStep.name) : '';
@@ -2244,7 +2258,7 @@ export default function WorkbenchPage() {
                   );
                   return (<>
                 <div className="h-10 bg-muted border-b flex items-center px-4"><h2 className="text-sm font-semibold m-0">{selectedStep ? (stepKey !== selectedStep.name ? stepKey : selectedStep.name) : selectedAgent ? selectedAgent.name : 'Agent 详情'}</h2></div>
-                <div className="flex-1 overflow-auto">
+                <div className="flex-1 min-h-0 overflow-auto">
               {selectedStep && (
                 <div className="bg-muted border-b p-3.5">
                   <div className="flex items-center gap-2 mb-2.5">
@@ -2457,7 +2471,7 @@ export default function WorkbenchPage() {
             </div>
                   </>);
                 })()}
-              </>
+              </div>
             }
           />
         )}
