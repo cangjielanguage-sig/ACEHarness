@@ -16,7 +16,8 @@ export async function GET(request: NextRequest) {
 
   const proc = processManager.getProcessBySessionId(sessionId);
   if (!proc) {
-    return NextResponse.json({ error: 'Session not found or already cleaned up' }, { status: 404 });
+    // Session not found — tell frontend to start a new conversation
+    return NextResponse.json({ content: '', status: 'not_found', startNew: true });
   }
 
   const fullContent = proc.output || proc.streamContent;

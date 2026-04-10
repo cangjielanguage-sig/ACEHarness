@@ -1,8 +1,9 @@
 /**
  * Base ACP Wrapper
- * 
+ *
  * Common wrapper implementation for all ACP-compatible engines.
- * Each engine (opencode, kiro-cli, codex, cursor) will extend this base class.
+ * Each engine (opencode, kiro-cli, cursor) will extend this base class.
+ * Event handling mirrors OpenCodeEngineWrapper for consistent UI rendering.
  */
 
 import { EventEmitter } from 'events';
@@ -17,59 +18,68 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
   protected seenToolIds = new Set<string>();
   protected streaming = false;
 
-  /**
-   * Get engine name (to be implemented by subclasses)
-   */
   abstract getName(): string;
-
-  /**
-   * Get ACP engine configuration (to be implemented by subclasses)
-   */
   protected abstract getACPConfig(options: EngineOptions): ACPEngineConfig;
-
-  /**
-   * Check if the engine is available
-   */
   abstract isAvailable(): Promise<boolean>;
 
-  /**
-   * Execute a task with the engine
-   */
   async execute(options: EngineOptions): Promise<EngineResult> {
     try {
-      const config = this.getACPConfig(options);
-      this.engine = new ACPEngine(config);
-      
-      // Setup event forwarding
-      this.setupEngineEvents();
-      
-      // Start the engine
-      await this.engine.start();
-      
-      // Create or resume session
-      if (options.sessionId) {
-        this.currentSessionId = await this.engine.resumeSession(options.sessionId);
-      } else {
-        this.currentSessionId = await this.engine.createSession();
+      this.seenToolIds.clear();
+      this.lastBlockWasTool = false;
+
+      // Reuse existing engine if resuming a session, otherwise create new
+      const canReuse = options.sessionId && this.engine && this.currentSessionId === options.sessionId;
+      if (!canReuse) {
+        // Stop previous engine if any
+        if (this.engine) {
+          try { await this.engine.stop(); } catch {}
+        }
+        const config = this.getACPConfig(options);
+        this.engine = new ACPEngine(config);
+        this.setupEngineEvents();
+        await this.engine.start();
+
+        if (options.sessionId) {
+          this.currentSessionId = await this.engine.resumeSession(options.sessionId);
+        } else {
+          this.currentSessionId = await this.engine.createSession();
+        }
       }
-      
-      // Set model if specified
+
       if (options.model) {
-        await this.engine.setModel(options.model);
+        try {
+          await this.engine.setModel(options.model);
+        } catch (modelErr: any) {
+          // Emit the error to the stream so the user sees available models in the UI
+          this.emit('stream', {
+            type: 'text',
+            content: `\n\n❌ 模型不可用: ${modelErr.message}\n`,
+          } as EngineStreamEvent);
+          return {
+            success: false,
+            output: '',
+            error: modelErr.message,
+          };
+        }
       }
-      
-      // Send prompt
+
+      this.streaming = true;
+      console.log(`[${this.getName()}] calling sendPrompt...`);
       const stopReason = await this.engine.sendPrompt(options.prompt);
-      
-      // Return result
+      console.log(`[${this.getName()}] sendPrompt returned: stopReason=${stopReason}`);
+      this.streaming = false;
+
+      // Treat end_turn and undefined/null (normal completion) as success
+      const isSuccess = !stopReason || stopReason === 'end_turn';
+
       return {
-        success: true,
-        output: '', // Output is streamed via events
+        success: isSuccess,
+        output: '',
         sessionId: this.currentSessionId,
         stopReason
       };
-      
     } catch (error) {
+      this.streaming = false;
       return {
         success: false,
         output: '',
@@ -78,9 +88,6 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
     }
   }
 
-  /**
-   * Cancel the current execution
-   */
   cancel(): void {
     if (this.engine) {
       this.engine.cancelSession();
@@ -89,118 +96,133 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
     }
   }
 
-  /**
-   * Setup event forwarding from ACP engine to Engine interface
-   */
-  private setupEngineEvents(): void {
+  // ---------------------------------------------------------------------------
+  // Event forwarding — subclasses can override setupEngineEvents for custom behavior
+  // ---------------------------------------------------------------------------
+
+  protected setupEngineEvents(): void {
     if (!this.engine) return;
 
     this.engine.on('agent-message', (content) => {
-      let text = '';
-      
-      if (typeof content === 'string') {
-        text = content;
-      } else if (content && typeof content === 'object') {
-        // 尝试从对象中提取文本
-        if (content.text) {
-          text = content.text;
-        } else if (content.content) {
-          text = content.content;
-        } else if (content.type === 'text' && content.text) {
-          text = content.text;
-        } else {
-          // 尝试将对象转换为字符串
-          text = JSON.stringify(content);
-        }
+      if (!this.streaming) return;
+      const text = this.extractText(content);
+      if (!text) return;
+
+      let prefix = '';
+      if (this.lastBlockWasTool) {
+        prefix = '\n\n<!-- chunk-boundary -->\n\n';
+        this.lastBlockWasTool = false;
       }
-      
-      if (text) {
-        this.emit('stream', { type: 'text', content: text } as EngineStreamEvent);
-      }
+      this.emit('stream', { type: 'text', content: prefix + text } as EngineStreamEvent);
     });
 
     this.engine.on('agent-thought', (content) => {
-      let text = '';
-      
-      if (typeof content === 'string') {
-        text = content;
-      } else if (content && typeof content === 'object') {
-        // 尝试从对象中提取文本
-        if (content.text) {
-          text = content.text;
-        } else if (content.content) {
-          text = content.content;
-        } else if (content.type === 'text' && content.text) {
-          text = content.text;
-        } else {
-          // 尝试将对象转换为字符串
-          text = JSON.stringify(content);
-        }
-      }
-      
+      if (!this.streaming) return;
+      const text = this.extractText(content);
       if (text) {
         this.emit('stream', { type: 'thought', content: text } as EngineStreamEvent);
       }
     });
 
     this.engine.on('tool-call', (toolCall) => {
-      this.emit('stream', { 
-        type: 'tool', 
-        content: `🔧 ${toolCall.title || 'Tool Call'}`, 
-        metadata: toolCall 
-      } as EngineStreamEvent);
+      if (!this.streaming) return;
+      const toolId = toolCall.id || '';
+      const hasInput = toolCall.rawInput && Object.keys(toolCall.rawInput).length > 0;
+      if (toolId && !this.seenToolIds.has(toolId) && hasInput) {
+        this.seenToolIds.add(toolId);
+        const formatted = this.formatToolCall(toolCall);
+        this.lastBlockWasTool = true;
+        this.emit('stream', { type: 'text', content: formatted, metadata: toolCall } as EngineStreamEvent);
+      }
     });
 
     this.engine.on('tool-call-update', (toolUpdate) => {
-      this.handleToolCallUpdate(toolUpdate);
+      if (!this.streaming) return;
+      const toolId = toolUpdate.id || '';
+
+      if (toolId && !this.seenToolIds.has(toolId)) {
+        const hasInput = toolUpdate.rawInput && Object.keys(toolUpdate.rawInput).length > 0;
+        if (hasInput && toolUpdate.status !== 'completed' && toolUpdate.status !== 'failed') {
+          this.seenToolIds.add(toolId);
+          const formatted = this.formatToolCall(toolUpdate);
+          this.lastBlockWasTool = true;
+          this.emit('stream', { type: 'text', content: formatted, metadata: toolUpdate } as EngineStreamEvent);
+        }
+      }
+
+      if (toolUpdate.status === 'completed' || toolUpdate.status === 'failed') {
+        let resultText = '';
+        if (toolUpdate.rawOutput) {
+          resultText = this.extractToolOutput(toolUpdate.rawOutput);
+        } else if (Array.isArray(toolUpdate.content)) {
+          const raw = toolUpdate.content
+            .filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
+          resultText = this.extractToolOutput(raw);
+        } else if (typeof toolUpdate.content === 'string') {
+          resultText = this.extractToolOutput(toolUpdate.content);
+        }
+        const formatted = this.formatToolResult(resultText, toolUpdate);
+        if (formatted) {
+          this.emit('stream', { type: 'text', content: formatted, metadata: toolUpdate } as EngineStreamEvent);
+        }
+      }
     });
 
-    this.engine.on('log', (log) => {
-      this.emit('stream', { type: 'log', content: log } as EngineStreamEvent);
-    });
+    this.engine.on('log', () => { /* skip */ });
 
     this.engine.on('error', (error) => {
-      this.emit('stream', { 
-        type: 'error', 
-        content: error instanceof Error ? error.message : String(error) 
+      this.emit('stream', {
+        type: 'text',
+        content: `\n\n❌ 错误: ${error instanceof Error ? error.message : String(error)}\n`
       } as EngineStreamEvent);
     });
   }
 
-  /**
-   * Handle tool call updates
-   */
-  private handleToolCallUpdate(toolUpdate: any): void {
-    const toolId = toolUpdate.id;
-    const toolName = this.resolveToolName(toolUpdate);
-    
-    // If this is the first time we see this tool, emit the header
-    if (toolId && !this.seenToolIds.has(toolId) && toolUpdate.status !== 'completed' && toolUpdate.status !== 'failed') {
-      const hasInput = toolUpdate.rawInput && Object.keys(toolUpdate.rawInput).length > 0;
-      if (hasInput) {
-        const formatted = this.formatToolCall(toolUpdate);
-        this.emit('stream', { 
-          type: 'tool', 
-          content: formatted,
-          metadata: toolUpdate
-        } as EngineStreamEvent);
-        this.seenToolIds.add(toolId);
-      }
+  // ---------------------------------------------------------------------------
+  // Helpers (protected so subclasses can reuse)
+  // ---------------------------------------------------------------------------
+
+  protected extractText(content: any): string {
+    if (typeof content === 'string') return content;
+    if (content && typeof content === 'object') {
+      if (content.type === 'text' && content.text) return content.text;
+      if (content.text) return content.text;
+      if (content.content) return content.content;
     }
+    return '';
   }
 
   /**
-   * Resolve the actual tool name from ACP event data
+   * Extract human-readable text from rawOutput.
+   * Handles structured objects like { output, exit, error, description, truncated }
+   * instead of dumping raw JSON.
    */
-  private resolveToolName(toolCall: any): string {
+  protected extractToolOutput(raw: any): string {
+    if (typeof raw === 'string') return raw;
+    if (!raw || typeof raw !== 'object') return '';
+    // Structured command result: { output, exit, error, description, ... }
+    if ('output' in raw && typeof raw.output === 'string') {
+      let text = raw.output;
+      if (raw.exit !== undefined && raw.exit !== 0) {
+        text += text ? `\n(exit code: ${raw.exit})` : `exit code: ${raw.exit}`;
+      }
+      return text;
+    }
+    if ('error' in raw && raw.error) return String(raw.error);
+    if ('content' in raw && typeof raw.content === 'string') return raw.content;
+    // Search results
+    if ('totalMatches' in raw) return `找到 ${raw.totalMatches} 个匹配${raw.truncated ? ' (已截断)' : ''}`;
+    if ('totalFiles' in raw) return `找到 ${raw.totalFiles} 个文件${raw.truncated ? ' (已截断)' : ''}`;
+    // Fallback: compact JSON
+    return JSON.stringify(raw);
+  }
+
+  protected resolveToolName(toolCall: any): string {
     const title = (toolCall.title || '').toLowerCase();
     const rawInput = toolCall.rawInput || {};
-
-    // Direct match on known tool names in title
-    const knownTools = ['bash', 'write', 'edit', 'read', 'glob', 'grep', 'task', 'todowrite', 'todo', 'webfetch', 'websearch', 'ls', 'multiedit', 'patch'];
+    const knownTools = ['bash', 'write', 'edit', 'read', 'glob', 'grep', 'task',
+      'todowrite', 'todo', 'webfetch', 'websearch', 'ls', 'multiedit', 'patch'];
     if (knownTools.includes(title)) return title;
-
-    // Infer from rawInput fields
     if ('command' in rawInput) return 'bash';
     if ('content' in rawInput && 'filePath' in rawInput && !('oldString' in rawInput)) return 'write';
     if ('oldString' in rawInput || 'newString' in rawInput) return 'edit';
@@ -211,14 +233,11 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
     if ('url' in rawInput) return 'webfetch';
     if ('query' in rawInput) return 'websearch';
     if ('filePath' in rawInput) return 'read';
-
     return title || 'tool';
   }
+/* PLACEHOLDER_FORMAT */
 
-  /**
-   * Format tool call into structured markdown
-   */
-  private formatToolCall(toolCall: any): string {
+  protected formatToolCall(toolCall: any): string {
     const toolName = this.resolveToolName(toolCall);
     const rawInput = toolCall.rawInput || {};
     let header = `\n\n**🔧 ${toolCall.title || toolName}**\n`;
@@ -263,57 +282,85 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
         if (removed > 0) stats += `, -${removed} 行`;
         header += `\n✏️ 编辑文件: \`${filePath}\` (${stats})\n`;
         if (oldStr || newStr) {
-          header += `\n<details><summary>查看修改</summary>\n\n`;
-          if (oldStr) header += `**原内容**\n\n${fenced(oldStr, 'diff')}\n\n`;
-          if (newStr) header += `**新内容**\n\n${fenced(newStr, 'diff')}\n\n`;
-          header += `</details>\n`;
+          const diff = (oldStr ? oldStr.split('\n').map((l: string) => '- ' + l).join('\n') + '\n' : '')
+            + (newStr ? newStr.split('\n').map((l: string) => '+ ' + l).join('\n') + '\n' : '');
+          header += `\n<details><summary>查看变更 (${stats})</summary>\n\n${fenced(diff.trimEnd(), 'diff')}\n\n</details>\n`;
         }
         break;
       }
-      case 'read': {
-        const rPath = rawInput.filePath || '';
-        header += `\n📖 读取文件: \`${rPath}\`\n`;
+      case 'read':
+        header += `\n📖 读取文件: \`${rawInput.filePath || ''}\`\n`;
         break;
-      }
-      case 'grep': {
-        const pattern = rawInput.pattern || '';
-        const include = rawInput.include || '';
-        header += `\n🔍 搜索: \`${pattern}\` (包含: ${include})\n`;
+      case 'glob':
+        header += `\n🔍 搜索文件: \`${rawInput.pattern || ''}\`\n`;
         break;
-      }
-      case 'glob': {
-        const pattern = rawInput.pattern || '';
-        header += `\n📁 文件匹配: \`${pattern}\`\n`;
+      case 'grep':
+        header += `\n🔍 搜索内容: \`${rawInput.pattern || ''}\`\n`;
         break;
-      }
-      case 'task': {
-        const desc = rawInput.description || '';
-        header += `\n📋 任务: ${desc}\n`;
+      case 'ls':
+        header += `\n📂 列出目录: \`${rawInput.path || '.'}\`\n`;
         break;
-      }
-      case 'todowrite': {
-        const todos = rawInput.todos || [];
-        header += `\n✅ 待办事项: ${todos.length} 项\n`;
+      case 'task':
+        header += `\n🤖 启动子任务: ${rawInput.description || ''}\n`;
         break;
-      }
-      case 'webfetch': {
-        const url = rawInput.url || '';
-        header += `\n🌐 获取网页: ${url}\n`;
-        break;
-      }
-      case 'websearch': {
-        const query = rawInput.query || '';
-        header += `\n🔎 搜索网络: ${query}\n`;
-        break;
-      }
-      default: {
-        header += `\n🛠️ 工具调用: ${toolName}\n`;
-        if (Object.keys(rawInput).length > 0) {
-          header += `\n<details><summary>查看输入</summary>\n\n${fenced(JSON.stringify(rawInput, null, 2), 'json')}\n\n</details>\n`;
+      case 'todowrite':
+      case 'todo': {
+        const todos = rawInput.todos || rawInput.items || [];
+        if (Array.isArray(todos) && todos.length > 0) {
+          const done = todos.filter((t: any) => t.status === 'completed' || t.status === 'done').length;
+          const inProg = todos.filter((t: any) => t.status === 'in_progress' || t.status === 'in-progress').length;
+          const todoHeader = `📋 任务列表 (${done}/${todos.length} 完成${inProg ? `, ${inProg} 进行中` : ''})`;
+          header = `\n<!-- todo-list-marker -->\n<div class="ace-todo-list">\n<div class="ace-todo-header">${todoHeader}</div>\n`;
+          header += `<div class="ace-todo-progress"><div class="ace-todo-progress-bar" style="width:${Math.round(((done + inProg * 0.5) / todos.length) * 100)}%"></div></div>\n`;
+          for (const t of todos) {
+            const st = t.status || 'pending';
+            const icon = st === 'completed' || st === 'done' ? '✅' : st === 'in_progress' || st === 'in-progress' ? '🔄' : '⬜';
+            const cls = st === 'completed' || st === 'done' ? 'ace-todo-done' : st === 'in_progress' || st === 'in-progress' ? 'ace-todo-active' : 'ace-todo-pending';
+            header += `<div class="ace-todo-item ${cls}">${icon} ${t.content || ''}</div>\n`;
+          }
+          header += `</div>\n`;
+        } else {
+          header = `\n<!-- todo-list-marker -->\n📋 任务列表更新中...\n`;
         }
+        break;
       }
+      case 'webfetch':
+        header += `\n🌐 获取网页: \`${rawInput.url || ''}\`\n`;
+        break;
+      case 'websearch':
+        header += `\n🔎 搜索: \`${rawInput.query || ''}\`\n`;
+        break;
     }
-
     return header;
+  }
+
+  protected formatToolResult(output: string, _metadata: any): string {
+    if (!output) return '';
+    const parsed = this.parseToolXmlOutput(output);
+    if (parsed) return parsed;
+    const lines = output.split('\n');
+    if (lines.length <= 15) return `\n${fenced(output)}\n`;
+    return `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n${fenced(output)}\n\n</details>\n`;
+  }
+
+  private parseToolXmlOutput(output: string): string | null {
+    const taskMatch = output.match(/<task_result>([\s\S]*?)<\/task_result>/);
+    if (taskMatch) {
+      const inner = taskMatch[1].trim();
+      return `\n<details><summary>🤖 子任务结果 (${inner.split('\n').length} 行)</summary>\n\n${fenced(inner)}\n\n</details>\n`;
+    }
+    const pathRegex = /<path>(.*?)<\/path>\s*(?:<type>.*?<\/type>\s*)?<content>([\s\S]*?)<\/content>/g;
+    let match;
+    const blocks: string[] = [];
+    while ((match = pathRegex.exec(output)) !== null) {
+      const fp = match[1].trim();
+      const ct = match[2].trim();
+      const ext = fp.split('.').pop() || '';
+      const lines = ct.split('\n');
+      if (lines.length <= 15) blocks.push(`\n${fenced(ct, ext)}\n`);
+      else blocks.push(`\n<details><summary>📄 ${fp} (${lines.length} 行)</summary>\n\n${fenced(ct, ext)}\n\n</details>\n`);
+    }
+    if (blocks.length > 0) return blocks.join('');
+    return null;
   }
 }

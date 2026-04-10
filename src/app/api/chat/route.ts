@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { processManager } from '@/lib/process-manager';
 import { createEngine, getConfiguredEngine } from '@/lib/engines/engine-factory';
 import { buildDashboardSystemPrompt } from '@/lib/chat-system-prompt';
 import { loadChatSettings } from '@/lib/chat-settings';
@@ -14,7 +13,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '消息不能为空' }, { status: 400 });
     }
 
-    const id = `chat-${Date.now()}`;
     const useModel = model || '';
 
     // Build system prompt based on mode
@@ -30,56 +28,35 @@ export async function POST(request: NextRequest) {
     const engineType = await getConfiguredEngine();
     const engine = await createEngine(engineType);
 
-    if (engine) {
-      const chunks: string[] = [];
-      engine.on('stream', (event: any) => {
-        if (event.type === 'text') chunks.push(event.content);
-      });
-
-      const result = await engine.execute({
-        agent: 'chat',
-        step: 'chat',
-        prompt: message,
-        systemPrompt,
-        model: useModel,
-        workingDirectory: process.cwd(),
-        sessionId: sessionId || undefined,
-      });
-
-      engine.cancel();
-
-      return NextResponse.json({
-        result: result.output || chunks.join(''),
-        sessionId: result.sessionId,
-        isError: !result.success,
-      });
+    if (!engine) {
+      return NextResponse.json({ error: '引擎不可用，请检查配置' }, { status: 500 });
     }
 
-    // Fallback: Claude Code via process-manager
-    const result = await processManager.executeClaudeCli(
-      id,
-      'chat-test',
-      'chat',
-      message,
+    const chunks: string[] = [];
+    engine.on('stream', (event: any) => {
+      if (event.type === 'text') chunks.push(event.content);
+    });
+
+    const result = await engine.execute({
+      agent: 'chat',
+      step: 'chat',
+      prompt: message,
       systemPrompt,
-      useModel,
-      {
-        resumeSessionId: sessionId || undefined,
-        appendSystemPrompt: !!sessionId,
-      }
-    );
+      model: useModel,
+      workingDirectory: process.cwd(),
+      sessionId: sessionId || undefined,
+    });
+
+    engine.cancel();
 
     return NextResponse.json({
-      result: result.result,
-      sessionId: result.session_id,
-      costUsd: result.cost_usd,
-      durationMs: result.duration_ms,
-      usage: result.usage,
-      isError: result.is_error,
+      result: result.output || chunks.join(''),
+      sessionId: result.sessionId,
+      isError: !result.success,
     });
   } catch (error: any) {
     return NextResponse.json(
-      { error: error.message || 'CLI 调用失败' },
+      { error: error.message || '执行失败' },
       { status: 500 }
     );
   }

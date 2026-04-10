@@ -11,10 +11,10 @@ import { existsSync } from 'fs';
 
 // Skills directory path segments - constructed at runtime to prevent
 // webpack/Next.js file tracing from over-matching the skills directory
-const SKILLS_SUBDIR = ['skills', '.claude', 'skills'].join('/');
+const SKILLS_SUBDIR = 'skills';
 import { parse } from 'yaml';
 import { processManager } from './process-manager';
-import type { ClaudeJsonResult } from './process-manager';
+import type { EngineJsonResult } from './engines/engine-interface';
 import { createRun, updateRun } from './run-store';
 import type { RunRecord } from './run-store';
 import {
@@ -32,6 +32,13 @@ import {
   routeInfoRequest,
   type AgentSummary,
 } from './supervisor-router';
+
+/** 根据工作流引擎配置解析 Agent 实际使用的模型 */
+export function resolveAgentModel(roleConfig: any, workflowContext?: any): string {
+  if (!roleConfig?.engineModels) return 'claude-opus-4-6';
+  const engine = workflowContext?.engine || roleConfig?.activeEngine || Object.keys(roleConfig.engineModels)[0];
+  return roleConfig.engineModels[engine] || Object.values(roleConfig.engineModels)[0] as string || 'claude-opus-4-6';
+}
 
 export interface TokenUsage {
   inputTokens: number;
@@ -235,41 +242,40 @@ export class WorkflowManager extends EventEmitter {
     const dirExistedBefore = existsSync(workspaceSkillsDir);
     await mkdir(workspaceSkillsDir, { recursive: true });
 
-    const serverIndex = resolve(serverSkillsDir, 'SKILL.md');
-    const targetIndex = resolve(workspaceSkillsDir, 'SKILL.md');
-    let indexCopied = false;
-    if (existsSync(serverIndex) && !existsSync(targetIndex)) {
-      try { await cp(serverIndex, targetIndex); indexCopied = true; } catch { /* ignore */ }
-    }
-
-    const copiedNames: string[] = [];
+    const linkedNames: string[] = [];
     for (const skillName of needed) {
       const src = resolve(serverSkillsDir, skillName);
       const dst = resolve(workspaceSkillsDir, skillName);
       if (!existsSync(src)) continue;
+      if (existsSync(dst)) continue; // already exists (symlink or real dir)
       try {
-        await cp(src, dst, { recursive: true, force: true });
-        copiedNames.push(skillName);
-        console.log(`[WF-Skills] 已复制 skill "${skillName}" → ${dst}`);
+        const { symlinkSync } = await import('fs');
+        symlinkSync(src, dst);
+        linkedNames.push(skillName);
+        console.log(`[WF-Skills] 已链接 skill "${skillName}" → ${dst}`);
       } catch (e) {
-        console.warn(`[WF-Skills] 复制 skill "${skillName}" 失败:`, e);
+        // Fallback to copy if symlink fails (e.g. cross-device)
+        try {
+          await cp(src, dst, { recursive: true, force: true });
+          linkedNames.push(skillName);
+          console.log(`[WF-Skills] 已复制 skill "${skillName}" → ${dst}`);
+        } catch (e2) {
+          console.warn(`[WF-Skills] 同步 skill "${skillName}" 失败:`, e2);
+        }
       }
     }
 
-    if (copiedNames.length > 0 || indexCopied) {
-      this.copiedSkills = { dir: workspaceSkillsDir, names: copiedNames, indexCopied, dirExistedBefore };
+    if (linkedNames.length > 0) {
+      this.copiedSkills = { dir: workspaceSkillsDir, names: linkedNames, indexCopied: false, dirExistedBefore };
     }
   }
 
   private async cleanupWorkspaceSkills(): Promise<void> {
     if (!this.copiedSkills) return;
-    const { dir, names, indexCopied, dirExistedBefore } = this.copiedSkills;
+    const { dir, names, dirExistedBefore } = this.copiedSkills;
 
     for (const name of names) {
       try { await rm(resolve(dir, name), { recursive: true, force: true }); } catch { /* ignore */ }
-    }
-    if (indexCopied) {
-      try { await rm(resolve(dir, 'SKILL.md'), { force: true }); } catch { /* ignore */ }
     }
     if (!dirExistedBefore) {
       try {
@@ -336,7 +342,7 @@ export class WorkflowManager extends EventEmitter {
         } catch { /* no SKILL.md in this dir */ }
       }
 
-      let result = `## 可用 Skills（来自项目 .claude/skills/）\n\n`;
+      let result = `## 可用 Skills（来自项目 skills/）\n\n`;
       result += `以下是项目工作区中预定义的 Skills，你可以直接按照说明使用：\n\n`;
       result += indexContent + '\n\n';
       if (details.length > 0) {
@@ -391,18 +397,9 @@ export class WorkflowManager extends EventEmitter {
     systemPrompt: string,
     model: string,
     options: any
-  ): Promise<ClaudeJsonResult> {
-    // Use Claude Code (existing implementation)
-    if (this.engineType === 'claude-code' || !this.currentEngine) {
-      return await processManager.executeClaudeCli(
-        processId,
-        agent,
-        step,
-        prompt,
-        systemPrompt,
-        model,
-        options
-      );
+  ): Promise<EngineJsonResult> {
+    if (!this.currentEngine) {
+      throw new Error(`引擎未初始化 (engineType=${this.engineType})`);
     }
 
     // Use alternative engine (Kiro CLI, etc.)
@@ -453,7 +450,7 @@ export class WorkflowManager extends EventEmitter {
         if (!result.success) rawProc.error = result.error || '';
       }
 
-      // Convert engine result to ClaudeJsonResult format
+      // Convert engine result to EngineJsonResult format
       return {
         result: result.success ? result.output : (result.error || result.output),
         session_id: result.sessionId || '',
@@ -594,7 +591,7 @@ export class WorkflowManager extends EventEmitter {
       // Sync skills to workspace before execution
       await this.syncSkillsToWorkspace(workflowConfig);
 
-      // Discover workspace skills from projectRoot/.claude/skills/
+      // Discover workspace skills from projectRoot/skills/
       if (workflowConfig.context.projectRoot) {
         this.workspaceSkills = await this.discoverWorkspaceSkills(workflowConfig.context.projectRoot);
 
@@ -689,7 +686,7 @@ export class WorkflowManager extends EventEmitter {
       return {
         name: agentName,
         team: roleConfig?.team || 'blue',
-        model: roleConfig?.model || 'claude-opus-4-6',
+        model: resolveAgentModel(roleConfig, workflowConfig.context),
         status: 'waiting',
         currentTask: null,
         completedTasks: 0,
@@ -1132,7 +1129,7 @@ export class WorkflowManager extends EventEmitter {
     try {
       // ========== Supervisor-Lite: 判断是否启用 Plan 循环 ==========
       let resultText: string;
-      let jsonResult: ClaudeJsonResult;
+      let jsonResult: EngineJsonResult;
       if (step.enablePlanLoop) {
         jsonResult = await this.executeStepWithInfoGathering(step, workflowConfig);
         resultText = jsonResult.result;
@@ -1298,7 +1295,7 @@ export class WorkflowManager extends EventEmitter {
     return !last || last.status !== 'failed';
   }
 
-  async executeStep(step: WorkflowStep, workflowConfig: WorkflowConfig, extraContext?: string): Promise<ClaudeJsonResult> {
+  async executeStep(step: WorkflowStep, workflowConfig: WorkflowConfig, extraContext?: string): Promise<EngineJsonResult> {
     const roleConfig = this.agentConfigs.find((r) => r.name === step.agent)
       || workflowConfig.roles?.find((r) => r.name === step.agent);
     if (!roleConfig) {
@@ -1322,7 +1319,7 @@ export class WorkflowManager extends EventEmitter {
     workflowConfig: WorkflowConfig,
     roleConfig: RoleConfig,
     extraContext?: string
-  ): Promise<ClaudeJsonResult> {
+  ): Promise<EngineJsonResult> {
     const subAgents = roleConfig.reviewPanel!.subAgents;
     const subAgentNames = Object.keys(subAgents);
 
@@ -1383,7 +1380,7 @@ export class WorkflowManager extends EventEmitter {
         step.name,
         coordinatorPrompt,
         systemPromptToUse,
-        roleConfig.model,
+        resolveAgentModel(roleConfig, workflowConfig.context),
         {
           workingDirectory: workflowConfig.context.projectRoot,
           allowedTools: roleConfig.allowedTools,
@@ -1413,7 +1410,7 @@ export class WorkflowManager extends EventEmitter {
     workflowConfig: WorkflowConfig,
     roleConfig: RoleConfig,
     extraContext?: string
-  ): Promise<ClaudeJsonResult> {
+  ): Promise<EngineJsonResult> {
     // Load previous step outputs for context injection — only completed steps
     let previousOutputs: Record<string, string> = {};
     if (this.currentRunId) {
@@ -1461,13 +1458,13 @@ export class WorkflowManager extends EventEmitter {
     let currentProcessId = processId;
     let currentPrompt = prompt;
     let currentSessionId = existingSessionId;
-    let lastResult: ClaudeJsonResult;
+    let lastResult: EngineJsonResult;
     let accumulatedOutput = ''; // Accumulate result output across feedback rounds
 
     try {
       // Execute loop: run agent, then check for pending feedback and resume if any
       while (true) {
-        let result: ClaudeJsonResult;
+        let result: EngineJsonResult;
         try {
           result = await this.executeWithEngine(
             currentProcessId,
@@ -1475,7 +1472,7 @@ export class WorkflowManager extends EventEmitter {
             step.name,
             currentPrompt,
             systemPromptToUse,
-            roleConfig.model,
+            resolveAgentModel(roleConfig, workflowConfig.context),
             {
               workingDirectory: workflowConfig.context.projectRoot,
               allowedTools: roleConfig.allowedTools,
@@ -1984,7 +1981,7 @@ export class WorkflowManager extends EventEmitter {
     // Set force-complete flag so the error handler in runStep treats this as success
     this.forceCompleteFlag = true;
 
-    // Kill the process — this will cause executeClaudeCli to reject
+    // Kill the process — this will cause the engine execution to reject
     processManager.killProcess(running.id);
 
     this.emit('log', {
@@ -2130,7 +2127,7 @@ export class WorkflowManager extends EventEmitter {
     // Load agent configs
     this.agentConfigs = await this.loadAgentConfigs();
 
-    // Discover workspace skills from projectRoot/.claude/skills/
+    // Discover workspace skills from projectRoot/skills/
     if (workflowConfig.context.projectRoot) {
       this.workspaceSkills = await this.discoverWorkspaceSkills(workflowConfig.context.projectRoot);
 
@@ -2482,7 +2479,7 @@ export class WorkflowManager extends EventEmitter {
   private async executeStepWithInfoGathering(
     step: WorkflowStep,
     workflowConfig: WorkflowConfig
-  ): Promise<ClaudeJsonResult> {
+  ): Promise<EngineJsonResult> {
     const maxRounds = step.maxPlanRounds || 3;
     let round = 0;
     let extraContext = '';
@@ -2563,7 +2560,7 @@ export class WorkflowManager extends EventEmitter {
     }
 
     const prompt = `# 问题\n${question}\n\n请直接回答这个问题，不需要执行其他任务。`;
-    const model = roleConfig.model || 'claude-opus-4-6';
+    const model = resolveAgentModel(roleConfig, workflowConfig.context);
     const systemPrompt = roleConfig.systemPrompt || `你是一个 AI 助手。`;
 
     const processId = `query-${agentName}-${Date.now()}`;

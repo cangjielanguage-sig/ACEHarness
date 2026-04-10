@@ -1,112 +1,61 @@
 /**
- * Unified ACP Engine
- * 
- * A complete ACP implementation based on OpenCode's implementation.
- * This can be used by all ACP-compatible engines:
- * - OpenCode
- * - Kiro CLI
- * - Codex
- * - Cursor CLI
+ * Unified ACP Engine — powered by @agentclientprotocol/sdk
+ *
+ * Replaces hand-rolled JSON-RPC with ClientSideConnection + ndJsonStream.
+ * Used by all ACP-compatible engines: Kiro CLI, OpenCode, Cursor.
  */
 
 import { spawn, ChildProcess } from 'child_process';
+import { Writable, Readable } from 'node:stream';
 import { EventEmitter } from 'events';
-
-// ============================================================================
-// ACP Protocol Types
-// ============================================================================
-
-export interface ACPInitializeParams {
-  protocolVersion: number;
-  clientInfo: {
-    name: string;
-    version: string;
-  };
-  clientCapabilities: {
-    fs: {
-      readTextFile: boolean;
-      writeTextFile: boolean;
-    };
-    terminal: boolean;
-  };
-}
-
-export interface ACPSessionNewParams {
-  cwd: string;
-  mcpServers: any[];
-}
-
-export interface ACPSessionPromptParams {
-  sessionId: string;
-  prompt: ACPContentBlock[];
-}
-
-export interface ACPContentBlock {
-  type: 'text' | 'image' | 'resource_link';
-  text?: string;
-  data?: string;
-  mimeType?: string;
-  uri?: string;
-  name?: string;
-}
-
-export interface ACPSessionUpdate {
-  sessionUpdate: string;
-  content?: any;
-  toolCallId?: string;
-  title?: string;
-  status?: string;
-  rawInput?: any;
-  [key: string]: any;
-}
-
-export type ACPStopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled';
-
-export interface ACPModelInfo {
-  modelId: string;
-  name: string;
-}
+import {
+  ClientSideConnection,
+  ndJsonStream,
+  PROTOCOL_VERSION,
+} from '@agentclientprotocol/sdk';
+import type {
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+  SessionNotification,
+  StopReason,
+  SessionUpdate,
+  Client,
+  Agent,
+} from '@agentclientprotocol/sdk';
 
 // ============================================================================
 // ACP Engine Configuration
 // ============================================================================
 
 export interface ACPEngineConfig {
-  /** Engine type: 'opencode', 'kiro-cli', 'codex', 'cursor' */
+  /** Engine type: 'opencode', 'kiro-cli', 'cursor' */
   engineType: string;
-  
   /** Command to execute (e.g., 'opencode', 'kiro-cli', 'cursor') */
   command: string;
-  
   /** Working directory */
   workingDirectory: string;
-  
   /** Agent name (optional) */
   agentName?: string;
-  
   /** Model to use (optional) */
   model?: string;
-  
   /** Additional arguments */
   args?: string[];
-  
+  /** Field name for prompt content in session/prompt (default: 'prompt', kiro uses 'content') */
+  promptField?: string;
   /** Environment variables */
   env?: Record<string, string>;
 }
 
+// Re-export StopReason so wrappers can use it
+export type ACPStopReason = StopReason;
 // ============================================================================
 // Unified ACP Engine
 // ============================================================================
 
 export class ACPEngine extends EventEmitter {
   private process: ChildProcess | null = null;
-  private requestId = 1;
-  private pendingRequests = new Map<number, {
-    resolve: (value: any) => void;
-    reject: (error: any) => void;
-  }>();
+  private connection: ClientSideConnection | null = null;
   private sessionId: string | null = null;
-  private buffer = '';
   private initialized = false;
   private availableModels: Array<{ modelId: string; name: string }> = [];
 
@@ -119,24 +68,21 @@ export class ACPEngine extends EventEmitter {
    */
   async start(): Promise<void> {
     const args = this.buildCommandArgs();
-    
+    console.log(`[${this.config.engineType}] spawning: ${this.config.command} ${args.join(' ')}`);
+
     this.process = spawn(this.config.command, args, {
       cwd: this.config.workingDirectory,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
         PATH: `${process.env.PATH}:/root/.local/bin:/usr/local/bin`,
-        ...this.config.env
+        ...this.config.env,
       },
     });
 
     if (!this.process.stdin || !this.process.stdout || !this.process.stderr) {
       throw new Error(`Failed to create ${this.config.engineType} process streams`);
     }
-
-    this.process.stdout.on('data', (data: Buffer) => {
-      this.handleStdout(data);
-    });
 
     this.process.stderr.on('data', (data: Buffer) => {
       const msg = data.toString();
@@ -153,6 +99,50 @@ export class ACPEngine extends EventEmitter {
       this.emit('error', error);
       this.cleanup(`${this.config.engineType} process error: ${error.message}`);
     });
+    // Convert Node streams to Web streams for the SDK
+    const output = Writable.toWeb(this.process.stdin) as WritableStream<Uint8Array>;
+    const input = Readable.toWeb(this.process.stdout) as ReadableStream<Uint8Array>;
+    const stream = ndJsonStream(output, input);
+
+    const engine = this; // capture for closure
+    this.connection = new ClientSideConnection((_agent: Agent): Client => ({
+      async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
+        // Auto-approve: pick first option (usually 'allow-always')
+        const optionId = params.options[0]?.optionId ?? 'always';
+        engine.emit('permission', params);
+        return { outcome: { outcome: 'selected', optionId } };
+      },
+
+      async sessionUpdate(params: SessionNotification): Promise<void> {
+        engine.handleSessionUpdate(params.update);
+      },
+
+      // Cursor extensions
+      async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+        switch (method) {
+          case 'cursor/ask_question':
+          case 'cursor/create_plan':
+          case 'cursor/update_todos':
+            engine.emit('cursor-ext', { method, params });
+            return {};
+          case 'cursor/task':
+            engine.emit('subtask', params);
+            return {};
+          case 'cursor/generate_image':
+            return {};
+          default:
+            console.log(`[${engine.config.engineType}] unhandled extMethod: ${method}`);
+            return {};
+        }
+      },
+
+      // Kiro extensions
+      async extNotification(method: string, params: Record<string, unknown>): Promise<void> {
+        if (method.startsWith('_kiro.dev/')) {
+          engine.emit('kiro-ext', { method, params });
+        }
+      },
+    }), stream);
 
     await this.initialize();
   }
@@ -162,65 +152,48 @@ export class ACPEngine extends EventEmitter {
    */
   private buildCommandArgs(): string[] {
     const args: string[] = [];
-    
     switch (this.config.engineType) {
       case 'opencode':
         args.push('acp', '--cwd', this.config.workingDirectory);
         break;
-        
       case 'kiro-cli':
-        args.push('acp', '-a');
-        if (this.config.agentName) {
-          args.push('--agent', this.config.agentName);
-        }
-        if (this.config.model) {
-          args.push('--model', this.config.model);
-        }
-        break;
-        
-      case 'codex':
-        // Codex ACP implementation (to be implemented)
         args.push('acp');
+        if (this.config.agentName) args.push('--agent', this.config.agentName);
+        if (this.config.model) args.push('--model', this.config.model);
         break;
-        
       case 'cursor':
-        // Cursor CLI ACP implementation (to be implemented)
         args.push('acp');
         break;
-        
       default:
         throw new Error(`Unknown engine type: ${this.config.engineType}`);
     }
-    
-    // Add any additional arguments
-    if (this.config.args) {
-      args.push(...this.config.args);
-    }
-    
+    if (this.config.args) args.push(...this.config.args);
     return args;
   }
-
   /**
    * Initialize ACP connection
    */
   private async initialize(): Promise<void> {
-    const params: ACPInitializeParams = {
-      protocolVersion: 1,
-      clientInfo: {
-        name: 'aceharness',
-        version: '1.0.0',
-      },
+    if (!this.connection) throw new Error('No connection');
+    const result = await this.connection.initialize({
+      protocolVersion: PROTOCOL_VERSION,
+      clientInfo: { name: 'aceharness', version: '1.0.0' },
       clientCapabilities: {
-        fs: {
-          readTextFile: true,
-          writeTextFile: true,
-        },
+        fs: { readTextFile: true, writeTextFile: true },
         terminal: true,
       },
-    };
-
-    const result = await this.sendRequest('initialize', params);
+    });
     this.initialized = true;
+
+    // Cursor ACP requires authenticate after initialize
+    if (this.config.engineType === 'cursor') {
+      try {
+        await this.connection.authenticate({ methodId: 'cursor_login' });
+      } catch (e) {
+        console.log(`[${this.config.engineType}] authenticate: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
     this.emit('initialized', result);
   }
 
@@ -228,26 +201,22 @@ export class ACPEngine extends EventEmitter {
    * Create a new session
    */
   async createSession(): Promise<string> {
-    if (!this.initialized) {
-      throw new Error(`${this.config.engineType} not initialized`);
-    }
-
-    const params: ACPSessionNewParams = {
+    if (!this.initialized || !this.connection) throw new Error(`${this.config.engineType} not initialized`);
+    const result = await this.connection.newSession({
       cwd: this.config.workingDirectory,
       mcpServers: [],
-    };
-
-    const result = await this.sendRequest('session/new', params);
+    });
     this.sessionId = result.sessionId;
-    this.availableModels = result.models?.availableModels || [];
-
+    this.availableModels = (result.models?.availableModels as any[]) || [];
+    console.log(`[${this.config.engineType}] session created: ${this.sessionId}`);
+    console.log(`[${this.config.engineType}] available models (${this.availableModels.length}):`,
+      JSON.stringify(this.availableModels.map(m => ({ id: m.modelId, name: m.name })), null, 2));
     this.emit('session-created', {
       sessionId: this.sessionId,
       configOptions: result.configOptions,
       modes: result.modes,
       models: result.models,
     });
-
     return this.sessionId!;
   }
 
@@ -255,80 +224,112 @@ export class ACPEngine extends EventEmitter {
    * Resume an existing session
    */
   async resumeSession(sessionId: string): Promise<string> {
-    if (!this.initialized) {
-      throw new Error(`${this.config.engineType} not initialized`);
-    }
-
-    const params = {
-      sessionId,
-      cwd: this.config.workingDirectory,
-      mcpServers: [],
-    };
-
-    const result = await this.sendRequest('session/load', params);
+    if (!this.initialized || !this.connection) throw new Error(`${this.config.engineType} not initialized`);
+    const result = await this.connection.loadSession({ sessionId, cwd: this.config.workingDirectory, mcpServers: [] });
     this.sessionId = sessionId;
-    this.availableModels = result.models?.availableModels || this.availableModels;
-
+    this.availableModels = (result.models?.availableModels as any[]) || this.availableModels;
     this.emit('session-resumed', {
       sessionId: this.sessionId,
       configOptions: result.configOptions,
       modes: result.modes,
       models: result.models,
     });
-
     return this.sessionId;
   }
-
   /**
    * Send a prompt to the current session
    */
   async sendPrompt(prompt: string): Promise<ACPStopReason> {
-    if (!this.sessionId) {
-      throw new Error('No active session');
+    if (!this.sessionId || !this.connection) throw new Error('No active session');
+
+    console.log(`[${this.config.engineType}] sendPrompt: sessionId=${this.sessionId}, promptLength=${prompt.length}`);
+
+    try {
+      const result = await this.connection.prompt({
+        sessionId: this.sessionId,
+        prompt: [{ type: 'text', text: prompt }],
+      });
+      console.log(`[${this.config.engineType}] sendPrompt completed: stopReason=${result.stopReason}`);
+      return result.stopReason;
+    } catch (err) {
+      console.error(`[${this.config.engineType}] sendPrompt error:`, err);
+      throw err;
     }
-
-    const params: ACPSessionPromptParams = {
-      sessionId: this.sessionId,
-      prompt: [{ type: 'text', text: prompt }],
-    };
-
-    const result = await this.sendRequest('session/prompt', params);
-    return result.stopReason;
   }
 
   /**
    * Set the model for the current session
    */
   async setModel(modelId: string): Promise<void> {
-    if (!this.sessionId) throw new Error('No active session');
+    if (!this.sessionId || !this.connection) throw new Error('No active session');
     const resolved = this.resolveModelId(modelId);
-    await this.sendRequest('session/set_model', { sessionId: this.sessionId, modelId: resolved });
+    if (!resolved) {
+      const modelList = this.availableModels.map(m => `  ${m.modelId} (${m.name})`).join('\n');
+      const err = new Error(
+        `Model "${modelId}" not found. Available models:\n${modelList}`
+      );
+      (err as any).status = 404;
+      throw err;
+    }
+    console.log(`[${this.config.engineType}] setModel: "${modelId}" -> resolved: "${resolved}"`);
+    try {
+      await this.connection.unstable_setSessionModel({ sessionId: this.sessionId, modelId: resolved });
+    } catch (err) {
+      const modelList = this.availableModels.map(m => `  ${m.modelId} (${m.name})`).join('\n');
+      const wrapped = new Error(
+        `setModel("${modelId}") failed: ${err instanceof Error ? err.message : err}\nAvailable models:\n${modelList}`
+      );
+      (wrapped as any).status = 404;
+      throw wrapped;
+    }
+  }
+
+  /**
+   * Get available models (for UI display)
+   */
+  getAvailableModels(): Array<{ modelId: string; name: string }> {
+    return this.availableModels;
   }
 
   /**
    * Resolve model ID from short name
    */
   private resolveModelId(shortName: string): string {
-    if (shortName.includes('/')) return shortName;
-    
-    // Exact suffix match
-    const exact = this.availableModels.find(m => m.modelId.endsWith('/' + shortName));
-    if (exact) return exact.modelId;
-    
-    // Fuzzy match
+    if (!shortName) return '';
+    // Exact match by modelId
+    const exactById = this.availableModels.find(m => m.modelId === shortName);
+    if (exactById) return exactById.modelId;
+    // Provider-qualified ID (e.g. "anthropic/claude-sonnet-4-6")
+    if (shortName.includes('/')) {
+      const exists = this.availableModels.find(m => m.modelId === shortName);
+      return exists ? exists.modelId : '';
+    }
+    // Exact suffix match (e.g. "claude-sonnet-4-5" matches "penguiapi/claude-sonnet-4-5")
+    const suffixMatch = this.availableModels.find(m => m.modelId.endsWith('/' + shortName));
+    if (suffixMatch) return suffixMatch.modelId;
+    // Normalize separators: dots ↔ dashes (e.g. "claude-sonnet-4.5" → "claude-sonnet-4-5")
+    const normalize = (s: string) => s.toLowerCase().replace(/[.\-_]/g, '-');
+    const normalized = normalize(shortName);
+    const normSuffix = this.availableModels.find(m => {
+      const tail = m.modelId.split('/').pop() || '';
+      return normalize(tail) === normalized;
+    });
+    if (normSuffix) return normSuffix.modelId;
+    // Fuzzy: match name or modelId containing the normalized input
     const fuzzy = this.availableModels
-      .filter(m => m.name.toLowerCase().includes(shortName.toLowerCase()))
+      .filter(m => normalize(m.name).includes(normalized) || normalize(m.modelId).includes(normalized))
       .sort((a, b) => a.modelId.length - b.modelId.length);
-    
-    return fuzzy[0]?.modelId || shortName;
+    if (fuzzy.length > 0) return fuzzy[0].modelId;
+    // No match found
+    return '';
   }
 
   /**
    * Cancel the current session
    */
   cancelSession(): void {
-    if (!this.sessionId) return;
-    this.sendNotification('session/cancel', { sessionId: this.sessionId });
+    if (!this.sessionId || !this.connection) return;
+    this.connection.cancel({ sessionId: this.sessionId }).catch(() => {});
   }
 
   /**
@@ -340,172 +341,51 @@ export class ACPEngine extends EventEmitter {
       this.cleanup();
     }
   }
-
   /**
-   * Send a JSON-RPC request
+   * Handle session update notifications from the SDK
    */
-  private sendRequest(method: string, params: any, timeoutMs?: number): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const id = this.requestId++;
-      const request = { jsonrpc: '2.0', id, method, params };
-
-      this.pendingRequests.set(id, { resolve, reject });
-
-      if (!this.process?.stdin) {
-        reject(new Error('Process not running'));
-        return;
-      }
-
-      this.process.stdin.write(JSON.stringify(request) + '\n');
-
-      const timeout = timeoutMs || (method === 'session/prompt' ? 3600000 : 30000);
-      setTimeout(() => {
-        if (this.pendingRequests.has(id)) {
-          this.pendingRequests.delete(id);
-          reject(new Error(`Request timeout: ${method}`));
-        }
-      }, timeout);
-    });
-  }
-
-  /**
-   * Send a JSON-RPC notification
-   */
-  private sendNotification(method: string, params: any): void {
-    if (this.process?.stdin) {
-      this.process.stdin.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n');
-    }
-  }
-
-  /**
-   * Handle stdout data
-   */
-  private handleStdout(data: Buffer): void {
-    this.buffer += data.toString();
-    const lines = this.buffer.split('\n');
-    this.buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (line.trim()) {
-        try {
-          this.handleMessage(JSON.parse(line));
-        } catch (error) {
-          this.emit('error', new Error(`Failed to parse JSON: ${line}`));
-        }
-      }
-    }
-  }
-
-  /**
-   * Handle JSON-RPC messages
-   */
-  private handleMessage(message: any): void {
-    // JSON-RPC request FROM server
-    if (message.id !== undefined && message.method) {
-      this.handleServerRequest(message);
-      return;
-    }
-
-    // JSON-RPC response to our request
-    if (message.id !== undefined) {
-      const pending = this.pendingRequests.get(message.id);
-      if (pending) {
-        this.pendingRequests.delete(message.id);
-        if (message.error) {
-          pending.reject(new Error(message.error.message || JSON.stringify(message.error)));
-        } else {
-          pending.resolve(message.result);
-        }
-      }
-      return;
-    }
-
-    // JSON-RPC notification
-    if (message.method === 'session/update') {
-      this.handleSessionUpdate(message.params);
-    }
-  }
-
-  /**
-   * Handle server requests (permission, fs, terminal)
-   */
-  private handleServerRequest(message: any): void {
-    const { id, method, params } = message;
-
-    if (method === 'session/request_permission' || method === 'permission/request') {
-      // Auto-approve all tool permissions
-      this.sendResponse(id, { outcome: { outcome: 'selected', optionId: 'always' } });
-      this.emit('permission', params);
-      return;
-    }
-
-    // fs.readTextFile / fs.writeTextFile — not implemented
-    if (method.startsWith('fs.') || method.startsWith('terminal.')) {
-      this.sendResponse(id, null, { code: -32601, message: `Method not supported: ${method}` });
-      return;
-    }
-
-    // Unknown server request
-    this.sendResponse(id, null, { code: -32601, message: `Unknown method: ${method}` });
-  }
-
-  /**
-   * Send JSON-RPC response
-   */
-  private sendResponse(id: number, result: any, error?: any): void {
-    if (!this.process?.stdin) return;
-    const response: any = { jsonrpc: '2.0', id };
-    if (error) response.error = error;
-    else response.result = result;
-    this.process.stdin.write(JSON.stringify(response) + '\n');
-  }
-
-  /**
-   * Handle session updates
-   */
-  private handleSessionUpdate(params: any): void {
-    const update: ACPSessionUpdate = params.update;
-
+  private handleSessionUpdate(update: SessionUpdate): void {
+    console.log(`[${this.config.engineType}] sessionUpdate: ${update.sessionUpdate}`);
     switch (update.sessionUpdate) {
       case 'user_message_chunk':
-        this.emit('user-message', update.content);
+        this.emit('user-message', (update as any).content);
         break;
       case 'agent_message_chunk':
-        this.emit('agent-message', update.content);
+        this.emit('agent-message', (update as any).content);
         break;
       case 'agent_thought_chunk':
-        this.emit('agent-thought', update.content);
+        this.emit('agent-thought', (update as any).content);
         break;
       case 'tool_call':
         this.emit('tool-call', {
-          id: update.toolCallId,
-          title: update.title,
-          status: update.status,
-          kind: update.kind,
-          content: update.content,
-          locations: update.locations,
-          rawInput: update.rawInput,
+          id: (update as any).toolCallId,
+          title: (update as any).title,
+          status: (update as any).status,
+          kind: (update as any).kind,
+          content: (update as any).content,
+          locations: (update as any).locations,
+          rawInput: (update as any).rawInput,
         });
         break;
       case 'tool_call_update':
         this.emit('tool-call-update', {
-          id: update.toolCallId,
-          title: update.title,
-          status: update.status,
-          kind: update.kind,
-          content: update.content,
-          rawInput: update.rawInput,
-          rawOutput: update.rawOutput,
+          id: (update as any).toolCallId,
+          title: (update as any).title,
+          status: (update as any).status,
+          kind: (update as any).kind,
+          content: (update as any).content,
+          rawInput: (update as any).rawInput,
+          rawOutput: (update as any).rawOutput,
         });
         break;
       case 'plan':
-        this.emit('plan', update.entries);
+        this.emit('plan', (update as any).entries);
         break;
       case 'current_mode_update':
-        this.emit('mode-changed', update.currentModeId);
+        this.emit('mode-changed', (update as any).currentModeId);
         break;
       case 'config_option_update':
-        this.emit('config-changed', update.configOptions);
+        this.emit('config-changed', (update as any).configOptions);
         break;
       default:
         this.emit('update', update);
@@ -517,15 +397,8 @@ export class ACPEngine extends EventEmitter {
    */
   private cleanup(reason?: string): void {
     this.process = null;
+    this.connection = null;
     this.sessionId = null;
     this.initialized = false;
-    
-    // Reject all pending requests
-    const err = new Error(reason || `${this.config.engineType} process exited`);
-    for (const [id, pending] of this.pendingRequests) {
-      pending.reject(err);
-    }
-    this.pendingRequests.clear();
-    this.buffer = '';
   }
 }

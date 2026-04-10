@@ -13,6 +13,7 @@ import { CangjieMagicEngineWrapper } from './cangjie-magic-wrapper';
 import { OpenCodeEngineWrapper } from './opencode-wrapper';
 import { CodexEngineWrapper } from './codex-wrapper';
 import { CursorEngineWrapper } from './cursor-wrapper';
+import { ClaudeCodeEngineWrapper } from './claude-code-wrapper';
 
 export type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode';
 
@@ -93,8 +94,12 @@ export async function createEngine(type?: EngineType): Promise<Engine | null> {
       return kiroEngine;
 
     case 'claude-code':
-      // Claude Code is handled by the existing process-manager
-      return null;
+      const ccEngine = new ClaudeCodeEngineWrapper();
+      if (!(await ccEngine.isAvailable())) {
+        console.warn('[EngineFactory] Claude Code CLI is not available');
+        return null;
+      }
+      return ccEngine;
 
     case 'codex':
       const codexEngine = new CodexEngineWrapper();
@@ -146,24 +151,8 @@ export async function isEngineAvailable(type: EngineType): Promise<boolean> {
       return await kiroEngine.isAvailable();
 
     case 'claude-code':
-      try {
-        const { execSync } = require('child_process');
-        // Use 'command -v' instead of 'which' for better compatibility
-        execSync('command -v claude', { stdio: 'ignore', shell: '/bin/bash' });
-        return true;
-      } catch {
-        // Fallback: check common installation paths
-        const fs = require('fs');
-        const commonPaths = [
-          '/root/.local/bin/claude',
-          '/usr/local/bin/claude',
-          '/usr/bin/claude',
-        ];
-        for (const p of commonPaths) {
-          if (fs.existsSync(p)) return true;
-        }
-        return false;
-      }
+      const ccCheck = new ClaudeCodeEngineWrapper();
+      return await ccCheck.isAvailable();
 
     case 'cangjie-magic':
       const cjCheck = new CangjieMagicEngineWrapper();

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processManager } from '@/lib/process-manager';
 import { getOrCreateEngine, getConfiguredEngine } from '@/lib/engines/engine-factory';
+import { getEngineConfigDir } from '@/lib/engines/engine-config';
 import { buildDashboardSystemPrompt } from '@/lib/chat-system-prompt';
 import { loadChatSettings } from '@/lib/chat-settings';
 import type { Engine } from '@/lib/engines/engine-interface';
@@ -61,7 +62,6 @@ const activeChats = new Map<string, {
   promise: Promise<any>;
   settled: boolean;
   chatId: string;
-  kind: 'claude' | 'engine';
   cancel?: () => void;
 }>();
 const engineStreamEvents = new EventEmitter();
@@ -69,7 +69,7 @@ engineStreamEvents.setMaxListeners(200);
 
 export async function POST(request: NextRequest) {
   try {
-    const { message, model, sessionId, frontendSessionId, mode } = await request.json();
+    const { message, model, engine: perChatEngine, sessionId, frontendSessionId, mode } = await request.json();
     if (!message?.trim()) {
       return NextResponse.json({ error: '消息不能为空' }, { status: 400 });
     }
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
       if (isResume) {
         // Lightweight reminder — just list enabled skill names
         systemPrompt = enabledSkills.length > 0
-          ? `当前启用的 Skills: ${enabledSkills.join(', ')}。需要时查阅 skills/.claude/skills/{skill-name}/SKILL.md。`
+          ? `当前启用的 Skills: ${enabledSkills.join(', ')}。需要时查阅 skills/{skill-name}/SKILL.md。`
           : '';
       } else {
         systemPrompt = await buildDashboardSystemPrompt(enabledSkills);
@@ -107,16 +107,41 @@ export async function POST(request: NextRequest) {
     }
 
     const chatSettings = mode === 'dashboard' ? await loadChatSettings() : null;
-    const configuredEngine = await getConfiguredEngine();
+    const configuredEngine = perChatEngine || await getConfiguredEngine();
     const engine = await getOrCreateEngine(configuredEngine, frontendSessionId);
+
+    // Ensure engine config dir + skills symlink exists in working directory
+    if (engine) {
+      const workDir = chatSettings?.workingDirectory || process.cwd();
+      try {
+        const { existsSync, mkdirSync, symlinkSync } = await import('fs');
+        const { join, resolve } = await import('path');
+        const engineConfigDir = getEngineConfigDir(configuredEngine);
+        const configDir = join(resolve(workDir), engineConfigDir);
+        if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+        const skillsLink = join(configDir, 'skills');
+        const skillsDir = join(process.cwd(), 'skills');
+        if (existsSync(skillsDir) && !existsSync(skillsLink)) {
+          symlinkSync(skillsDir, skillsLink);
+        }
+      } catch { /* ignore */ }
+    }
 
     // Non-Claude engines: stream through Engine wrapper events
     if (engine) {
       registerEngineStream(chatId, frontendSessionId);
 
+      // Register in processManager so recovery endpoint can find it
+      const proc = processManager.registerExternalProcess(chatId, 'chat', 'chat');
+      if (frontendSessionId) {
+        proc.frontendSessionId = frontendSessionId;
+        processManager.registerActiveStream(frontendSessionId, chatId);
+      }
+
       const onEngineStream = (evt: any) => {
         if (evt?.type === 'text' && evt.content) {
           appendEngineStreamContent(chatId, evt.content);
+          if (proc) proc.streamContent += evt.content;
           engineStreamEvents.emit(chatId, { type: 'delta', content: evt.content });
         } else if (evt?.type === 'thought' && evt.content) {
           engineStreamEvents.emit(chatId, { type: 'thinking', content: evt.content });
@@ -140,9 +165,17 @@ export async function POST(request: NextRequest) {
       }).then((result) => {
         if (result.sessionId) {
           setEngineStreamSessionId(chatId, result.sessionId);
+          if (proc) proc.sessionId = result.sessionId;
         }
         const state = getEngineStream(chatId);
         const output = result.output || state?.streamContent || '';
+
+        // Update processManager state
+        if (proc) {
+          proc.status = result.success ? 'completed' : 'failed';
+          proc.endTime = new Date();
+          proc.output = output;
+        }
 
         if (!result.success && !output && result.error) {
           throw new Error(result.error);
@@ -164,7 +197,6 @@ export async function POST(request: NextRequest) {
         promise: execPromise,
         settled: false,
         chatId,
-        kind: 'engine' as const,
         cancel: () => {
           setEngineStreamStatus(chatId, 'killed');
           engine.cancel();
@@ -178,35 +210,16 @@ export async function POST(request: NextRequest) {
           setTimeout(() => {
             activeChats.delete(chatId);
             removeEngineStream(chatId);
+            if (frontendSessionId) processManager.removeActiveStream(frontendSessionId);
           }, 30000);
         });
 
       return NextResponse.json({ chatId });
     }
 
-    // Claude Code path
-    const execPromise = processManager.executeClaudeCli(
-      chatId,
-      'chat',
-      'chat',
-      message,
-      systemPrompt,
-      useModel,
-      {
-        resumeSessionId: validResumeSid,
-        appendSystemPrompt: !!validResumeSid && !!systemPrompt,
-        frontendSessionId,
-        workingDirectory: chatSettings?.workingDirectory || undefined,
-      }
-    );
-    const entry = { promise: execPromise, settled: false, chatId, kind: 'claude' as const };
-    activeChats.set(chatId, entry);
-    execPromise
-      .then(() => { entry.settled = true; })
-      .catch(() => { entry.settled = true; })
-      .finally(() => { setTimeout(() => activeChats.delete(chatId), 30000); });
-
-    return NextResponse.json({ chatId });
+    // All engines (including claude-code) should be handled above via getOrCreateEngine.
+    // If engine is null, it means the engine is not available.
+    return NextResponse.json({ error: '引擎不可用，请检查配置' }, { status: 500 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || '启动失败' }, { status: 500 });
   }
@@ -266,20 +279,8 @@ export async function GET(request: NextRequest) {
 
       const cleanup = () => {
         closed = true;
-        processManager.off('stream', onClaudeStream);
         engineStreamEvents.off(chatId, onEngineStream);
         try { controller.close(); } catch {}
-      };
-
-      // Stream handler — forward text deltas and thinking
-      const onClaudeStream = (evt: any) => {
-        if (evt.id === chatId) {
-          if (evt.delta) {
-            send('delta', { content: evt.delta });
-          } else if (evt.thinking) {
-            send('thinking', { content: evt.thinking });
-          }
-        }
       };
 
       const onEngineStream = (evt: any) => {
@@ -293,15 +294,11 @@ export async function GET(request: NextRequest) {
         }
       };
 
-      if (entry.kind === 'engine') {
-        const state = getEngineStream(chatId);
-        if (state?.streamContent) {
-          send('delta', { content: state.streamContent });
-        }
-        engineStreamEvents.on(chatId, onEngineStream);
-      } else {
-        processManager.on('stream', onClaudeStream);
+      const state = getEngineStream(chatId);
+      if (state?.streamContent) {
+        send('delta', { content: state.streamContent });
       }
+      engineStreamEvents.on(chatId, onEngineStream);
 
       send('connected', { chatId });
 
@@ -347,14 +344,11 @@ export async function DELETE(request: NextRequest) {
   }
 
   const entry = activeChats.get(chatId);
-  if (entry?.kind === 'engine' && entry.cancel) {
+  if (entry?.cancel) {
     entry.cancel();
-    activeChats.delete(chatId);
-    removeEngineStream(chatId);
-    return NextResponse.json({ killed: true });
   }
-
-  const killed = processManager.killProcess(chatId);
   activeChats.delete(chatId);
-  return NextResponse.json({ killed });
+  removeEngineStream(chatId);
+  processManager.killProcess(chatId);
+  return NextResponse.json({ killed: true });
 }

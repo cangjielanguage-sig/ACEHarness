@@ -11,10 +11,11 @@ import { existsSync } from 'fs';
 
 // Skills directory path segments - constructed at runtime to prevent
 // webpack/Next.js file tracing from over-matching the skills directory
-const SKILLS_SUBDIR = ['skills', '.claude', 'skills'].join('/');
+const SKILLS_SUBDIR = 'skills';
 import { parse } from 'yaml';
+import { resolveAgentModel } from './workflow-manager';
 import { processManager } from './process-manager';
-import type { ClaudeJsonResult } from './process-manager';
+import type { EngineJsonResult } from './engines/engine-interface';
 import { createRun, updateRun } from './run-store';
 import {
   saveRunState, saveProcessOutput, saveStreamContent,
@@ -28,7 +29,7 @@ import { formatTimestamp } from './utils';
 import { createEngine, getConfiguredEngine, type Engine, type EngineType } from './engines';
 import { getEngineSkillsSubdir } from './engines/engine-config';
 import type { EngineStreamEvent } from './engines/engine-interface';
-import type { SdkPlanSubtaskTelemetry } from './engines/claude-sdk-plan';
+import type { SdkPlanSubtaskTelemetry } from './engines/claude-code-wrapper';
 import {
   parseNeedInfo,
   isPlanDone,
@@ -142,7 +143,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
   // ========== Claude SDK Plan（useSdkPlan）==========
   private _sdkPlanAvailable: boolean | null = null;
-  private activeSdkPlanEngine: import('./engines/claude-sdk-plan').ClaudeSdkPlanEngine | null = null;
+  private activeSdkPlanEngine: import('./engines/claude-code-wrapper').ClaudeCodeEngineWrapper | null = null;
   /** 供 getStatus / 刷新后恢复 sdk-plan-question 弹窗 */
   private pendingSdkPlanQuestionPayload: {
     questions: unknown[];
@@ -299,49 +300,44 @@ export class StateMachineWorkflowManager extends EventEmitter {
     }
     if (needed.size === 0) return;
 
-    // Track what we copy for cleanup
-    const copiedNames: string[] = [];
     const dirExistedBefore = existsSync(workspaceSkillsDir);
-
-    // Ensure target dir exists
     await mkdir(workspaceSkillsDir, { recursive: true });
 
-    // Copy SKILL.md index if not exists
-    const serverIndex = resolve(serverSkillsDir, 'SKILL.md');
-    const targetIndex = resolve(workspaceSkillsDir, 'SKILL.md');
-    let indexCopied = false;
-    if (existsSync(serverIndex) && !existsSync(targetIndex)) {
-      try { await cp(serverIndex, targetIndex); indexCopied = true; } catch { /* ignore */ }
-    }
-
-    // Copy each needed skill directory
+    const linkedNames: string[] = [];
     for (const skillName of needed) {
       const src = resolve(serverSkillsDir, skillName);
       const dst = resolve(workspaceSkillsDir, skillName);
       if (!existsSync(src)) continue;
+      if (existsSync(dst)) continue;
       try {
-        await cp(src, dst, { recursive: true, force: true });
-        copiedNames.push(skillName);
-        console.log(`[SM-Skills] 已复制 skill "${skillName}" → ${dst}`);
+        const { symlinkSync } = await import('fs');
+        symlinkSync(src, dst);
+        linkedNames.push(skillName);
+        console.log(`[SM-Skills] 已链接 skill "${skillName}" → ${dst}`);
       } catch (e) {
-        console.warn(`[SM-Skills] 复制 skill "${skillName}" 失败:`, e);
+        try {
+          await cp(src, dst, { recursive: true, force: true });
+          linkedNames.push(skillName);
+          console.log(`[SM-Skills] 已复制 skill "${skillName}" → ${dst}`);
+        } catch (e2) {
+          console.warn(`[SM-Skills] 同步 skill "${skillName}" 失败:`, e2);
+        }
       }
     }
 
-    if (copiedNames.length > 0 || indexCopied) {
-      this.copiedSkills = { dir: workspaceSkillsDir, indexCopied };
-      // Store copied names on the object for cleanup
-      (this.copiedSkills as any).names = copiedNames;
+    if (linkedNames.length > 0) {
+      this.copiedSkills = { dir: workspaceSkillsDir, indexCopied: false };
+      (this.copiedSkills as any).names = linkedNames;
       (this.copiedSkills as any).dirExistedBefore = dirExistedBefore;
     }
   }
 
   /**
-   * Remove skills that were copied to workspace during syncSkillsToWorkspace
+   * Remove skills that were linked/copied to workspace during syncSkillsToWorkspace
    */
   private async cleanupWorkspaceSkills(): Promise<void> {
     if (!this.copiedSkills) return;
-    const { dir, indexCopied } = this.copiedSkills;
+    const { dir } = this.copiedSkills;
     const names: string[] = (this.copiedSkills as any).names || [];
     const dirExistedBefore: boolean = (this.copiedSkills as any).dirExistedBefore ?? true;
 
@@ -353,17 +349,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
       } catch { /* ignore */ }
     }
 
-    if (indexCopied) {
-      try { await rm(resolve(dir, 'SKILL.md'), { force: true }); } catch { /* ignore */ }
-    }
-
-    // If we created the skills dir and it's now empty, remove it
     if (!dirExistedBefore) {
       try {
         const remaining = await readdir(dir);
         if (remaining.length === 0) {
           await rm(dir, { recursive: true, force: true });
-          // Also try removing the engine config dir (e.g. .claude/, .kiro/) if empty
           const configDir = resolve(dir, '..');
           const configRemaining = await readdir(configDir);
           if (configRemaining.length === 0) {
@@ -743,20 +733,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
     systemPrompt: string,
     model: string,
     options: any
-  ): Promise<ClaudeJsonResult> {
-    if (this.engineType === 'claude-code' || !this.currentEngine) {
-      return await processManager.executeClaudeCli(
-        processId,
-        agent,
-        step,
-        prompt,
-        systemPrompt,
-        model,
-        {
-          ...options,
-          streamStepLabel: options.streamStepName || options.streamStepLabel,
-        }
-      );
+  ): Promise<EngineJsonResult> {
+    if (!this.currentEngine) {
+      throw new Error(`引擎未初始化 (engineType=${this.engineType})`);
     }
 
     // Use alternative engine (Kiro CLI, etc.)
@@ -874,7 +853,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       return {
         name: agentName,
         team: roleConfig?.team || 'blue',
-        model: roleConfig?.model || 'claude-opus-4-6',
+        model: resolveAgentModel(roleConfig, workflowConfig.context),
         status: 'waiting',
         currentTask: null,
         completedTasks: 0,
@@ -1193,7 +1172,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
         console.error(`[StateMachineWorkflowManager] Step "${step.name}" in state "${state.name}" failed: ${errorMsg}`);
         stepOutputs.push(`ERROR: ${errorMsg}`);
         verdict = 'fail';
-        // Continue to next step instead of aborting the entire state
+        // Abort remaining steps in this state on engine failure
+        break;
       }
     }
 
@@ -1629,7 +1609,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const roleConfig = this.agentConfigs.find(r => r.name === step.agent)
       || config.roles?.find(r => r.name === step.agent);
 
-    const model = roleConfig?.model || 'claude-opus-4-6';
+    const model = resolveAgentModel(roleConfig, config.context);
     const systemPrompt = roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
     const workingDirectory = config.context?.projectRoot
       ? resolve(process.cwd(), config.context.projectRoot)
@@ -1685,7 +1665,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       if (this.shouldStop) {
         throw new Error('工作流已停止');
       }
-      let result: ClaudeJsonResult;
+      let result: EngineJsonResult;
       try {
         result = await this.executeWithEngine(
           currentProcessId,
@@ -2646,7 +2626,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     }
 
     const prompt = `# 问题\n${question}\n\n请直接回答这个问题，不需要执行其他任务。`;
-    const model = roleConfig.model || 'claude-opus-4-6';
+    const model = resolveAgentModel(roleConfig, config.context);
     const systemPrompt = roleConfig.systemPrompt || `你是一个 AI 助手。`;
 
     const processId = `query-${agentName}-${Date.now()}`;
@@ -2730,8 +2710,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private async canUseSdkPlan(): Promise<boolean> {
     if (this._sdkPlanAvailable !== null) return this._sdkPlanAvailable;
     try {
-      const { ClaudeSdkPlanEngine } = await import('./engines/claude-sdk-plan');
-      const engine = new ClaudeSdkPlanEngine();
+      const { ClaudeCodeEngineWrapper } = await import('./engines/claude-code-wrapper');
+      const engine = new ClaudeCodeEngineWrapper();
       this._sdkPlanAvailable = await engine.isAvailable();
     } catch {
       this._sdkPlanAvailable = false;
@@ -2754,8 +2734,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
     config: StateMachineWorkflowConfig,
     requirements?: string
   ): Promise<string> {
-    const { ClaudeSdkPlanEngine } = await import('./engines/claude-sdk-plan');
-    const planEngine = new ClaudeSdkPlanEngine();
+    const { ClaudeCodeEngineWrapper } = await import('./engines/claude-code-wrapper');
+    const planEngine = new ClaudeCodeEngineWrapper();
     this.activeSdkPlanEngine = planEngine;
 
     const agent = this.agents.find(a => a.name === step.agent);
@@ -2852,7 +2832,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const roleConfig =
         this.agentConfigs.find(r => r.name === step.agent) ||
         config.roles?.find(r => r.name === step.agent);
-      const model = roleConfig?.model || 'claude-opus-4-6';
+      const model = resolveAgentModel(roleConfig, config.context);
       const systemPrompt =
         roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
       const workingDirectory = config.context?.projectRoot
@@ -2866,6 +2846,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         systemPrompt,
         model,
         workingDirectory,
+        mode: 'plan',
         timeoutMs: (config.context?.timeoutMinutes || 60) * 60 * 1000,
       });
 
@@ -3004,7 +2985,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     state: StateMachineState,
     config: StateMachineWorkflowConfig,
     planContent: string,
-    planEngine: import('./engines/claude-sdk-plan').ClaudeSdkPlanEngine,
+    planEngine: import('./engines/claude-code-wrapper').ClaudeCodeEngineWrapper,
     requirements?: string,
   ): Promise<{ action: 'approve' | 'edit' | 'reject'; content?: string; feedback?: string }> {
     const MAX_REJECT_ROUNDS = 5;
@@ -3062,7 +3043,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const roleConfig =
         this.agentConfigs.find(r => r.name === step.agent) ||
         config.roles?.find(r => r.name === step.agent);
-      const model = roleConfig?.model || 'claude-opus-4-6';
+      const model = resolveAgentModel(roleConfig, config.context);
       const systemPrompt =
         roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
       const workingDirectory = config.context?.projectRoot
@@ -3078,6 +3059,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         systemPrompt,
         model,
         workingDirectory,
+        mode: 'plan',
         timeoutMs: (config.context?.timeoutMinutes || 60) * 60 * 1000,
       });
 

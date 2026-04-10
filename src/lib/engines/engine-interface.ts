@@ -16,6 +16,31 @@ export interface EngineOptions {
   sessionId?: string;
   appendSystemPrompt?: boolean;
   runId?: string;
+  /** 'plan' for SDK plan mode */
+  mode?: string;
+  /** MCP server configs */
+  mcpServers?: any[];
+  /** Review panel agents */
+  agents?: Record<string, any>;
+  /** Frontend session tracking */
+  frontendSessionId?: string;
+}
+
+/** Unified execution result across all engines */
+export interface EngineJsonResult {
+  result: string;
+  session_id: string;
+  cost_usd: number;
+  duration_ms: number;
+  duration_api_ms: number;
+  is_error: boolean;
+  num_turns: number;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens: number;
+    cache_read_input_tokens: number;
+  };
 }
 
 export interface EngineResult {
@@ -24,6 +49,7 @@ export interface EngineResult {
   error?: string;
   sessionId?: string;
   stopReason?: string;
+  metadata?: any;
 }
 
 export interface EngineStreamEvent {
@@ -33,29 +59,10 @@ export interface EngineStreamEvent {
 }
 
 export interface Engine {
-  /**
-   * Execute a task with the engine
-   */
   execute(options: EngineOptions): Promise<EngineResult>;
-
-  /**
-   * Cancel the current execution
-   */
   cancel(): void;
-
-  /**
-   * Check if the engine is available
-   */
   isAvailable(): Promise<boolean>;
-
-  /**
-   * Get engine name
-   */
   getName(): string;
-
-  /**
-   * Listen to stream events
-   */
   on(event: 'stream', listener: (event: EngineStreamEvent) => void): void;
   off(event: 'stream', listener: (event: EngineStreamEvent) => void): void;
 }
