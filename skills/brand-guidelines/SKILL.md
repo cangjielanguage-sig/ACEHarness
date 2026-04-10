@@ -1,11 +1,12 @@
 ---
 name: brand-guidelines
+source: anthropics
 description: Applies Anthropic's official brand colors and typography to any
   sort of artifact that may benefit from having Anthropic's look-and-feel. Use
   it when brand colors or style guidelines, visual formatting, or company design
   standards apply.
 license: Complete terms in LICENSE.txt
-descriptionZH: Applies Anthropic's official brand colors and typography to artifacts
+descriptionZH: 将 Anthropic 官方品牌配色和排版应用到各类制品中
 tags:
   - 品牌
   - 设计

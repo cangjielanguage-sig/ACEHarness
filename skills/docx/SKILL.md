@@ -1,5 +1,6 @@
 ---
 name: docx
+source: anthropics
 description: "Use this skill whenever the user wants to create, read, edit, or
   manipulate Word documents (.docx files). Triggers include: any mention of
   'Word doc', 'word document', '.docx', or requests to produce professional
@@ -12,7 +13,7 @@ description: "Use this skill whenever the user wants to create, read, edit, or
   skill. Do NOT use for PDFs, spreadsheets, Google Docs, or general coding tasks
   unrelated to document generation."
 license: Proprietary. LICENSE.txt has complete terms
-descriptionZH: Create, read, edit, or manipulate Word documents (.docx files)
+descriptionZH: 创建、读取、编辑或操作 Word 文档（.docx 文件）
 tags:
   - 文档
   - Word

@@ -1,11 +1,12 @@
 ---
 name: canvas-design
+source: anthropics
 description: Create beautiful visual art in .png and .pdf documents using design
   philosophy. You should use this skill when the user asks to create a poster,
   piece of art, design, or other static piece. Create original visual designs,
   never copying existing artists' work to avoid copyright violations.
 license: Complete terms in LICENSE.txt
-descriptionZH: Create beautiful visual art in .png and .pdf documents using design philosophy
+descriptionZH: 使用设计哲学创建精美的 .png 和 .pdf 视觉艺术作品
 tags:
   - 设计
   - 艺术

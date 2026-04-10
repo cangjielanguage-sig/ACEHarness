@@ -1,12 +1,13 @@
 ---
 name: internal-comms
+source: anthropics
 description: A set of resources to help me write all kinds of internal
   communications, using the formats that my company likes to use. Claude should
   use this skill whenever asked to write some sort of internal communications
   (status reports, leadership updates, 3P updates, company newsletters, FAQs,
   incident reports, project updates, etc.).
 license: Complete terms in LICENSE.txt
-descriptionZH: Write internal communications using company formats (status
+descriptionZH: 使用公司格式撰写内部沟通文档（状态报告、项目更新等）
   reports, updates, newsletters, FAQs)
 tags:
   - 写作

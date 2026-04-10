@@ -1,10 +1,11 @@
 ---
 name: webapp-testing
+source: anthropics
 description: Toolkit for interacting with and testing local web applications
   using Playwright. Supports verifying frontend functionality, debugging UI
   behavior, capturing browser screenshots, and viewing browser logs.
 license: Complete terms in LICENSE.txt
-descriptionZH: Test local web applications using Playwright with screenshots and browser logs
+descriptionZH: 使用 Playwright 测试本地 Web 应用，支持截图和浏览器日志
 tags:
   - 测试
   - Playwright

@@ -1,11 +1,12 @@
 ---
 name: web-artifacts-builder
+source: anthropics
 description: Suite of tools for creating elaborate, multi-component claude.ai
   HTML artifacts using modern frontend web technologies (React, Tailwind CSS,
   shadcn/ui). Use for complex artifacts requiring state management, routing, or
   shadcn/ui components - not for simple single-file HTML/JSX artifacts.
 license: Complete terms in LICENSE.txt
-descriptionZH: Build elaborate multi-component HTML artifacts using React,
+descriptionZH: 使用 React、Tailwind CSS、shadcn/ui 构建多组件 HTML 制品
   Tailwind CSS, and shadcn/ui
 tags:
   - Web

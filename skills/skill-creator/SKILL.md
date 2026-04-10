@@ -1,11 +1,12 @@
 ---
 name: skill-creator
+source: anthropics
 description: Create new skills, modify and improve existing skills, and measure
   skill performance. Use when users want to create a skill from scratch, edit,
   or optimize an existing skill, run evals to test a skill, benchmark skill
   performance with variance analysis, or optimize a skill's description for
   better triggering accuracy.
-descriptionZH: Create new skills, modify and improve existing skills, and
+descriptionZH: 创建新技能、修改和优化现有技能、运行评估测试
   measure skill performance
 tags:
   - 元技能

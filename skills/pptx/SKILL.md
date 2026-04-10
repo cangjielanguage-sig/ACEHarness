@@ -1,5 +1,6 @@
 ---
 name: pptx
+source: anthropics
 description: 'Use this skill any time a .pptx file is involved in any way — as
   input, output, or both. This includes: creating slide decks, pitch decks, or
   presentations; reading, parsing, or extracting text from any .pptx file (even
@@ -11,7 +12,7 @@ description: 'Use this skill any time a .pptx file is involved in any way — as
   content afterward. If a .pptx file needs to be opened, created, or touched,
   use this skill.'
 license: Proprietary. LICENSE.txt has complete terms
-descriptionZH: Create, read, edit, and manipulate PowerPoint presentations (.pptx files)
+descriptionZH: 创建、读取、编辑和操作 PowerPoint 演示文稿（.pptx 文件）
 tags:
   - 演示文稿
   - PPT

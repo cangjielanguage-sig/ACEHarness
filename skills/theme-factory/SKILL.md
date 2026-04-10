@@ -1,11 +1,12 @@
 ---
 name: theme-factory
+source: anthropics
 description: Toolkit for styling artifacts with a theme. These artifacts can be
   slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes
   with colors/fonts that you can apply to any artifact that has been creating,
   or can generate a new theme on-the-fly.
 license: Complete terms in LICENSE.txt
-descriptionZH: Toolkit for styling artifacts with professional themes (colors, fonts, layouts)
+descriptionZH: 为制品应用专业主题样式（配色、字体、布局）
 tags:
   - 主题
   - 样式

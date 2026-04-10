@@ -1,5 +1,6 @@
 ---
 name: frontend-design
+source: anthropics
 description: Create distinctive, production-grade frontend interfaces with high
   design quality. Use this skill when the user asks to build web components,
   pages, artifacts, posters, or applications (examples include websites, landing
@@ -7,7 +8,7 @@ description: Create distinctive, production-grade frontend interfaces with high
   styling/beautifying any web UI). Generates creative, polished code and UI
   design that avoids generic AI aesthetics.
 license: Complete terms in LICENSE.txt
-descriptionZH: Create distinctive, production-grade frontend interfaces with
+descriptionZH: 创建高质量、生产级的前端界面和 Web 组件
   high design quality
 tags:
   - 前端

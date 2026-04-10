@@ -1,12 +1,13 @@
 ---
 name: algorithmic-art
+source: anthropics
 description: Creating algorithmic art using p5.js with seeded randomness and
   interactive parameter exploration. Use this when users request creating art
   using code, generative art, algorithmic art, flow fields, or particle systems.
   Create original algorithmic art rather than copying existing artists' work to
   avoid copyright violations.
 license: Complete terms in LICENSE.txt
-descriptionZH: Creating algorithmic art using p5.js with seeded randomness and
+descriptionZH: 使用 p5.js 创建算法艺术，支持种子随机和交互式参数探索
   interactive parameter exploration
 tags:
   - 艺术

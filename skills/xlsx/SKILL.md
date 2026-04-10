@@ -1,5 +1,6 @@
 ---
 name: xlsx
+source: anthropics
 description: 'Use this skill any time a spreadsheet file is the primary input or
   output. This means any task where the user wants to: open, read, edit, or fix
   an existing .xlsx, .xlsm, .csv, or .tsv file (e.g., adding columns, computing
@@ -14,7 +15,7 @@ description: 'Use this skill any time a spreadsheet file is the primary input or
   report, standalone Python script, database pipeline, or Google Sheets API
   integration, even if tabular data is involved.'
 license: Proprietary. LICENSE.txt has complete terms
-descriptionZH: Create, read, edit, and process spreadsheet files (.xlsx, .csv, .tsv)
+descriptionZH: 创建、读取、编辑和处理电子表格文件（.xlsx、.csv、.tsv）
 tags:
   - 电子表格
   - Excel

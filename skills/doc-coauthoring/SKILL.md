@@ -1,12 +1,13 @@
 ---
 name: doc-coauthoring
+source: anthropics
 description: Guide users through a structured workflow for co-authoring
   documentation. Use when user wants to write documentation, proposals,
   technical specs, decision docs, or similar structured content. This workflow
   helps users efficiently transfer context, refine content through iteration,
   and verify the doc works for readers. Trigger when user mentions writing docs,
   creating proposals, drafting specs, or similar documentation tasks.
-descriptionZH: Guide users through a structured workflow for co-authoring documentation
+descriptionZH: 引导用户通过结构化工作流协作撰写文档
 tags:
   - 文档
   - 写作

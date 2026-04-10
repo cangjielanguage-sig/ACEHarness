@@ -1,5 +1,6 @@
 ---
 name: pdf
+source: anthropics
 description: Use this skill whenever the user wants to do anything with PDF
   files. This includes reading or extracting text/tables from PDFs, combining or
   merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding
@@ -7,7 +8,7 @@ description: Use this skill whenever the user wants to do anything with PDF
   extracting images, and OCR on scanned PDFs to make them searchable. If the
   user mentions a .pdf file or asks to produce one, use this skill.
 license: Proprietary. LICENSE.txt has complete terms
-descriptionZH: Read, create, edit, merge, split, and process PDF files
+descriptionZH: 读取、创建、编辑、合并、拆分和处理 PDF 文件
 tags:
   - PDF
   - 文档
