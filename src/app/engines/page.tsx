@@ -79,10 +79,10 @@ const engines: Engine[] = [
   {
     id: 'codex',
     name: 'Codex',
-    description: 'OpenAI Codex 引擎，专注于代码生成和理解，支持 ACP 协议',
+    description: 'OpenAI Codex 引擎，专注于代码生成和理解，基于 Codex SDK',
     icon: '🔮',
     status: 'available',
-    features: ['ACP 协议', '代码生成', '代码补全', '多语言支持', 'API 集成'],
+    features: ['Codex SDK', '代码生成', '代码补全', '多语言支持', 'API 集成'],
     endpoints: ['openai'],
   },
   {
