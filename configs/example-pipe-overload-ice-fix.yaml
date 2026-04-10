@@ -16,9 +16,9 @@ workflow:
     main() { 0 } 
 
     ```已知能通过编译的对照用例（Array<Float64> + 显式类型标注）：  `func test(input: Array<Float64>)
-    { input |> map { p: Float64 => f(p + 1.0)
-    }}`编译器版本：1.1.0-alpha.20260324030034 (cjnative) 错误：Windows unexpected
-    exception code (11) / SIGSEGV，Error Code: 6
+    { input |> map { p: Float64 => f(p + 1.0) }}`
+
+    错误：Windows unexpected exception code (11) / SIGSEGV，Error Code: 6
   mode: state-machine
   maxTransitions: 30
   states:
@@ -374,7 +374,7 @@ workflow:
 context:
   projectRoot: ../cangjie_compiler
   requirements: |-
-    已知release/1.0分支没问题，修复结果注意看下release/1.0的代码，一样说明改的不对。任务：修复仓颉编译器在管道运算符 |> 配合尾随 lambda 调用重载函数时触发的 ICE。
+    任务：修复仓颉编译器在管道运算符 |> 配合尾随 lambda 调用重载函数时触发的 ICE。
     问题现象：以下代码在编译时触发 ICE (Internal Compiler Error)， Windows 环境下错误码 11 (SIGSEGV)：
 
     注意复现务必使用以下代码：
@@ -390,8 +390,14 @@ context:
     已知能通过编译的对照用例（Array<Float64> + 显式类型标注）： `func test(input: Array<Float64>) { input |> map { p: Float64 => f(p + 1.0) }}`
 
     修复原则： - 仅做最小化的根因修改，不做防御性修改 - 不添加与业务无关的注释 - 在 ../cangjie_test 补充 LLT 测试用例
-    验收标准： 1. 上述代码不再 ICE，编译通过 2. 管道运算符的正常功能不受影响 3. 函数重载的正常功能不受影响 4. 现有测试套件无回归 5. 压力测试无新问题 6. ../cangjie_test 中已补充 LLT 测试用例
-    注意，cangjie语言要求二元操作符两边的类型必须是一致的，所以应该能自动推导出p的类型，而不需要做类型标注。注意！需要保证最终修复后不加类型标注也能编过！不能改变语义行为！注意，cangjie语言要求二元操作符两边的类型必须是一致的，所以应该能自动推导出p的类型，而不需要做类型标注。注意！需要保证最终修复后不加类型标注也能编过！不能改变语义行为！不一定要在崩溃点修复，不要加防御性代码，修复根因！
+    验收标准：
+     1. 上述代码不再 ICE，编译通过
+     2. 管道运算符的正常功能不受影响
+     3. 函数重载的正常功能不受影响
+     4. 现有测试套件无回归
+     5. 压力测试无新问题
+     6. ../cangjie_test 中已补充 LLT 测试用例
+    注意，cangjie语言要求二元操作符两边的类型必须是一致的，所以应该能自动推导出p的类型，而不需要做类型标注。注意，cangjie语言要求二元操作符两边的类型必须是一致的，所以应该能自动推导出p的类型，而不需要做类型标注。注意，需要保证最终修复后不加类型标注也能编过，不能改变语义行为，不一定要在崩溃点修复，不要加防御性代码，修复根因
   codebase: src/frontend/
   testRoot: ../cangjie_test
   timeoutMinutes: 300
