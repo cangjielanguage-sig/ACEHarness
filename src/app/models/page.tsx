@@ -8,6 +8,7 @@ import { Cpu, Plus, Trash2, ArrowLeft, Edit2, Check, X, GripVertical } from 'luc
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { MultiCombobox } from '@/components/ui/combobox';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -37,7 +38,17 @@ interface ModelOption {
   label: string;
   costMultiplier: number;
   endpoints: string[];
+  engines?: string[];
 }
+
+const ALL_ENGINES = [
+  { id: 'claude-code', label: 'Claude Code' },
+  { id: 'kiro-cli', label: 'Kiro CLI' },
+  { id: 'opencode', label: 'OpenCode' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'cursor', label: 'Cursor' },
+  { id: 'cangjie-magic', label: 'CangjieMagic' },
+];
 
 interface SortableItemProps {
   id: string;
@@ -98,53 +109,50 @@ function SortableItem({
       )}
       {editingIndex === index ? (
         <>
-          <div className="flex-1 grid grid-cols-4 gap-3">
-            <Input
-              value={editingModel?.value || ''}
-              onChange={(e) => updateEditingModel('value', e.target.value)}
-              placeholder={t('models.modelValue')}
-            />
-            <Input
-              value={editingModel?.label || ''}
-              onChange={(e) => updateEditingModel('label', e.target.value)}
-              placeholder={t('models.displayLabel')}
-            />
-            <Input
-              type="number"
-              step="0.01"
-              value={editingModel?.costMultiplier || 0}
-              onChange={(e) => updateEditingModel('costMultiplier', parseFloat(e.target.value) || 0)}
-              placeholder={t('models.costMultiplier')}
-            />
-            <div className="flex gap-2 items-center">
-              <label className="flex items-center gap-1 text-xs cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={editingModel?.endpoints?.includes('anthropic') || false}
-                  onChange={(e) => {
-                    const endpoints = e.target.checked
-                      ? [...(editingModel?.endpoints || []), 'anthropic']
-                      : (editingModel?.endpoints || []).filter(ep => ep !== 'anthropic');
-                    updateEditingModel('endpoints', endpoints);
-                  }}
-                  className="rounded"
+          <div className="flex-1 space-y-2">
+            <div className="grid grid-cols-3 gap-3">
+              <Input
+                value={editingModel?.value || ''}
+                onChange={(e) => updateEditingModel('value', e.target.value)}
+                placeholder={t('models.modelValue')}
+              />
+              <Input
+                value={editingModel?.label || ''}
+                onChange={(e) => updateEditingModel('label', e.target.value)}
+                placeholder={t('models.displayLabel')}
+              />
+              <Input
+                type="number"
+                step="0.01"
+                value={editingModel?.costMultiplier || 0}
+                onChange={(e) => updateEditingModel('costMultiplier', parseFloat(e.target.value) || 0)}
+                placeholder={t('models.costMultiplier')}
+              />
+            </div>
+            <div className="flex gap-4 items-center flex-wrap">
+              <div className="flex-1 min-w-[150px]">
+                <span className="text-xs text-muted-foreground mb-1 block">端点:</span>
+                <MultiCombobox
+                  value={editingModel?.endpoints || []}
+                  onValueChange={(v) => updateEditingModel('endpoints', v)}
+                  options={[
+                    { value: 'anthropic', label: 'Anthropic' },
+                    { value: 'openai', label: 'OpenAI' },
+                  ]}
+                  placeholder="选择端点"
+                  searchable={false}
                 />
-                Anthropic
-              </label>
-              <label className="flex items-center gap-1 text-xs cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={editingModel?.endpoints?.includes('openai') || false}
-                  onChange={(e) => {
-                    const endpoints = e.target.checked
-                      ? [...(editingModel?.endpoints || []), 'openai']
-                      : (editingModel?.endpoints || []).filter(ep => ep !== 'openai');
-                    updateEditingModel('endpoints', endpoints);
-                  }}
-                  className="rounded"
+              </div>
+              <div className="flex-1 min-w-[200px]">
+                <span className="text-xs text-muted-foreground mb-1 block">引擎:</span>
+                <MultiCombobox
+                  value={editingModel?.engines || []}
+                  onValueChange={(v) => updateEditingModel('engines', v)}
+                  options={ALL_ENGINES.map(eng => ({ value: eng.id, label: eng.label }))}
+                  placeholder="选择引擎"
+                  searchable={false}
                 />
-                OpenAI
-              </label>
+              </div>
             </div>
           </div>
           <Button
@@ -164,7 +172,7 @@ function SortableItem({
         </>
       ) : (
         <>
-          <div className="flex-1 grid grid-cols-4 gap-4">
+          <div className="flex-1 grid grid-cols-5 gap-4">
             <div>
               <div className="text-xs text-muted-foreground">{t('models.value')}</div>
               <div className="font-mono text-sm">{model.value}</div>
@@ -179,12 +187,24 @@ function SortableItem({
             </div>
             <div>
               <div className="text-xs text-muted-foreground">API 端点</div>
-              <div className="flex gap-1 mt-1">
+              <div className="flex gap-1 mt-1 flex-wrap">
                 {(model.endpoints || []).map(ep => (
                   <span key={ep} className="text-xs px-2 py-0.5 bg-primary/10 text-primary rounded">
                     {ep}
                   </span>
                 ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">引擎</div>
+              <div className="flex gap-1 mt-1 flex-wrap">
+                {(model.engines || []).length > 0 ? (model.engines || []).map(eng => (
+                  <span key={eng} className="text-xs px-2 py-0.5 bg-blue-500/10 text-blue-500 rounded">
+                    {eng}
+                  </span>
+                )) : (
+                  <span className="text-xs text-muted-foreground">全部</span>
+                )}
               </div>
             </div>
           </div>
@@ -222,6 +242,7 @@ export default function ModelsPage() {
     label: '',
     costMultiplier: 0.1,
     endpoints: [],
+    engines: [],
   });
   const { confirm, dialogProps } = useConfirmDialog();
 
@@ -389,7 +410,7 @@ export default function ModelsPage() {
               <Plus className="w-5 h-5 text-primary" />
               {t('models.addNew')}
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <Label htmlFor="value">{t('models.modelValue')}</Label>
                 <Input
@@ -419,45 +440,35 @@ export default function ModelsPage() {
                   onChange={(e) => setNewModel({ ...newModel, costMultiplier: parseFloat(e.target.value) || 0 })}
                 />
               </div>
-              <div>
-                <Label htmlFor="endpoints">API 端点</Label>
-                <div className="flex gap-2 mt-2">
-                  <label className="flex items-center gap-1 text-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newModel.endpoints.includes('anthropic')}
-                      onChange={(e) => {
-                        const endpoints = e.target.checked
-                          ? [...newModel.endpoints, 'anthropic']
-                          : newModel.endpoints.filter(ep => ep !== 'anthropic');
-                        setNewModel({ ...newModel, endpoints });
-                      }}
-                      className="rounded"
-                    />
-                    Anthropic
-                  </label>
-                  <label className="flex items-center gap-1 text-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newModel.endpoints.includes('openai')}
-                      onChange={(e) => {
-                        const endpoints = e.target.checked
-                          ? [...newModel.endpoints, 'openai']
-                          : newModel.endpoints.filter(ep => ep !== 'openai');
-                        setNewModel({ ...newModel, endpoints });
-                      }}
-                      className="rounded"
-                    />
-                    OpenAI
-                  </label>
-                </div>
+            </div>
+            <div className="flex gap-4 items-center flex-wrap mt-3">
+              <div className="flex-1 min-w-[150px]">
+                <Label className="text-xs text-muted-foreground mb-1 block">端点:</Label>
+                <MultiCombobox
+                  value={newModel.endpoints}
+                  onValueChange={(v) => setNewModel({ ...newModel, endpoints: v })}
+                  options={[
+                    { value: 'anthropic', label: 'Anthropic' },
+                    { value: 'openai', label: 'OpenAI' },
+                  ]}
+                  placeholder="选择端点"
+                  searchable={false}
+                />
               </div>
-              <div className="flex items-end">
-                <Button onClick={addModel} className="w-full">
-                  <Plus className="w-4 h-4 mr-2" />
-                  {t('models.addModel')}
-                </Button>
+              <div className="flex-1 min-w-[200px]">
+                <Label className="text-xs text-muted-foreground mb-1 block">引擎:</Label>
+                <MultiCombobox
+                  value={newModel.engines || []}
+                  onValueChange={(v) => setNewModel({ ...newModel, engines: v })}
+                  options={ALL_ENGINES.map(eng => ({ value: eng.id, label: eng.label }))}
+                  placeholder="选择引擎"
+                  searchable={false}
+                />
               </div>
+              <Button onClick={addModel} className="ml-auto">
+                <Plus className="w-4 h-4 mr-2" />
+                {t('models.addModel')}
+              </Button>
             </div>
           </motion.div>
 

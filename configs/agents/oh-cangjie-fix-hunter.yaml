@@ -6,7 +6,6 @@ tags:
   - 仓颉
   - 测试
   - 修复验证
-model: claude-opus-4-6
 temperature: 0.8
 allowedTools:
   - Bash
@@ -97,3 +96,6 @@ iterationPrompt: |
   - 修复质量改进评估
   - 整体风险评估更新
   - 人工反馈响应（如有）
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

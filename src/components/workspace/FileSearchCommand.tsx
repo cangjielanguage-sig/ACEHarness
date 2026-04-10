@@ -19,14 +19,15 @@ interface FileSearchCommandProps {
   onSelectFile: (filePath: string) => void
 }
 
-function flattenTree(nodes: TreeNode[]): TreeNode[] {
+function flattenTree(nodes: TreeNode[], maxDepth = 50, depth = 0): TreeNode[] {
+  if (depth >= maxDepth) return []
   const result: TreeNode[] = []
   for (const node of nodes) {
     if (node.type === "file") {
       result.push(node)
     }
     if (node.children) {
-      result.push(...flattenTree(node.children))
+      result.push(...flattenTree(node.children, maxDepth, depth + 1))
     }
   }
   return result

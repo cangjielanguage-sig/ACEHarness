@@ -5,7 +5,6 @@ tags:
   - 审查
   - 修复评审
   - 方案仲裁
-model: claude-opus-4-6
 temperature: 0.5
 allowedTools:
   - Read
@@ -123,3 +122,6 @@ reviewPanel:
         - Glob
         - Grep
       model: claude-sonnet-4-6
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

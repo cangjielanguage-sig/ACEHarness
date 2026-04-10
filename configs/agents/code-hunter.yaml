@@ -5,7 +5,6 @@ tags:
   - 测试
   - 漏洞挖掘
   - 安全测试
-model: claude-opus-4-6
 temperature: 0.8
 allowedTools:
   - Bash
@@ -96,3 +95,6 @@ iterationPrompt: |
   - 实现完备性评估（未到位的实现点）
   - 安全风险评估更新
   - 人工反馈响应（如有）
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

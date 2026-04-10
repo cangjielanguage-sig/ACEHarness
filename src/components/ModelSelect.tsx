@@ -1,18 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { ModelOption } from '@/lib/models';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SingleCombobox, type ComboboxOption } from '@/components/ui/combobox';
 import { useToast } from '@/components/ui/toast';
 
 interface ModelSelectProps {
   value: string;
   onChange: (value: string) => void;
   className?: string;
+  /** When set, only show models that include this engine in their engines list */
+  engine?: string;
 }
 
-export function ModelSelect({ value, onChange, className = '' }: ModelSelectProps) {
-  const [models, setModels] = useState< ModelOption[]>([]);
+export function ModelSelect({ value, onChange, className = '', engine }: ModelSelectProps) {
+  const [allModels, setAllModels] = useState<ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -20,11 +22,21 @@ export function ModelSelect({ value, onChange, className = '' }: ModelSelectProp
     fetch('/api/models')
       .then(res => res.json())
       .then(data => {
-        setModels(data.models || []);
+        setAllModels(data.models || []);
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, []);
+
+  // Filter by engine if specified; models without engines field are shown for all engines
+  const models = engine
+    ? allModels.filter(m => !m.engines || m.engines.length === 0 || m.engines.includes(engine))
+    : allModels;
+
+  const options: ComboboxOption[] = useMemo(
+    () => models.map(m => ({ value: m.value, label: `${m.label} (${m.costMultiplier}x)` })),
+    [models],
+  );
 
   const handleChange = (newValue: string) => {
     const selectedModel = models.find(m => m.value === newValue);
@@ -35,17 +47,13 @@ export function ModelSelect({ value, onChange, className = '' }: ModelSelectProp
   };
 
   return (
-    <Select value={value} onValueChange={handleChange} disabled={loading}>
-      <SelectTrigger className={className}>
-        <SelectValue placeholder="选择模型" />
-      </SelectTrigger>
-      <SelectContent>
-        {models.map(opt => (
-          <SelectItem key={opt.value} value={opt.value}>
-            {opt.label} ({opt.costMultiplier}x)
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <SingleCombobox
+      value={value}
+      onValueChange={handleChange}
+      options={options}
+      placeholder="选择模型"
+      disabled={loading}
+      triggerClassName={className}
+    />
   );
 }

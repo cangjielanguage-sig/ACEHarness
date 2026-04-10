@@ -6,7 +6,6 @@ tags:
   - 编写
   - 技术写作
   - 整理
-model: claude-opus-4-6
 temperature: 0.6
 allowedTools:
   - Bash
@@ -79,3 +78,6 @@ iterationPrompt: |
   - 包含所有必要的内容和示例
   - 结构清晰，易于阅读和维护
 _file: documentation-writer.yaml
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

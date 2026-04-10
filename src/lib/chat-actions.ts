@@ -203,7 +203,7 @@ const VALID_ICONS: Set<string> = (() => {
   try {
     const fs = require('fs');
     const path = require('path');
-    const jsonPath = path.resolve(process.cwd(), 'skills/.claude/skills/aceharness-chat-card/scripts/material-icons.json');
+    const jsonPath = path.resolve(process.cwd(), 'skills/aceharness-chat-card/scripts/material-icons.json');
     const icons: string[] = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
     return new Set(icons);
   } catch {

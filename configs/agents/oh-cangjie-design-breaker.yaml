@@ -6,7 +6,6 @@ tags:
   - 仓颉
   - 攻击
   - 设计测试
-model: claude-opus-4-6
 temperature: 0.8
 allowedTools:
   - Bash
@@ -122,3 +121,6 @@ iterationPrompt: |
   - 设计完备性评估（未到位的设计点）
   - 架构改进建议（按优先级排序）
   - 人工反馈响应（如有）
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

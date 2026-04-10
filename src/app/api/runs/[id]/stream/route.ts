@@ -57,6 +57,8 @@ export async function GET(
         allProcs.find((p: any) => p.runId === id && p.step === step && p.streamContent);
       if (existing?.streamContent) {
         send('delta', { content: existing.streamContent });
+        // Track how much we already sent so flushPersistedStream won't re-send it
+        lastFileSentLen = existing.streamContent.length;
       }
 
       // Initial snapshot from disk (Claude SDK Plan writes here, no processManager stream)
@@ -74,6 +76,8 @@ export async function GET(
         if (proc?.runId !== id || proc.step !== step) return;
         if (evt.delta) {
           send('delta', { content: evt.delta });
+          // Keep lastFileSentLen in sync so flushPersistedStream won't re-send
+          lastFileSentLen += evt.delta.length;
         }
         if (evt.thinking) {
           send('thinking', { content: evt.thinking });

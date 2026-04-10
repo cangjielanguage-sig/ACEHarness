@@ -6,7 +6,8 @@ import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
 import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
-import { ModelSelect } from '@/components/ModelSelect';
+import { EngineModelSelect } from '@/components/EngineModelSelect';
+import { useCurrentEngine } from '@/components/EngineSelect';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import ChatSidebar from '@/components/chat/ChatSidebar';
@@ -46,7 +47,8 @@ function ChatPageContent() {
     activeSession, sessions, createSession, sendMessage, stopStreaming,
     deleteMessage, retryFromMessage, continueFromMessage,
     loading, streamingMessageId,
-    model, setModel, confirmAction, rejectAction, undoActionById, retryAction,
+    model, setModel, engine, setEngine,
+    confirmAction, rejectAction, undoActionById, retryAction,
     skillSettings,
   } = useChat();
   const [input, setInput] = useState('');
@@ -54,6 +56,7 @@ function ChatPageContent() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [editorLoaded, setEditorLoaded] = useState(false);
+  const effectiveEngine = useCurrentEngine(engine);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -215,10 +218,10 @@ function ChatPageContent() {
       key={msg.id}
       message={msg}
       isStreaming={msg.id === streamingMessageId}
-      onConfirmAction={messageCallbacks[msg.id].onConfirmAction}
-      onRejectAction={messageCallbacks[msg.id].onRejectAction}
-      onUndoAction={messageCallbacks[msg.id].onUndoAction}
-      onRetryAction={messageCallbacks[msg.id].onRetryAction}
+      onConfirmAction={messageCallbacks[msg.id]?.onConfirmAction}
+      onRejectAction={messageCallbacks[msg.id]?.onRejectAction}
+      onUndoAction={messageCallbacks[msg.id]?.onUndoAction}
+      onRetryAction={messageCallbacks[msg.id]?.onRetryAction}
       onAction={handleQuickAction}
       onDelete={deleteMessage}
       onRetryFromMessage={msg.role === 'user' ? retryFromMessage : undefined}
@@ -266,8 +269,8 @@ function ChatPageContent() {
             </Button>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-48 hidden sm:block">
-              <ModelSelect value={model} onChange={setModel} className="h-8 text-xs" />
+            <div className="w-52 hidden sm:block">
+              <EngineModelSelect engine={engine} model={model} onEngineChange={setEngine} onModelChange={setModel} className="h-8 text-xs" />
             </div>
             <Button size="sm" variant="ghost" onClick={() => createSession()} title="新建会话">
               <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>add</span>

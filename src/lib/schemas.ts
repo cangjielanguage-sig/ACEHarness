@@ -49,7 +49,8 @@ export const workflowPhaseSchema = z.object({
 export const roleConfigSchema = z.object({
   name: z.string().min(1, '角色名称不能为空'),
   team: z.enum(['blue', 'red', 'judge']),
-  model: z.string().min(1, '模型名称不能为空'),
+  engineModels: z.record(z.string(), z.string()), // 引擎→模型映射 { "": "claude-sonnet-4-20250514", "opencode": "gpt-4o" }（""=跟随全局）
+  activeEngine: z.string(), // 当前启用的引擎 key（""=跟随全局）
   temperature: z.number().optional(),
   capabilities: z.array(z.string()).min(1, '至少需要一个能力'),
   systemPrompt: z.string().min(1, '系统提示不能为空'),
@@ -86,6 +87,7 @@ export const contextConfigSchema = z.object({
   requirements: z.string().optional(),
   codebase: z.string().optional(),
   timeoutMinutes: z.number().min(1).optional(),
+  engine: z.string().optional(), // 工作流级别引擎覆盖
   skills: z.array(z.string()).optional(), // 启用的 skills 列表
   routerModel: z.string().optional(), // Supervisor-Lite 路由模型（可选）
 });

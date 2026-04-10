@@ -23,6 +23,7 @@ export interface ChatSession {
   title: string;
   backendSessionId?: string;
   model: string;
+  engine?: string;
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
@@ -59,6 +60,8 @@ interface DashboardChatContextType {
   streamingMessageId: string | null;
   model: string;
   setModel: (m: string) => void;
+  engine: string;
+  setEngine: (e: string) => void;
   confirmAction: (messageId: string, actionId: string) => Promise<void>;
   rejectAction: (messageId: string, actionId: string) => void;
   undoActionById: (messageId: string, actionId: string) => Promise<void>;
@@ -79,6 +82,7 @@ const DashboardChatContext = createContext<DashboardChatContextType>({
   deleteMessage: () => {}, retryFromMessage: () => {}, continueFromMessage: async () => {},
   loading: false, streamingMessageId: null,
   model: 'claude-sonnet-4-6', setModel: () => {},
+  engine: '', setEngine: () => {},
   confirmAction: async () => {}, rejectAction: () => {},
   undoActionById: async () => {}, retryAction: async () => {},
   skillSettings: { 'power-gitcode': true }, discoveredSkills: [], toggleSkill: () => {},
@@ -150,6 +154,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('chat-model', m);
     }
   }, []);
+
+  // Per-chat engine override (empty = use global)
+  const [engine, setEngineState] = useState('');
+  const handleSetEngine = useCallback((e: string) => {
+    setEngineState(e);
+    // Also store on the active session
+    updateActiveSession(s => ({ ...s, engine: e }));
+  }, []);
+
+  // Load engine's default model if user hasn't explicitly chosen one
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('chat-model') : null;
+    if (!saved) {
+      fetch('/api/engine').then(r => r.json()).then(data => {
+        if (data.defaultModel) setModel(data.defaultModel);
+      }).catch(() => {});
+    }
+  }, []);
+
   const [skillSettings, setSkillSettings] = useState<Record<string, boolean>>({ 'power-gitcode': true });
   const [discoveredSkills, setDiscoveredSkills] = useState<{ name: string; label: string; description: string; source?: string; tags?: string[] }[]>([]);
   const [workingDirectory, setWorkingDirectoryState] = useState('');
@@ -245,6 +268,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         messages: s.messages.filter(m => !(m.role === 'assistant' && !m.content && !m.actions?.length && !m.cards?.length)),
       };
       setActiveSession(reparseSession(cleaned));
+      // Sync per-chat engine override
+      setEngineState(cleaned.engine || '');
 
       // Check if there's an active stream for this session and reconnect
       try {
@@ -640,11 +665,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const backendSid = activeSessionRef.current?.backendSessionId;
       const frontendSid = activeSessionRef.current?.id;
-      console.log('[ChatSend] backendSessionId:', backendSid, 'frontendSessionId:', frontendSid, 'model:', model);
+      console.log('[ChatSend] backendSessionId:', backendSid, 'frontendSessionId:', frontendSid, 'model:', model, 'engine:', engine);
       const startRes = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, model, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard' }),
+        body: JSON.stringify({ message: text, model, engine: engine || undefined, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard' }),
       });
       const startData = await startRes.json();
       if (!startRes.ok || startData.error) {
@@ -987,6 +1012,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       createSession, deleteSession, renameSession, setActiveSessionId,
       sendMessage, stopStreaming, deleteMessage, retryFromMessage, continueFromMessage,
       loading, streamingMessageId, model, setModel: handleSetModel,
+      engine, setEngine: handleSetEngine,
       confirmAction, rejectAction, undoActionById, retryAction,
       skillSettings, discoveredSkills, toggleSkill,
       workingDirectory, setWorkingDirectory,

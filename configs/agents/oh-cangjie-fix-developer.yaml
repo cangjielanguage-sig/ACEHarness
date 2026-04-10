@@ -6,7 +6,6 @@ tags:
   - 仓颉
   - 编码
   - 修复
-model: claude-opus-4-6
 temperature: 0.3
 allowedTools:
   - Bash
@@ -125,3 +124,6 @@ iterationPrompt: |
   - 修正后的修复详情
   - 新增/修改的测试用例
   - 构建和测试验证结果
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

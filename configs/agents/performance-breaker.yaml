@@ -1,6 +1,5 @@
 name: performance-breaker
 team: red
-model: claude-opus-4-6
 category: 压力测试
 tags:
   - 压力测试
@@ -96,3 +95,6 @@ iterationPrompt: |
   - 优化完备性评估（未到位的优化点）
   - 性能风险更新
   - 人工反馈响应（如有）
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

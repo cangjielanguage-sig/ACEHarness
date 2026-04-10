@@ -8,6 +8,7 @@ export interface ModelOption {
   label: string;
   costMultiplier: number;
   endpoints: string[];
+  engines?: string[];
 }
 
 interface ModelsConfig {

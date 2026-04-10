@@ -5,7 +5,6 @@ tags:
   - 压力测试
   - 稳定性测试
   - 极限测试
-model: claude-opus-4-6
 temperature: 0.8
 allowedTools:
   - Bash
@@ -101,3 +100,6 @@ iterationPrompt: |
   - 测试结果对比表（修复前 vs 修复后）
   - 系统稳定性评估
   - 容量规划建议更新
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

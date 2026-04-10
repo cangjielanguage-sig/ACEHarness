@@ -42,17 +42,8 @@ export default function SetupPage() {
         if (data.isSetup) {
           router.push('/login');
         } else {
-          // 检查并自动 clone skills 仓库
-          setCloning(true);
+          // Load skills directly (no clone needed)
           try {
-            const skillsRes = await fetch('/api/skills');
-            const skillsData = await skillsRes.json();
-            if (!skillsData.isCloned) {
-              // 自动 clone skills 仓库
-              await fetch('/api/skills', { method: 'POST' });
-            }
-            // Clone 完成后进入 admin 步骤并加载 skills
-            setStep('admin');
             const settingsRes = await fetch('/api/chat/settings');
             const settingsData = await settingsRes.json();
             setSkills(settingsData.discoveredSkills || []);
@@ -60,8 +51,8 @@ export default function SetupPage() {
             setSelectedSkills(new Set(defaultEnabled));
           } catch {
             // skills 加载失败仍可继续
-            setStep('admin');
           }
+          setStep('admin');
         }
       })
       .catch(() => {
@@ -166,7 +157,7 @@ export default function SetupPage() {
         <div className="flex flex-col items-center gap-4">
           <RobotLogo size={48} className="animate-robotPulse" />
           <p className="text-sm text-muted-foreground">
-            {cloning ? '正在拉取 Skills 仓库...' : '检查系统状态...'}
+            {cloning ? '加载 Skills...' : '检查系统状态...'}
           </p>
         </div>
       </div>
@@ -334,7 +325,7 @@ export default function SetupPage() {
               <div className="text-center py-8 text-muted-foreground">
                 <span className="material-symbols-outlined text-4xl mb-2">extension</span>
                 <p>未发现任何技能</p>
-                <p className="text-xs mt-1">请将技能放入 skills/.claude/skills/ 目录</p>
+                <p className="text-xs mt-1">请将技能放入 skills/ 目录</p>
               </div>
             ) : (
               <div className="space-y-3 max-h-[400px] overflow-y-auto mb-6">
@@ -383,9 +374,8 @@ export default function SetupPage() {
                 如何安装更多技能？
               </h3>
               <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
-                <li>将技能文件夹放入 <code className="bg-muted px-1 rounded">skills/.claude/skills/</code> 目录</li>
-                <li>每个技能需要包含 <code className="bg-muted px-1 rounded">SKILL.md</code> 文件描述技能</li>
-                <li>可选：在 <code className="bg-muted px-1 rounded">skills/skills.yaml</code> 中配置技能元数据</li>
+                <li>将技能文件夹放入 <code className="bg-muted px-1 rounded">skills/</code> 目录</li>
+                <li>每个技能需要包含带 frontmatter 的 <code className="bg-muted px-1 rounded">SKILL.md</code> 文件</li>
                 <li>刷新页面后技能将自动被发现</li>
               </ol>
             </div>

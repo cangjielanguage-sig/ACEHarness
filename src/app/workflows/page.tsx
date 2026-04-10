@@ -172,7 +172,7 @@ export default function WorkflowsPage() {
                     <div className="flex items-center gap-2 mb-1">
                       <h3 className="text-lg font-semibold">{workflow.name}</h3>
                       {workflow.mode === 'state-machine' && (
-                        <Badge className="bg-gradient-to-r from-purple-500 to-blue-500 text-white border-0 text-xs">
+                        <Badge className="bg-gradient-to-r from-purple-500 to-blue-500 text-white border-0 text-xs whitespace-nowrap shrink-0">
                           状态机
                         </Badge>
                       )}

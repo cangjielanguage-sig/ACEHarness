@@ -22,6 +22,7 @@ import Markdown from '@/components/Markdown';
 import ResizablePanels from '@/components/ResizablePanels';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { MultiCombobox } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -31,6 +32,7 @@ import { Separator } from '@/components/ui/separator';
 import { WorkspaceEditor } from '@/components/workspace/WorkspaceEditor';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Switch } from '@/components/ui/switch';
+import { EngineSelect } from '@/components/EngineSelect';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useToast } from '@/components/ui/toast';
@@ -183,7 +185,6 @@ export default function WorkbenchPage() {
   const [editingContextValue, setEditingContextValue] = useState('');
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
-  const [showSkillSelector, setShowSkillSelector] = useState(false);
   const [designTab, setDesignTab] = useState<'workflow' | 'config'>('workflow');
   const [forceTransitionModal, setForceTransitionModal] = useState<{ targetState: string; instruction: string } | null>(null);
   const liveStreamRef = useRef<EventSource | ReturnType<typeof setInterval> | null>(null);
@@ -197,7 +198,7 @@ export default function WorkbenchPage() {
     viewMode, workflowConfig, editingConfig, agentConfigs,
     workflowStatus, runId, currentPhase, currentStep, agents, logs, completedSteps, failedSteps,
     showCheckpoint, checkpointMessage, checkpointIsIterative, activeTab, selectedAgent, selectedStep,
-    projectRoot, requirements, timeoutMinutes, skills, showProcessPanel,
+    projectRoot, requirements, timeoutMinutes, engine, skills, showProcessPanel,
     showEditNodeModal, editingNode, iterationStates, stepResults, stepIdMap,
     globalContext, phaseContexts,
   } = state;
@@ -441,18 +442,27 @@ export default function WorkbenchPage() {
       if (!detail) return;
 
       // Map persisted agents to the Agent shape the run view expects
-      const agents = (detail.agents || []).map((a: any) => ({
-        name: a.name,
-        team: a.team,
-        model: a.model,
-        status: a.status || 'waiting',
-        currentTask: null,
-        completedTasks: a.completedTasks || 0,
-        tokenUsage: a.tokenUsage || { inputTokens: 0, outputTokens: 0 },
-        iterationCount: a.iterationCount || 0,
-        summary: a.summary || '',
-        changes: [],
-      }));
+      const agents = (detail.agents || []).map((a: any) => {
+        // Resolve model from current agent config (engineModels) if available
+        const roleConfig = agentConfigs.find((r: any) => r.name === a.name);
+        let model = a.model;
+        if (roleConfig?.engineModels) {
+          const eng = roleConfig.activeEngine ?? Object.keys(roleConfig.engineModels)[0];
+          model = roleConfig.engineModels[eng] || Object.values(roleConfig.engineModels)[0] || model;
+        }
+        return {
+          name: a.name,
+          team: a.team,
+          model,
+          status: a.status || 'waiting',
+          currentTask: null,
+          completedTasks: a.completedTasks || 0,
+          tokenUsage: a.tokenUsage || { inputTokens: 0, outputTokens: 0 },
+          iterationCount: a.iterationCount || 0,
+          summary: a.summary || '',
+          changes: [],
+        };
+      });
 
       // Restore all state into the run view
       dispatch({ type: 'SET_WORKFLOW_STATUS', payload: detail.status === 'crashed' ? 'failed' : detail.status });
@@ -591,6 +601,7 @@ export default function WorkbenchPage() {
       dispatch({ type: 'SET_PROJECT_ROOT', payload: config.context?.projectRoot || '' });
       dispatch({ type: 'SET_REQUIREMENTS', payload: config.context?.requirements || '' });
       dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: config.context?.timeoutMinutes || 30 });
+      dispatch({ type: 'SET_ENGINE', payload: config.context?.engine || '' });
       dispatch({ type: 'SET_SKILLS', payload: config.context?.skills || [] });
 
       // Load available skills
@@ -855,7 +866,7 @@ export default function WorkbenchPage() {
   const saveConfig = async () => {
     setSaving(true);
     try {
-      const config = { ...workflowConfig, context: { ...(workflowConfig.context || {}), projectRoot, requirements, timeoutMinutes, skills } };
+      const config = { ...workflowConfig, context: { ...(workflowConfig.context || {}), projectRoot, requirements, timeoutMinutes, engine: engine || undefined, skills } };
       await configApi.saveConfig(configFile, config);
       dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: config });
       toast('success', '配置已保存');
@@ -1878,11 +1889,11 @@ export default function WorkbenchPage() {
     <div className="flex flex-col h-screen bg-background/80 text-foreground">
       <div className="shrink-0 bg-muted border-b flex flex-wrap items-center px-4 py-2 gap-x-4 gap-y-2">
         <div className="flex items-center gap-2 shrink-0 min-w-0">
-          <Button variant="outline" size="sm" onClick={() => router.push('/workflows')}>
-            <span className="material-symbols-outlined text-sm">arrow_back</span><span className="hidden sm:inline"> 返回</span>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => router.push('/workflows')}>
+            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>arrow_back</span><span className="hidden sm:inline"> 返回</span>
           </Button>
-          <h1 className="text-sm sm:text-base font-semibold m-0 flex items-center gap-1.5 min-w-0 max-w-[160px] sm:max-w-[240px] lg:max-w-none">
-            <RobotLogo size={20} className="shrink-0" />
+          <h1 className="text-xs font-semibold m-0 flex items-center gap-1.5 min-w-0 max-w-[160px] sm:max-w-[240px] lg:max-w-none">
+            <RobotLogo size={18} className="shrink-0" />
             {isDesignMode ? (
               editingName ? (
                 <Input
@@ -1893,13 +1904,13 @@ export default function WorkbenchPage() {
                     if (e.key === 'Enter') saveWorkflowName(nameValue);
                     if (e.key === 'Escape') setEditingName(false);
                   }}
-                  className="h-6 text-sm font-semibold w-[150px]"
+                  className="h-6 text-xs font-semibold w-[150px]"
                   autoFocus
                 />
               ) : (
                 <button
                   onClick={() => { setEditingName(true); setNameValue(workflowConfig?.workflow?.name || ''); }}
-                  className="flex items-center gap-1 text-sm font-semibold hover:bg-background/50 px-2 py-0.5 rounded min-w-0 max-w-full"
+                  className="flex items-center gap-1 text-xs font-semibold hover:bg-background/50 px-2 py-0.5 rounded min-w-0 max-w-full"
                   title={workflowConfig?.workflow?.name || configFile}
                 >
                   <span className="truncate">{workflowConfig?.workflow?.name || configFile}</span>
@@ -1927,38 +1938,38 @@ export default function WorkbenchPage() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {isRunMode && (<>
-            <Button size="sm" onClick={startWorkflow} disabled={starting || isRunning || workflowStatus === 'running'}>
+            <Button size="sm" className="h-7 text-xs" onClick={startWorkflow} disabled={starting || isRunning || workflowStatus === 'running'}>
               {starting ? (
                 <ClipLoader color="currentColor" size={14} className="mr-1" />
               ) : (
-                <span className="material-symbols-outlined mr-1" style={{ fontSize: '16px' }}>play_arrow</span>
+                <span className="material-symbols-outlined mr-1" style={{ fontSize: 14 }}>play_arrow</span>
               )}
               <span className="hidden sm:inline">{starting ? '启动中...' : '启动工作流'}</span>
               <span className="sm:hidden">{starting ? '...' : '启动'}</span>
             </Button>
-            <Button variant="destructive" size="sm" onClick={stopWorkflow} disabled={!isRunning && workflowStatus !== 'running'}>
-              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>stop</span><span className="hidden sm:inline">停止</span>
+            <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={stopWorkflow} disabled={!isRunning && workflowStatus !== 'running'}>
+              <span className="material-symbols-outlined" style={{ fontSize: 14 }}>stop</span><span className="hidden sm:inline">停止</span>
             </Button>
             <ButtonGroup>
-              <Button variant="outline" size="sm" onClick={() => dispatch({ type: 'SET_SHOW_PROCESS_PANEL', payload: !showProcessPanel })}>
-                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>settings</span><span className="hidden sm:inline">进程</span>
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => dispatch({ type: 'SET_SHOW_PROCESS_PANEL', payload: !showProcessPanel })}>
+                <span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span><span className="hidden sm:inline">进程</span>
               </Button>
-              <Button variant="outline" size="sm" onClick={() => openContextEditor('global')} title="全局上下文">
-                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit_note</span><span className="hidden sm:inline">上下文</span>
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openContextEditor('global')} title="全局上下文">
+                <span className="material-symbols-outlined" style={{ fontSize: 14 }}>edit_note</span><span className="hidden sm:inline">上下文</span>
               </Button>
               {projectRoot && (
-                <Button variant="outline" size="sm" onClick={() => setWorkspaceEditorOpen(true)} title="打开工作区编辑器">
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_open</span><span className="hidden sm:inline">工作区</span>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setWorkspaceEditorOpen(true)} title="打开工作区编辑器">
+                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>folder_open</span><span className="hidden sm:inline">工作区</span>
                 </Button>
               )}
             </ButtonGroup>
           </>)}
           {isDesignMode && (
-            <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={handleSaveConfig} disabled={saving}>
+            <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white" onClick={handleSaveConfig} disabled={saving}>
               {saving ? (
                 <ClipLoader color="currentColor" size={14} className="mr-1" />
               ) : (
-                <span className="material-symbols-outlined text-sm mr-1">save</span>
+                <span className="material-symbols-outlined mr-1" style={{ fontSize: 14 }}>save</span>
               )}
               {saving ? '保存中...' : '保存配置'}
             </Button>
@@ -2070,17 +2081,17 @@ export default function WorkbenchPage() {
               )}
               <Tabs value={activeTab} onValueChange={(val) => dispatch({ type: 'SET_ACTIVE_TAB', payload: val })} className="flex flex-col flex-1 overflow-hidden">
                 <TabsList className="w-full rounded-none border-b flex-shrink-0 px-1 !flex flex-wrap h-auto gap-0.5 py-1">
-                  <TabsTrigger value="workflow" className="flex items-center justify-center gap-1 text-xs px-2 py-1">
+                  <TabsTrigger value="workflow" className="flex items-center justify-center gap-1 text-xs h-7 px-2">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>monitoring</span>工作流
                   </TabsTrigger>
-                  <TabsTrigger value="agents" className="flex items-center justify-center gap-1 text-xs px-2 py-1">
+                  <TabsTrigger value="agents" className="flex items-center justify-center gap-1 text-xs h-7 px-2">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>smart_toy</span>Agents
                   </TabsTrigger>
-        {(isDesignMode) && <TabsTrigger value="config" className="flex items-center justify-center gap-1 text-xs px-2 py-1"><span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span>配置</TabsTrigger>}
-                  <TabsTrigger value="documents" className="flex items-center justify-center gap-1 text-xs px-2 py-1">
+        {(isDesignMode) && <TabsTrigger value="config" className="flex items-center justify-center gap-1 text-xs h-7 px-2"><span className="material-symbols-outlined" style={{ fontSize: 14 }}>settings</span>配置</TabsTrigger>}
+                  <TabsTrigger value="documents" className="flex items-center justify-center gap-1 text-xs h-7 px-2">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>description</span>文档
                   </TabsTrigger>
-                  <TabsTrigger value="schedules" className="flex items-center justify-center gap-1 text-xs px-2 py-1">
+                  <TabsTrigger value="schedules" className="flex items-center justify-center gap-1 text-xs h-7 px-2">
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>schedule</span>定时
                   </TabsTrigger>
                 </TabsList>
@@ -2289,7 +2300,7 @@ export default function WorkbenchPage() {
                       <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">Agent 配置</div>
                       <div className="flex gap-2 items-center mb-1.5">
                         <span className="text-xs text-muted-foreground">模型</span>
-                        <span className="text-xs font-mono">{selectedRoleConfig.model || '-'}</span>
+                        <span className="text-xs font-mono">{selectedRoleConfig.engineModels?.[selectedRoleConfig.activeEngine] || Object.values(selectedRoleConfig.engineModels || {})[0] || selectedRoleConfig.model || '-'}</span>
                       </div>
                       {selectedRoleConfig.temperature !== undefined && (
                         <div className="flex gap-2 items-center mb-1.5">
@@ -2541,6 +2552,18 @@ export default function WorkbenchPage() {
                       </div>
                       <div className="p-5 space-y-5">
                         <div>
+                          <Label className="text-sm font-medium">执行引擎</Label>
+                          <div className="mt-2">
+                            <EngineSelect
+                              value={engine}
+                              onChange={(v) => dispatch({ type: 'SET_ENGINE', payload: v })}
+                              allowGlobal
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1.5">工作流使用的引擎，Agent 会根据引擎自动选择对应模型</p>
+                        </div>
+
+                        <div>
                           <Label className="text-sm font-medium">项目根目录</Label>
                           <Input
                             value={projectRoot}
@@ -2609,41 +2632,18 @@ export default function WorkbenchPage() {
 
                         {availableSkills.length > 0 && (
                           <div>
-                            <div className="flex items-center justify-between">
-                              <Label className="text-sm font-medium">Skills</Label>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => setShowSkillSelector(true)}
-                              >
-                                <span className="material-symbols-outlined text-xs mr-1">list</span>
-                                选择 ({skills.length})
-                              </Button>
-                            </div>
-                            <div className="mt-2 min-h-[40px] p-3 border rounded-md bg-muted/30">
-                              {skills.length > 0 ? (
-                                <div className="flex flex-wrap gap-1.5">
-                                  {skills.map((skillName) => (
-                                    <Badge key={skillName} variant="secondary" className="text-xs">
-                                      {skillName}
-                                      <button
-                                        type="button"
-                                        className="ml-1 hover:text-destructive"
-                                        onClick={() => dispatch({ type: 'SET_SKILLS', payload: skills.filter(s => s !== skillName) })}
-                                      >
-                                        ×
-                                      </button>
-                                    </Badge>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-center text-muted-foreground text-sm py-2">
-                                  <span className="material-symbols-outlined text-base mr-1">info</span>
-                                  未选择任何 Skills
-                                </div>
-                              )}
+                            <Label className="text-sm font-medium">Skills</Label>
+                            <div className="mt-2">
+                              <MultiCombobox
+                                value={skills}
+                                onValueChange={(v) => dispatch({ type: 'SET_SKILLS', payload: v })}
+                                options={availableSkills.map(skill => ({
+                                  value: skill.name,
+                                  label: skill.name,
+                                  description: skill.description,
+                                }))}
+                                placeholder="选择 Skills..."
+                              />
                             </div>
                             <p className="text-xs text-muted-foreground mt-1.5">选择工作流运行时可用的 Skills</p>
                           </div>
@@ -3420,63 +3420,6 @@ export default function WorkbenchPage() {
                   <Markdown>{mergeSubtaskDetails(markdownModal.chunks[0])}</Markdown>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-      {showSkillSelector && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setShowSkillSelector(false)}>
-          <div className="bg-card rounded-lg w-[700px] max-w-[90%] max-h-[80vh] flex flex-col border" onClick={(e) => e.stopPropagation()}>
-            <div className="p-5 border-b flex items-center justify-between shrink-0">
-              <h3 className="text-lg font-semibold">
-                <span className="material-symbols-outlined text-lg mr-2 align-middle">list</span>
-                选择 Skills
-              </h3>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowSkillSelector(false)}>
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
-              </Button>
-            </div>
-            <div className="flex-1 overflow-auto p-5">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-2 px-2 w-8"></th>
-                    <th className="text-left py-2 px-2">名称</th>
-                    <th className="text-left py-2 px-2">描述</th>
-                    <th className="text-left py-2 px-2">标签</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {availableSkills.map((skill) => (
-                    <tr key={skill.name} className="border-b hover:bg-muted/50">
-                      <td className="py-2 px-2">
-                        <Checkbox
-                          checked={skills.includes(skill.name)}
-                          onCheckedChange={(checked) => {
-                            const newSkills = checked
-                              ? [...skills, skill.name]
-                              : skills.filter(s => s !== skill.name);
-                            dispatch({ type: 'SET_SKILLS', payload: newSkills });
-                          }}
-                        />
-                      </td>
-                      <td className="py-2 px-2 font-medium">{skill.name}</td>
-                      <td className="py-2 px-2 text-muted-foreground">{skill.description}</td>
-                      <td className="py-2 px-2">
-                        <div className="flex flex-wrap gap-1">
-                          {(skill as any).tags?.slice(0, 3).map((tag: string) => (
-                            <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="p-4 border-t flex justify-between items-center shrink-0">
-              <span className="text-sm text-muted-foreground">已选择 {skills.length} 个</span>
-              <Button onClick={() => setShowSkillSelector(false)}>确定</Button>
             </div>
           </div>
         </div>

@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
 import Markdown from '@/components/Markdown';
-import { ModelSelect } from '@/components/ModelSelect';
+import { EngineModelSelect } from '@/components/EngineModelSelect';
+import { useCurrentEngine } from '@/components/EngineSelect';
 import { RobotLogo } from '@/components/chat/ChatMessage';
 import dynamic from 'next/dynamic';
 import type { RichTextEditorHandle } from '@/components/ui/RichTextEditor';
@@ -26,6 +27,8 @@ export default function ChatModal() {
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [model, setModel] = useState('claude-sonnet-4-6');
+  const [engine, setEngine] = useState('');
+  const effectiveEngine = useCurrentEngine(engine);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<RichTextEditorHandle>(null);
 
@@ -90,10 +93,12 @@ export default function ChatModal() {
           <div className="flex items-center justify-between px-4 py-3 border-b bg-muted flex-shrink-0">
             <span className="font-semibold text-sm">ACEHarness 在线</span>
             <div className="flex items-center gap-2">
-              <div className="w-48">
-                <ModelSelect
-                  value={model}
-                  onChange={setModel}
+              <div className="w-44">
+                <EngineModelSelect
+                  engine={engine}
+                  model={model}
+                  onEngineChange={setEngine}
+                  onModelChange={setModel}
                   className="h-7 text-xs"
                 />
               </div>

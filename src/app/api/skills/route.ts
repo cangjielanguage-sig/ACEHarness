@@ -1,174 +1,193 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 import { parse } from 'yaml';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { existsSync } from 'fs';
 
-const execAsync = promisify(exec);
+const SKILLS_DIR = path.join(process.cwd(), 'skills');
 
-// Skills 仓库路径
-const SKILLS_REPO_DIR = path.join(process.cwd(), 'skills');
-const SKILLS_CONFIG_FILE = path.join(SKILLS_REPO_DIR, 'skills.yaml');
-const SKILLS_REPO_URL = 'https://gitcode.com/cjc-compiler-frontend/cangjie_ace_skills.git';
-const ANTHROPICS_SKILLS_REPO_URL = 'https://github.com/anthropics/skills.git';
-const CLAUDE_SKILLS_SUBDIR = ['.claude', 'skills'].join('/');
-
-// 检查 skills 目录是否有内容（skills.yaml 存在即视为已初始化）
-async function isSkillsInitialized(): Promise<boolean> {
-  return fs.access(SKILLS_CONFIG_FILE).then(() => true).catch(() => false);
-}
-
-async function forcePullSkillsRepo(): Promise<boolean> {
+/** Parse YAML frontmatter from SKILL.md content */
+function parseFrontmatter(content: string): Record<string, any> | null {
+  if (!content.startsWith('---')) return null;
+  const endIdx = content.indexOf('---', 3);
+  if (endIdx < 0) return null;
   try {
-    const dirExists = await fs.access(SKILLS_REPO_DIR).then(() => true).catch(() => false);
-
-    if (!dirExists) {
-      // 目录不存在，直接克隆
-      await execAsync(`git clone ${SKILLS_REPO_URL} ${SKILLS_REPO_DIR}`);
-    } else {
-      // 目录存在，检查是否是 git 仓库
-      const isGitRepo = await fs.access(path.join(SKILLS_REPO_DIR, '.git')).then(() => true).catch(() => false);
-      if (isGitRepo) {
-        // 已有仓库，拉取最新
-        await execAsync('git fetch origin', { cwd: SKILLS_REPO_DIR });
-        try {
-          await execAsync('git reset --hard origin/main', { cwd: SKILLS_REPO_DIR });
-        } catch {
-          await execAsync('git reset --hard origin/master', { cwd: SKILLS_REPO_DIR });
-        }
-        await execAsync('git clean -fd', { cwd: SKILLS_REPO_DIR });
-      } else {
-        // 目录存在但不是 git 仓库，先克隆到临时目录再替换
-        const tmpDir = SKILLS_REPO_DIR + '_tmp';
-        // 清理可能残留的临时目录
-        await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-        await execAsync(`git clone ${SKILLS_REPO_URL} ${tmpDir}`);
-        await fs.rm(SKILLS_REPO_DIR, { recursive: true, force: true });
-        await fs.rename(tmpDir, SKILLS_REPO_DIR);
-      }
-    }
-    return true;
-  } catch (error) {
-    console.error('Failed to pull skills repo:', error);
-    return false;
+    return parse(content.substring(3, endIdx)) || null;
+  } catch {
+    return null;
   }
 }
 
+/** Scan skills/ directory, find xxx/SKILL.md with valid frontmatter */
+async function discoverSkills() {
+  const skills: any[] = [];
+  try {
+    const entries = await fs.readdir(SKILLS_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const skillMdPath = path.join(SKILLS_DIR, entry.name, 'SKILL.md');
+      try {
+        const content = await fs.readFile(skillMdPath, 'utf-8');
+        const fm = parseFrontmatter(content);
+        if (!fm || !fm.name) continue; // Must have frontmatter with name
+
+        // Check for PROMPT.md
+        const promptMdPath = path.join(SKILLS_DIR, entry.name, 'PROMPT.md');
+        const hasPromptMd = existsSync(promptMdPath);
+
+        skills.push({
+          name: fm.name,
+          path: entry.name,
+          description: fm.description || '',
+          descriptionZh: fm.descriptionZH || '',
+          tags: fm.tags || [],
+          source: fm.source || 'cangjie',
+          hasPromptMd,
+          detailedDescription: content,
+        });
+      } catch { /* no SKILL.md */ }
+    }
+  } catch { /* skills dir doesn't exist */ }
+  return skills;
+}
+
+// GET: List all skills
 export async function GET() {
   try {
-    // 检查 skills 目录是否存在
-    const skillsDirExists = await fs.access(SKILLS_REPO_DIR).then(() => true).catch(() => false);
-
-    if (!skillsDirExists) {
-      return NextResponse.json({
-        skills: [],
-        isCloned: false,
-        message: 'Skills 仓库未初始化'
-      });
+    const dirExists = existsSync(SKILLS_DIR);
+    if (!dirExists) {
+      return NextResponse.json({ skills: [], isCloned: true, message: 'Skills 目录不存在' });
     }
-
-    // 检查是否已初始化（有 skills.yaml）
-    const initialized = await isSkillsInitialized();
-    if (!initialized) {
-      return NextResponse.json({
-        skills: [],
-        isCloned: false,
-        message: 'Skills 目录为空，需要拉取仓库'
-      });
-    }
-
-    // 读取 skills.yaml
-    const content = await fs.readFile(SKILLS_CONFIG_FILE, 'utf-8');
-    const config = parse(content) as { skills: Array<{
-      name: string;
-      path: string;
-      description: string;
-      descriptionZh?: string;
-      tags: string[];
-      platforms?: string[];
-      version?: string;
-      updatedAt?: string;
-      contributors?: string[];
-      source?: string;
-    }> };
-
-    // 读取每个 skill 的详细描述
-    const skillsWithDetails = await Promise.all(
-      (config.skills || []).map(async (skill) => {
-        const skillPath = path.join(SKILLS_REPO_DIR, CLAUDE_SKILLS_SUBDIR, skill.path, 'SKILL.md');
-        let detailedDescription = '';
-        try {
-          detailedDescription = await fs.readFile(skillPath, 'utf-8');
-        } catch {
-          // 文件不存在
-        }
-        return {
-          ...skill,
-          detailedDescription
-        };
-      })
-    );
-
-    return NextResponse.json({
-      skills: skillsWithDetails,
-      isCloned: true
-    });
+    const skills = await discoverSkills();
+    return NextResponse.json({ skills, isCloned: true });
   } catch (error) {
     console.error('Failed to read skills:', error);
     return NextResponse.json({ error: 'Failed to read skills' }, { status: 500 });
   }
 }
 
-// 强制更新 skills 仓库
-export async function POST() {
+// POST: Upload zip to import skills
+export async function POST(request: NextRequest) {
   try {
-    const success = await forcePullSkillsRepo();
-    if (success) {
-      return NextResponse.json({ success: true, message: 'Skills 仓库已强制更新' });
-    } else {
-      return NextResponse.json({ success: false, error: '强制更新失败' }, { status: 500 });
+    const contentType = request.headers.get('content-type') || '';
+    if (!contentType.includes('multipart/form-data')) {
+      return NextResponse.json({ error: '请上传 ZIP 文件' }, { status: 400 });
     }
+
+    const formData = await request.formData();
+    const file = formData.get('file') as File | null;
+    if (!file) {
+      return NextResponse.json({ error: '未找到上传文件' }, { status: 400 });
+    }
+
+    // Save zip to temp
+    const tmpDir = path.join(process.cwd(), '.tmp_skill_upload');
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    const zipPath = path.join(tmpDir, 'upload.zip');
+    const buffer = Buffer.from(await file.arrayBuffer());
+    await fs.writeFile(zipPath, buffer);
+
+    // Unzip
+    const extractDir = path.join(tmpDir, 'extracted');
+    await fs.mkdir(extractDir, { recursive: true });
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    await execAsync(`unzip -o "${zipPath}" -d "${extractDir}"`);
+
+    // Find valid skills (directories containing SKILL.md)
+    const imported: string[] = [];
+    const entries = await fs.readdir(extractDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const skillMd = path.join(extractDir, entry.name, 'SKILL.md');
+      const hasSkillMd = existsSync(skillMd);
+      if (!hasSkillMd) continue;
+
+      // Copy to skills/
+      const dest = path.join(SKILLS_DIR, entry.name);
+      await fs.cp(path.join(extractDir, entry.name), dest, { recursive: true });
+      imported.push(entry.name);
+    }
+
+    // Also check if the zip itself is a single skill (SKILL.md at root of extracted)
+    if (imported.length === 0) {
+      const rootSkillMd = path.join(extractDir, 'SKILL.md');
+      if (existsSync(rootSkillMd)) {
+        // Use the zip filename (without .zip) as skill name
+        const skillName = file.name.replace(/\.zip$/i, '');
+        const dest = path.join(SKILLS_DIR, skillName);
+        await fs.cp(extractDir, dest, { recursive: true });
+        imported.push(skillName);
+      }
+    }
+
+    // Cleanup
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+
+    if (imported.length === 0) {
+      return NextResponse.json({ error: '未找到有效的 Skill（需包含 SKILL.md）' }, { status: 400 });
+    }
+
+    return NextResponse.json({ success: true, imported, message: `导入了 ${imported.length} 个 Skill` });
   } catch (error) {
-    console.error('Failed to sync skills:', error);
-    return NextResponse.json({ success: false, error: '强制更新失败' }, { status: 500 });
+    console.error('Failed to import skills:', error);
+    return NextResponse.json({ error: '导入失败: ' + (error as Error).message }, { status: 500 });
   }
 }
 
-// 从 Anthropics 官方仓库更新 skills
-export async function PUT() {
+// PUT: Export selected skills as zip
+export async function PUT(request: NextRequest) {
   try {
-    const tmpDir = path.join(process.cwd(), '.tmp_anthropics_skills');
-    const targetDir = path.join(SKILLS_REPO_DIR, CLAUDE_SKILLS_SUBDIR);
-
-    // 清理临时目录
-    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-
-    // 克隆 Anthropics 仓库
-    await execAsync(`git clone --depth 1 ${ANTHROPICS_SKILLS_REPO_URL} ${tmpDir}`);
-
-    // 复制 skills 到本地
-    const skillsSourceDir = path.join(tmpDir, 'skills');
-    const entries = await fs.readdir(skillsSourceDir, { withFileTypes: true });
-    let updated = 0;
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const src = path.join(skillsSourceDir, entry.name);
-      const dest = path.join(targetDir, entry.name);
-      await fs.cp(src, dest, { recursive: true });
-      updated++;
+    const body = await request.json();
+    const skillNames: string[] = body.skills || [];
+    if (skillNames.length === 0) {
+      return NextResponse.json({ error: '请选择要导出的 Skill' }, { status: 400 });
     }
 
-    // 清理临时目录
-    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    // Verify all skills exist
+    const missing: string[] = [];
+    for (const name of skillNames) {
+      if (!existsSync(path.join(SKILLS_DIR, name, 'SKILL.md'))) {
+        missing.push(name);
+      }
+    }
+    if (missing.length > 0) {
+      return NextResponse.json({ error: `找不到 Skill: ${missing.join(', ')}` }, { status: 404 });
+    }
 
-    return NextResponse.json({
-      success: true,
-      message: `已从 Anthropics 官方更新 ${updated} 个 skills`,
-      updated
+    // Create zip
+    const tmpDir = path.join(process.cwd(), '.tmp_skill_export');
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    // Copy skills to tmp
+    for (const name of skillNames) {
+      await fs.cp(path.join(SKILLS_DIR, name), path.join(tmpDir, name), { recursive: true });
+    }
+
+    const zipPath = path.join(process.cwd(), '.tmp_skills_export.zip');
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    await execAsync(`cd "${tmpDir}" && zip -r "${zipPath}" .`);
+
+    const zipBuffer = await fs.readFile(zipPath);
+
+    // Cleanup
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(zipPath, { force: true }).catch(() => {});
+
+    return new Response(zipBuffer, {
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="skills-export.zip"`,
+      },
     });
   } catch (error) {
-    console.error('Failed to update Anthropics skills:', error);
-    return NextResponse.json({ success: false, error: '从 Anthropics 官方更新失败' }, { status: 500 });
+    console.error('Failed to export skills:', error);
+    return NextResponse.json({ error: '导出失败: ' + (error as Error).message }, { status: 500 });
   }
 }

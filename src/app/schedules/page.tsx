@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SingleCombobox, ComboboxPortalProvider } from '@/components/ui/combobox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
@@ -275,6 +275,7 @@ export default function SchedulesPage() {
       {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
+          <ComboboxPortalProvider>
           <h2 className="text-lg font-semibold mb-4">{editingJob ? t('schedules.dialog.editTitle') : t('schedules.dialog.createTitle')}</h2>
           <div className="space-y-4">
             <div>
@@ -283,12 +284,12 @@ export default function SchedulesPage() {
             </div>
             <div>
               <Label>{t('schedules.dialog.configFile')}</Label>
-              <Select value={formConfig} onValueChange={setFormConfig}>
-                <SelectTrigger><SelectValue placeholder={t('schedules.dialog.selectConfig')} /></SelectTrigger>
-                <SelectContent>
-                  {configs.map(c => <SelectItem key={c.filename} value={c.filename}>{c.name} ({c.filename})</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SingleCombobox
+                value={formConfig}
+                onValueChange={setFormConfig}
+                options={configs.map(c => ({ value: c.filename, label: `${c.name} (${c.filename})` }))}
+                placeholder={t('schedules.dialog.selectConfig')}
+              />
             </div>
             <div>
               <Label>{t('schedules.dialog.scheduleMode')}</Label>
@@ -301,14 +302,16 @@ export default function SchedulesPage() {
                   <div className="flex gap-2 items-end">
                     <div className="flex-1">
                       <Label>{t('schedules.dialog.intervalType')}</Label>
-                      <Select value={formIntervalUnit} onValueChange={v => setFormIntervalUnit(v as any)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="hour">{t('schedules.dialog.everyNHours')}</SelectItem>
-                          <SelectItem value="day">{t('schedules.dialog.daily')}</SelectItem>
-                          <SelectItem value="week">{t('schedules.dialog.weekly')}</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <SingleCombobox
+                        value={formIntervalUnit}
+                        onValueChange={v => setFormIntervalUnit(v as any)}
+                        options={[
+                          { value: 'hour', label: t('schedules.dialog.everyNHours') },
+                          { value: 'day', label: t('schedules.dialog.daily') },
+                          { value: 'week', label: t('schedules.dialog.weekly') },
+                        ]}
+                        searchable={false}
+                      />
                     </div>
                     {formIntervalUnit === 'hour' && (
                       <div className="w-24">
@@ -322,12 +325,12 @@ export default function SchedulesPage() {
                       {formIntervalUnit === 'week' && (
                         <div className="flex-1">
                           <Label>{t('schedules.dialog.weekday')}</Label>
-                          <Select value={String(formWeekday)} onValueChange={v => setFormWeekday(Number(v))}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {WEEKDAYS.map((d, i) => <SelectItem key={i} value={String(i)}>{d}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
+                          <SingleCombobox
+                            value={String(formWeekday)}
+                            onValueChange={v => setFormWeekday(Number(v))}
+                            options={WEEKDAYS.map((d, i) => ({ value: String(i), label: d }))}
+                            searchable={false}
+                          />
                         </div>
                       )}
                       <div className="w-20">
@@ -359,6 +362,7 @@ export default function SchedulesPage() {
               <Button onClick={handleSave}>{editingJob ? t('schedules.dialog.save') : t('schedules.dialog.create')}</Button>
             </div>
           </div>
+          </ComboboxPortalProvider>
         </DialogContent>
       </Dialog>
 

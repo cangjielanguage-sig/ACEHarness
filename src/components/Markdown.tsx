@@ -1,12 +1,35 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import styles from './Markdown.module.css';
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [text]);
+  return (
+    <button
+      onClick={handleCopy}
+      className="absolute top-2 right-2 p-1.5 rounded text-xs bg-white/10 hover:bg-white/20 text-gray-300 transition-colors"
+      title="复制代码"
+    >
+      {copied ? (
+        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>check</span>
+      ) : (
+        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>content_copy</span>
+      )}
+    </button>
+  );
+}
 
 const verdictConfig: Record<string, { icon: string; label: string; color: string; bg: string; border: string }> = {
   pass: { icon: 'check_circle', label: '通过', color: 'text-green-500', bg: 'bg-green-500/10', border: 'border-green-500/30' },
@@ -58,14 +81,17 @@ const components = {
 
     if (match || isMultiLine) {
       return (
-        <SyntaxHighlighter
-          style={oneDark}
-          language={match?.[1] || 'text'}
-          PreTag="div"
-          customStyle={{ margin: 0, borderRadius: '6px', fontSize: '13px' }}
-        >
-          {code}
-        </SyntaxHighlighter>
+        <div className="relative group">
+          <CopyButton text={code} />
+          <SyntaxHighlighter
+            style={oneDark}
+            language={match?.[1] || 'text'}
+            PreTag="div"
+            customStyle={{ margin: 0, borderRadius: '6px', fontSize: '13px' }}
+          >
+            {code}
+          </SyntaxHighlighter>
+        </div>
       );
     }
     return (
@@ -113,11 +139,33 @@ const components = {
   },
 };
 
-// Preprocess: convert bare URLs to markdown links for GFM autolink
+// Valid HTML5 tag names (lowercase). Used to filter out non-standard tags like <float64>.
+const HTML_TAGS = new Set([
+  'a','abbr','address','area','article','aside','audio','b','base','bdi','bdo','blockquote',
+  'body','br','button','canvas','caption','cite','code','col','colgroup','data','datalist',
+  'dd','del','details','dfn','dialog','div','dl','dt','em','embed','fieldset','figcaption',
+  'figure','footer','form','h1','h2','h3','h4','h5','h6','head','header','hgroup','hr',
+  'html','i','iframe','img','input','ins','kbd','label','legend','li','link','main','map',
+  'mark','menu','meta','meter','nav','noscript','object','ol','optgroup','option','output',
+  'p','param','picture','pre','progress','q','rp','rt','ruby','s','samp','script','search',
+  'section','select','slot','small','source','span','strong','style','sub','summary','sup',
+  'table','tbody','td','template','textarea','tfoot','th','thead','time','title','tr','track',
+  'u','ul','var','video','wbr',
+]);
+
+// Preprocess: convert bare URLs to markdown links for GFM autolink,
+// and escape non-standard HTML-like tags (e.g. <float64>) so rehypeRaw doesn't choke.
 function preprocessMarkdown(content: string): string {
-  // GFM autolink literals: match URLs not already in markdown link format
-  // This handles URLs like https://example.com that aren't wrapped in []
-  return content.replace(
+  // 1. Escape angle brackets around non-standard tag names
+  const escaped = content.replace(
+    /<\/?([a-zA-Z][a-zA-Z0-9._-]*)(\s[^>]*)?\/?>/g,
+    (match, tagName) => {
+      if (HTML_TAGS.has(tagName.toLowerCase())) return match;
+      return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+  );
+  // 2. GFM autolink literals: wrap bare URLs in angle brackets
+  return escaped.replace(
     /(?<![<"\[])(https?:\/\/[^\s<>\]")]+)/g,
     '<$1>'
   );

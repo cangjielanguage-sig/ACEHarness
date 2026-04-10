@@ -181,5 +181,5 @@ context:
 ## 更多信息
 
 - 查看 `configs/agents/` 目录了解可用的 agent 配置
-- 查看 `skills/.claude/skills/` 目录了解可用的技能
+- 查看 `skills/` 目录了解可用的技能
 - 参考 `docs/` 目录了解 Supervisor 智能路由和工作流引擎的详细文档

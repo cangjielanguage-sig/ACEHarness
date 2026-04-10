@@ -13,13 +13,15 @@ import { ClipLoader } from 'react-spinners';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { ModelOption } from '@/lib/models';
+import { SingleCombobox, type ComboboxOption, type ComboboxGroupDef } from '@/components/ui/combobox';
 
 interface AgentConfig {
   name: string;
   team: 'blue' | 'red' | 'judge';
   category?: string;
   tags?: string[];
-  model: string;
+  engineModels: Record<string, string>;
+  activeEngine: string;
   temperature?: number;
   systemPrompt?: string;
   iterationPrompt?: string;
@@ -52,11 +54,15 @@ export default function AgentsPage() {
   const [batchReplacing, setBatchReplacing] = useState(false);
   const [alertMessage, setAlertMessage] = useState('');
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [globalEngine, setGlobalEngine] = useState('claude-code');
   const { confirm, dialogProps } = useConfirmDialog();
 
   useEffect(() => {
     loadAgents();
     loadModels();
+    fetch('/api/engine').then(r => r.json()).then(d => {
+      if (d.engine) setGlobalEngine(d.engine);
+    }).catch(() => {});
   }, []);
 
   const loadModels = async () => {
@@ -85,7 +91,8 @@ export default function AgentsPage() {
     setEditingAgent({
       name: '',
       team: 'blue',
-      model: 'gpt-4',
+      engineModels: { '': 'claude-sonnet-4-20250514' },
+      activeEngine: '',
       tags: [],
     });
     setIsNewAgent(true);
@@ -125,17 +132,23 @@ export default function AgentsPage() {
   };
 
   const handleBatchReplaceModel = async () => {
-    if (!fromModel.trim() || !toModel.trim()) {
+    if (!fromModel || !toModel) {
       setAlertMessage('请选择源模型和目标模型');
       return;
     }
-    if (fromModel === toModel) {
+    // Parse composite "engine::model" values
+    const [fromEng, ...fromRest] = fromModel.split('::');
+    const fromMod = fromRest.join('::');
+    const [toEng, ...toRest] = toModel.split('::');
+    const toMod = toRest.join('::');
+
+    if (fromEng === toEng && fromMod === toMod) {
       setAlertMessage('源模型和目标模型不能相同');
       return;
     }
     const confirmed = await confirm({
       title: '确认批量替换',
-      description: `确定要将所有使用 "${fromModel}" 的 Agent 替换为 "${toModel}" 吗？`,
+      description: `确定要将引擎 "${fromEng || '跟随全局'}" 下使用 "${fromMod}" 的 Agent 替换为 "${toEng || '跟随全局'}" 的 "${toMod}" 吗？`,
       confirmLabel: '确认替换',
       cancelLabel: '取消',
       variant: 'default',
@@ -144,7 +157,7 @@ export default function AgentsPage() {
 
     setBatchReplacing(true);
     try {
-      const result = await agentApi.batchReplaceModel(fromModel, toModel);
+      const result = await agentApi.batchReplaceModel(fromEng, fromMod, toMod);
       setAlertMessage(result.message);
       await loadAgents();
       setShowBatchReplaceModal(false);
@@ -173,8 +186,60 @@ export default function AgentsPage() {
     return 'common';
   };
 
-  // Get all unique models
-  const allModels = Array.from(new Set(agents.map(a => a.model).filter(Boolean)));
+  // Get all unique models (from engineModels values)
+  const allModels = Array.from(new Set(agents.flatMap(a => Object.values(a.engineModels || {})).filter(Boolean)));
+
+  const ALL_ENGINES = [
+    { id: '', name: '跟随全局', icon: '🌐' },
+    { id: 'claude-code', name: 'Claude Code', icon: '🤖' },
+    { id: 'kiro-cli', name: 'Kiro CLI', icon: '⚡' },
+    { id: 'opencode', name: 'OpenCode', icon: '🌐' },
+    { id: 'codex', name: 'Codex', icon: '🔮' },
+    { id: 'cursor', name: 'Cursor', icon: '✨' },
+    { id: 'cangjie-magic', name: 'CangjieMagic', icon: '🧙' },
+  ];
+
+  // Source: only engine::model combos that actually exist in agents
+  const batchSourceGroups: ComboboxGroupDef[] = (() => {
+    // Collect all existing engine::model pairs from agents
+    const existing = new Map<string, Set<string>>();
+    for (const a of agents) {
+      for (const [eng, mod] of Object.entries(a.engineModels || {})) {
+        if (!mod) continue;
+        if (!existing.has(eng)) existing.set(eng, new Set());
+        existing.get(eng)!.add(mod);
+      }
+    }
+    return ALL_ENGINES
+      .filter(eng => existing.has(eng.id))
+      .map(eng => ({
+        label: `${eng.icon} ${eng.name}`,
+        items: Array.from(existing.get(eng.id)!).map(mod => {
+          const label = availableModels.find(m => m.value === mod)?.label || mod;
+          return { value: `${eng.id}::${mod}`, label: `${eng.icon} ${label}` };
+        }),
+      }))
+      .filter(g => g.items.length > 0);
+  })();
+
+  // Target: filter by effective engine (follow-global uses globalEngine)
+  const batchTargetGroups: ComboboxGroupDef[] = (() => {
+    if (!fromModel) return [];
+    const [srcEng] = fromModel.split('::');
+    const effectiveEng = srcEng || globalEngine;
+    const eng = ALL_ENGINES.find(e => e.id === srcEng) || ALL_ENGINES[0];
+    const engineModels = availableModels.filter(
+      m => !m.engines || m.engines.length === 0 || m.engines.includes(effectiveEng),
+    );
+    if (engineModels.length === 0) return [];
+    return [{
+      label: `${eng.icon} ${eng.name}`,
+      items: engineModels.map(m => ({
+        value: `${srcEng}::${m.value}`,
+        label: `${eng.icon} ${m.label}`,
+      })),
+    }];
+  })();
 
   // Filter agents
   const filteredAgents = agents.filter(agent => {
@@ -430,7 +495,7 @@ export default function AgentsPage() {
                             )}
 
                             <div className="text-sm text-muted-foreground mb-2">
-                              <div>模型: {agent.model}</div>
+                              <div>模型: {agent.engineModels?.[agent.activeEngine] || Object.values(agent.engineModels || {})[0] || '未配置'}</div>
                               {agent.temperature !== undefined && (
                                 <div>Temperature: {agent.temperature}</div>
                               )}
@@ -494,34 +559,35 @@ export default function AgentsPage() {
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-sm font-medium mb-2 block">源模型</label>
-                <select
-                  className="w-full px-3 py-2 bg-background border rounded-md"
+                <label className="text-sm font-medium mb-2 block">源（引擎 + 模型）</label>
+                <SingleCombobox
                   value={fromModel}
-                  onChange={(e) => setFromModel(e.target.value)}
-                >
-                  <option value="">选择源模型</option>
-                  {allModels.map(model => (
-                    <option key={model} value={model}>{model}</option>
-                  ))}
-                </select>
+                  onValueChange={(v) => { setFromModel(v); setToModel(''); }}
+                  groups={batchSourceGroups}
+                  placeholder="选择当前使用的引擎和模型"
+                />
               </div>
               <div>
-                <label className="text-sm font-medium mb-2 block">目标模型</label>
-                <select
-                  className="w-full px-3 py-2 bg-background border rounded-md"
+                <label className="text-sm font-medium mb-2 block">替换为</label>
+                <SingleCombobox
                   value={toModel}
-                  onChange={(e) => setToModel(e.target.value)}
-                >
-                  <option value="">选择目标模型</option>
-                  {availableModels.map(model => (
-                    <option key={model.value} value={model.value}>{model.label}</option>
-                  ))}
-                </select>
+                  onValueChange={setToModel}
+                  groups={batchTargetGroups}
+                  placeholder={fromModel ? "选择目标模型" : "请先选择源模型"}
+                />
               </div>
-              <div className="text-sm text-muted-foreground">
-                将所有使用 "{fromModel || '(未选择)'}" 的 Agent 替换为 "{toModel || '(未选择)'}"
-              </div>
+              {fromModel && toModel && (() => {
+                const [fEng] = fromModel.split('::');
+                const fMod = fromModel.split('::').slice(1).join('::');
+                const tMod = toModel.split('::').slice(1).join('::');
+                const fEngName = ALL_ENGINES.find(e => e.id === fEng)?.name || fEng || '跟随全局';
+                const affected = agents.filter(a => a.engineModels?.[fEng] === fMod).length;
+                return (
+                  <div className="text-sm text-muted-foreground">
+                    将引擎 "{fEngName}" 下使用 "{fMod}" 的 Agent 模型替换为 "{tMod}"（影响 {affected} 个 Agent）
+                  </div>
+                );
+              })()}
             </div>
             <div className="p-5 border-t flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowBatchReplaceModal(false)} disabled={batchReplacing}>

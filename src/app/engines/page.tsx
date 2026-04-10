@@ -9,7 +9,25 @@ import { Badge } from '@/components/ui/badge';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { useToast } from '@/components/ui/toast';
-import { ArrowLeft, Check, Cpu, Zap } from 'lucide-react';
+import { ArrowLeft, Check, Cpu, Zap, Search, Download } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { SingleCombobox } from '@/components/ui/combobox';
+
+interface ModelOption {
+  value: string;
+  label: string;
+  costMultiplier: number;
+  engines?: string[];
+}
+
+interface DetectedModel {
+  modelId: string;
+  name: string;
+  selected: boolean;
+  label: string;
+  costMultiplier: number;
+}
 
 interface Engine {
   id: string;
@@ -82,6 +100,8 @@ export default function EnginesPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [currentEngine, setCurrentEngine] = useState<string>('claude-code');
+  const [defaultModel, setDefaultModel] = useState<string>('');
+  const [models, setModels] = useState<ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [engineAvailability, setEngineAvailability] = useState<Record<string, boolean>>({});
   const [checkingAvailability, setCheckingAvailability] = useState(false);
@@ -89,7 +109,19 @@ export default function EnginesPage() {
   useEffect(() => {
     loadCurrentEngine();
     checkEngineAvailability();
+    loadModels();
   }, []);
+
+  const loadModels = async () => {
+    try {
+      const res = await fetch('/api/models');
+      const data = await res.json();
+      setModels(data.models || []);
+    } catch { /* ignore */ }
+  };
+
+  const getModelsForEngine = (engineId: string) =>
+    models.filter(m => !m.engines || m.engines.length === 0 || m.engines.includes(engineId));
 
   const loadCurrentEngine = async () => {
     try {
@@ -97,6 +129,9 @@ export default function EnginesPage() {
       const data = await response.json();
       if (data.engine) {
         setCurrentEngine(data.engine);
+      }
+      if (data.defaultModel) {
+        setDefaultModel(data.defaultModel);
       }
     } catch (error) {
       console.error('Failed to load current engine:', error);
@@ -154,6 +189,11 @@ export default function EnginesPage() {
 
       if (response.ok) {
         setCurrentEngine(engineId);
+        // Check if current defaultModel is compatible with new engine
+        const compatible = getModelsForEngine(engineId);
+        if (defaultModel && !compatible.find(m => m.value === defaultModel)) {
+          setDefaultModel('');
+        }
         toast('success', `已切换到 ${engine?.name} 引擎`);
       } else {
         toast('error', '切换引擎失败');
@@ -161,6 +201,89 @@ export default function EnginesPage() {
     } catch (error) {
       console.error('Failed to set engine:', error);
       toast('error', '切换引擎失败: ' + (error as Error).message);
+    }
+  };
+
+  const handleSetDefaultModel = async (modelValue: string) => {
+    try {
+      const response = await fetch('/api/engine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engine: currentEngine, defaultModel: modelValue }),
+      });
+      if (response.ok) {
+        setDefaultModel(modelValue);
+        const label = models.find(m => m.value === modelValue)?.label || modelValue;
+        toast('success', `默认模型已设置: ${label}`);
+      }
+    } catch (error) {
+      console.error('Failed to set default model:', error);
+      toast('error', '设置默认模型失败');
+    }
+  };
+
+  // --- Model detection ---
+  const [detecting, setDetecting] = useState(false);
+  const [detectedModels, setDetectedModels] = useState<DetectedModel[]>([]);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [detectingEngine, setDetectingEngine] = useState('');
+
+  const handleDetectModels = async (engineId: string) => {
+    setDetecting(true);
+    setDetectingEngine(engineId);
+    try {
+      const res = await fetch(`/api/engine/models?engine=${engineId}`);
+      const data = await res.json();
+      if (data.error) {
+        toast('error', `检测失败: ${data.error}`);
+        return;
+      }
+      const existing = new Set(models.map(m => m.value));
+      const detected: DetectedModel[] = (data.models || []).map((m: any) => ({
+        modelId: m.modelId,
+        name: m.name,
+        selected: !existing.has(m.modelId),
+        label: m.name || m.modelId,
+        costMultiplier: 0.1,
+      }));
+      setDetectedModels(detected);
+      setShowImportDialog(true);
+    } catch (error) {
+      toast('error', `检测失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  const handleImportModels = async () => {
+    const toImport = detectedModels.filter(m => m.selected);
+    if (toImport.length === 0) {
+      toast('warning', '请至少选择一个模型');
+      return;
+    }
+    const newModels: ModelOption[] = toImport.map(m => ({
+      value: m.modelId,
+      label: m.label,
+      costMultiplier: m.costMultiplier,
+      endpoints: [],
+      engines: [detectingEngine],
+    }));
+    const merged = [...models, ...newModels];
+    try {
+      const res = await fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ models: merged }),
+      });
+      if (res.ok) {
+        setModels(merged);
+        toast('success', `已导入 ${toImport.length} 个模型`);
+        setShowImportDialog(false);
+      } else {
+        toast('error', '保存模型失败');
+      }
+    } catch {
+      toast('error', '保存模型失败');
     }
   };
 
@@ -305,6 +428,38 @@ export default function EnginesPage() {
                   切换到此引擎
                 </Button>
               )}
+
+              {/* Default Model Selector — only for current engine */}
+              {currentEngine === engine.id && (
+                <div className="mt-4 pt-4 border-t border-border/50" onClick={(e) => e.stopPropagation()}>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">默认模型：</p>
+                  <SingleCombobox
+                    value={defaultModel}
+                    onValueChange={(v) => handleSetDefaultModel(v)}
+                    options={[
+                      { value: '', label: '未设置（使用全局默认）' },
+                      ...getModelsForEngine(engine.id).map(m => ({
+                        value: m.value,
+                        label: `${m.label} (${m.costMultiplier}x)`,
+                      })),
+                    ]}
+                    placeholder="选择默认模型"
+                    triggerClassName="h-9 text-sm"
+                  />
+                  {engine.id !== 'claude-code' && engine.id !== 'cangjie-magic' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full mt-2"
+                      disabled={detecting}
+                      onClick={() => handleDetectModels(engine.id)}
+                    >
+                      <Search className="w-4 h-4 mr-2" />
+                      {detecting && detectingEngine === engine.id ? '检测中...' : '检测可用模型'}
+                    </Button>
+                  )}
+                </div>
+              )}
             </motion.div>
           ))}
         </div>
@@ -368,6 +523,81 @@ CANGJIE_STDX_PATH — stdx 动态库路径`}
           </div>
         </motion.div>
       </div>
+
+      {/* Model Import Dialog */}
+      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogTitle className="text-lg font-semibold">
+            <Download className="w-5 h-5 inline mr-2" />
+            导入模型 — {engines.find(e => e.id === detectingEngine)?.name}
+          </DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            检测到 {detectedModels.length} 个模型，勾选要导入到模型列表的模型：
+          </p>
+          <div className="flex-1 overflow-auto border rounded-lg">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 sticky top-0">
+                <tr>
+                  <th className="p-2 w-8">
+                    <input
+                      type="checkbox"
+                      checked={detectedModels.every(m => m.selected)}
+                      onChange={(e) => setDetectedModels(prev => prev.map(m => ({ ...m, selected: e.target.checked })))}
+                      className="rounded"
+                    />
+                  </th>
+                  <th className="p-2 text-left">模型 ID</th>
+                  <th className="p-2 text-left">显示名称</th>
+                  <th className="p-2 text-left w-24">费用倍率</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detectedModels.map((m, i) => (
+                  <tr key={m.modelId} className="border-t border-border/30 hover:bg-muted/30">
+                    <td className="p-2">
+                      <input
+                        type="checkbox"
+                        checked={m.selected}
+                        onChange={(e) => setDetectedModels(prev => prev.map((dm, j) => j === i ? { ...dm, selected: e.target.checked } : dm))}
+                        className="rounded"
+                      />
+                    </td>
+                    <td className="p-2 font-mono text-xs">{m.modelId}</td>
+                    <td className="p-2">
+                      <Input
+                        value={m.label}
+                        onChange={(e) => setDetectedModels(prev => prev.map((dm, j) => j === i ? { ...dm, label: e.target.value } : dm))}
+                        className="h-7 text-xs"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={m.costMultiplier}
+                        onChange={(e) => setDetectedModels(prev => prev.map((dm, j) => j === i ? { ...dm, costMultiplier: parseFloat(e.target.value) || 0 } : dm))}
+                        className="h-7 text-xs w-20"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex justify-between items-center pt-2">
+            <span className="text-xs text-muted-foreground">
+              已选择 {detectedModels.filter(m => m.selected).length} / {detectedModels.length}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowImportDialog(false)}>取消</Button>
+              <Button onClick={handleImportModels}>
+                <Download className="w-4 h-4 mr-2" />
+                导入选中模型
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

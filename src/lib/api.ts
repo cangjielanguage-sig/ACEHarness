@@ -184,11 +184,11 @@ export const agentApi = {
     return response.json();
   },
 
-  async batchReplaceModel(fromModel: string, toModel: string): Promise<ApiResponse & { updatedCount: number }> {
+  async batchReplaceModel(engine: string | undefined, fromModel: string, toModel: string): Promise<ApiResponse & { updatedCount: number }> {
     const response = await fetch(`${API_BASE}/agents/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'replace-model', fromModel, toModel }),
+      body: JSON.stringify({ action: 'replace-model', engine, fromModel, toModel }),
     });
     if (!response.ok) throw new Error('批量替换模型失败');
     return response.json();
@@ -577,8 +577,8 @@ export interface TreeNode {
 }
 
 export const workspaceApi = {
-  async getTree(workspacePath: string): Promise<{ tree: TreeNode[] }> {
-    const res = await fetch(`${API_BASE}/workspace/tree?path=${encodeURIComponent(workspacePath)}`);
+  async getTree(workspacePath: string, depth = 2): Promise<{ tree: TreeNode[] }> {
+    const res = await fetch(`${API_BASE}/workspace/tree?path=${encodeURIComponent(workspacePath)}&depth=${depth}`);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || '获取文件树失败');

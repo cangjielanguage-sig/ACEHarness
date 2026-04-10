@@ -5,7 +5,6 @@ tags:
   - 测试
   - 质量保证
   - 自动化测试
-model: claude-opus-4-6
 temperature: 0.3
 allowedTools:
   - Bash
@@ -105,3 +104,6 @@ iterationPrompt: |
   - 新增测试用例列表（含测试目标和覆盖场景）
   - 测试执行结果
   - 覆盖率改进报告
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

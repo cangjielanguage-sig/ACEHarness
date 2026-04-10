@@ -48,15 +48,8 @@ runs/
 .opencode/
 .codex/
 .cursor/
-
-/configs/agents/simple-reviewer.yaml
-/configs/agents/simple-tester.yaml
-/configs/agents/simple-coder.yaml
-/configs/test-blite-supervisor.yaml
+.cursorrules
 
 # ACEHarness data
 data/*
-!data/chat-settings.yaml
-!data/users/
-# skills/
-configs/x.yaml
+.engine.json

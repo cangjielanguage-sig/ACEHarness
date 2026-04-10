@@ -7,13 +7,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Checkbox } from './ui/checkbox';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select';
+import { SingleCombobox } from '@/components/ui/combobox';
 import {
   DndContext,
   closestCenter,
@@ -141,16 +135,14 @@ function TransitionRow({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs mb-1 block">跳转到</Label>
-              <Select value={transition.to} onValueChange={(v) => onChange({ ...transition, to: v })}>
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="选择目标状态" />
-                </SelectTrigger>
-                <SelectContent>
-                  {states.map(s => (
-                    <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SingleCombobox
+                value={transition.to}
+                onValueChange={(v) => onChange({ ...transition, to: v })}
+                options={states.map(s => ({ value: s.name, label: s.name }))}
+                placeholder="选择目标状态"
+                triggerClassName="h-8 text-sm"
+                searchable={false}
+              />
             </div>
             <div>
               <Label className="text-xs mb-1 block">优先级（数字越小越优先）</Label>

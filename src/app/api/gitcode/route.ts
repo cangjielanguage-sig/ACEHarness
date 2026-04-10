@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { execFile } from 'child_process';
 import { resolve } from 'path';
 
-const SCRIPT_PATH = resolve(process.cwd(), 'skills/.claude/skills/power-gitcode/scripts/power-gitcode.py');
+const SCRIPT_PATH = resolve(process.cwd(), 'skills/power-gitcode/scripts/power-gitcode.py');
 
 const ALLOWED_COMMANDS = new Set([
   'create_pr', 'get_pr', 'get_pr_commits', 'get_pr_changed_files', 'get_pr_comments',

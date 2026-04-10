@@ -6,7 +6,6 @@ tags:
   - 仓颉
   - 压力测试
   - 性能测试
-model: claude-opus-4-6
 temperature: 0.8
 allowedTools:
   - Bash
@@ -97,3 +96,6 @@ iterationPrompt: |
   - 优化完备性评估（未到位的优化点）
   - 性能风险更新
   - 人工反馈响应（如有）
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

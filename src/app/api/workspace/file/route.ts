@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 
-const MAX_FILE_SIZE = 100 * 1024; // 100KB
+const MAX_FILE_SIZE = 200 * 1024; // 100KB
 
 function isPathSafe(workspace: string, filePath: string, resolvedPath: string): boolean {
   const expectedBase = path.resolve(workspace);
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
 
     if (stat.size > MAX_FILE_SIZE) {
       return NextResponse.json(
-        { error: '文件超过 100KB 限制', size: stat.size, path: file },
+        { error: '文件超过 200KB 限制', size: stat.size, path: file },
         { status: 413 }
       );
     }

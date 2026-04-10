@@ -8,6 +8,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { ModelSelect } from '@/components/ModelSelect';
+import { SingleCombobox } from '@/components/ui/combobox';
+import { EngineSelect } from '@/components/EngineSelect';
 
 interface SubAgent {
   description: string;
@@ -27,7 +29,8 @@ interface AgentConfig {
   team: 'blue' | 'red' | 'judge';
   category?: string;
   tags?: string[];
-  model: string;
+  engineModels: Record<string, string>;
+  activeEngine: string;
   temperature?: number;
   systemPrompt?: string;
   iterationPrompt?: string;
@@ -49,7 +52,13 @@ interface AgentEditModalProps {
 const CATEGORIES = ['测试', '编码', '设计', '压力测试', '审查', '文档', '其他'];
 
 export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentEditModalProps) {
-  const [formData, setFormData] = useState<AgentConfig>(agent);
+  // Normalize: ensure engineModels exists (backward compat with old model field)
+  const normalizedAgent = {
+    ...agent,
+    engineModels: agent.engineModels || ((agent as any).model ? { '': (agent as any).model } : { '': 'claude-sonnet-4-20250514' }),
+    activeEngine: agent.activeEngine ?? '',
+  };
+  const [formData, setFormData] = useState<AgentConfig>(normalizedAgent);
   const [newTag, setNewTag] = useState('');
   const [newCapability, setNewCapability] = useState('');
   const [newConstraint, setNewConstraint] = useState('');
@@ -154,36 +163,30 @@ export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentE
 
             <div>
               <Label>团队 *</Label>
-              <select
-                className="w-full h-10 px-3 rounded-md border bg-background"
+              <SingleCombobox
                 value={formData.team}
-                onChange={(e) => setFormData({ ...formData, team: e.target.value as any })}
-              >
-                <option value="blue">蓝队（防守）</option>
-                <option value="red">红队（攻击）</option>
-                <option value="judge">裁判</option>
-              </select>
+                onValueChange={(v) => setFormData({ ...formData, team: v as any })}
+                options={[
+                  { value: 'blue', label: '蓝队（防守）' },
+                  { value: 'red', label: '红队（攻击）' },
+                  { value: 'judge', label: '裁判' },
+                ]}
+                placeholder="选择团队"
+                searchable={false}
+              />
             </div>
 
             <div>
               <Label>分类</Label>
-              <select
-                className="w-full h-10 px-3 rounded-md border bg-background"
+              <SingleCombobox
                 value={formData.category || ''}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value || undefined })}
-              >
-                <option value="">未分类</option>
-                {CATEGORIES.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <Label>模型 *</Label>
-              <ModelSelect
-                value={formData.model}
-                onChange={(value) => setFormData({ ...formData, model: value })}
+                onValueChange={(v) => setFormData({ ...formData, category: v || undefined })}
+                options={[
+                  { value: '', label: '未分类' },
+                  ...CATEGORIES.map(cat => ({ value: cat, label: cat })),
+                ]}
+                placeholder="选择分类"
+                searchable={false}
               />
             </div>
 
@@ -198,6 +201,79 @@ export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentE
                 onChange={(e) => setFormData({ ...formData, temperature: e.target.value ? parseFloat(e.target.value) : undefined })}
                 placeholder="0.7"
               />
+            </div>
+          </div>
+
+          {/* 模型配置 */}
+          <div>
+            <Label>模型配置 *</Label>
+            <p className="text-xs text-muted-foreground mb-2">配置各引擎使用的模型，选中的为当前启用</p>
+            <div className="space-y-2">
+              {Object.entries(formData.engineModels).map(([eng, mod]) => (
+                <div key={eng} className="flex gap-2 items-center">
+                  <button
+                    type="button"
+                    className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center ${formData.activeEngine === eng ? 'border-primary bg-primary' : 'border-muted-foreground/40'}`}
+                    onClick={() => setFormData({ ...formData, activeEngine: eng })}
+                    title="设为启用"
+                  >
+                    {formData.activeEngine === eng && <span className="w-2 h-2 rounded-full bg-white" />}
+                  </button>
+                  <div className="w-[130px] shrink-0">
+                    <EngineSelect
+                      value={eng}
+                      onChange={(newEng) => {
+                        if (newEng === eng) return;
+                        const updated = { ...formData.engineModels };
+                        const model = updated[eng];
+                        delete updated[eng];
+                        updated[newEng] = model;
+                        const newActive = formData.activeEngine === eng ? newEng : formData.activeEngine;
+                        setFormData({ ...formData, engineModels: updated, activeEngine: newActive });
+                      }}
+                      allowGlobal
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <ModelSelect
+                      value={mod}
+                      onChange={(v) => setFormData({ ...formData, engineModels: { ...formData.engineModels, [eng]: v } })}
+                      engine={eng || undefined}
+                    />
+                  </div>
+                  {Object.keys(formData.engineModels).length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        const updated = { ...formData.engineModels };
+                        delete updated[eng];
+                        const newActive = formData.activeEngine === eng ? Object.keys(updated)[0] : formData.activeEngine;
+                        setFormData({ ...formData, engineModels: updated, activeEngine: newActive });
+                      }}
+                    >
+                      <span className="material-symbols-outlined text-sm text-destructive">delete</span>
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const usedEngines = Object.keys(formData.engineModels);
+                  const allEngines = ['', 'claude-code', 'kiro-cli', 'opencode', 'codex', 'cursor', 'cangjie-magic'];
+                  const available = allEngines.find(e => !usedEngines.includes(e));
+                  if (available === undefined) return;
+                  const defaultModel = Object.values(formData.engineModels)[0] || '';
+                  setFormData({ ...formData, engineModels: { ...formData.engineModels, [available]: defaultModel } });
+                }}
+              >
+                <span className="material-symbols-outlined text-sm mr-1">add</span>
+                添加引擎
+              </Button>
             </div>
           </div>
 

@@ -7,7 +7,6 @@ tags:
   - 防御
   - 构建
   - 修复
-model: claude-opus-4-6
 temperature: 0.3
 allowedTools:
   - Bash
@@ -101,3 +100,6 @@ systemPrompt: >
   - 如有错误：按优先级流程处理的过程
 
   - 最终状态（成功/失败 + 原因）
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

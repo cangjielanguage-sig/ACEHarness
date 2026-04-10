@@ -6,7 +6,7 @@ import { parse, stringify } from 'yaml';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { action, fromModel, toModel } = body;
+    const { action, engine, fromModel, toModel } = body;
 
     if (action !== 'replace-model') {
       return NextResponse.json(
@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!fromModel || !toModel) {
+    if (fromModel === undefined || !toModel) {
       return NextResponse.json(
         { error: '缺少必要参数' },
         { status: 400 }
@@ -27,6 +27,8 @@ export async function POST(request: NextRequest) {
     const yamlFiles = files.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
 
     let updatedCount = 0;
+    // engine key: "" means follow-global, undefined means match all engines
+    const targetEngine = engine ?? undefined;
 
     for (const file of yamlFiles) {
       try {
@@ -34,11 +36,22 @@ export async function POST(request: NextRequest) {
         const content = await readFile(filepath, 'utf-8');
         const agent = parse(content);
 
-        if (agent.model === fromModel) {
-          agent.model = toModel;
-          const yamlContent = stringify(agent);
-          await writeFile(filepath, yamlContent, 'utf-8');
-          updatedCount++;
+        if (agent.engineModels && typeof agent.engineModels === 'object') {
+          let changed = false;
+          const engines = targetEngine !== undefined
+            ? [targetEngine]
+            : Object.keys(agent.engineModels);
+
+          for (const eng of engines) {
+            if (agent.engineModels[eng] === fromModel) {
+              agent.engineModels[eng] = toModel;
+              changed = true;
+            }
+          }
+          if (changed) {
+            await writeFile(filepath, stringify(agent), 'utf-8');
+            updatedCount++;
+          }
         }
       } catch (error) {
         console.error(`Failed to update ${file}:`, error);

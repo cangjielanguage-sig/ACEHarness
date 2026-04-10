@@ -57,6 +57,7 @@ export interface WorkflowState {
   projectRoot: string;
   requirements: string;
   timeoutMinutes: number;
+  engine: string;
   skills: string[];
   showProcessPanel: boolean;
   showEditNodeModal: boolean;
@@ -96,6 +97,7 @@ type WorkflowAction =
   | { type: 'SET_PROJECT_ROOT'; payload: string }
   | { type: 'SET_REQUIREMENTS'; payload: string }
   | { type: 'SET_TIMEOUT_MINUTES'; payload: number }
+  | { type: 'SET_ENGINE'; payload: string }
   | { type: 'SET_SKILLS'; payload: string[] }
   | { type: 'SET_SHOW_PROCESS_PANEL'; payload: boolean }
   | { type: 'SET_SHOW_EDIT_NODE_MODAL'; payload: boolean }
@@ -133,6 +135,7 @@ function createInitialState(initialViewMode: ViewMode = 'run'): WorkflowState {
     projectRoot: '',
     requirements: '',
     timeoutMinutes: 30,
+    engine: '',
     skills: [],
     showProcessPanel: false,
     showEditNodeModal: false,
@@ -174,6 +177,7 @@ function workflowReducer(state: WorkflowState, action: WorkflowAction): Workflow
     case 'SET_PROJECT_ROOT': return { ...state, projectRoot: action.payload };
     case 'SET_REQUIREMENTS': return { ...state, requirements: action.payload };
     case 'SET_TIMEOUT_MINUTES': return { ...state, timeoutMinutes: action.payload };
+    case 'SET_ENGINE': return { ...state, engine: action.payload };
     case 'SET_SKILLS': return { ...state, skills: action.payload };
     case 'SET_SHOW_PROCESS_PANEL': return { ...state, showProcessPanel: action.payload };
     case 'SET_SHOW_EDIT_NODE_MODAL': return { ...state, showEditNodeModal: action.payload };

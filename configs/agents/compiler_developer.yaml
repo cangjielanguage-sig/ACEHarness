@@ -5,7 +5,6 @@ tags:
   - 编码
   - 开发
   - 实现
-model: claude-opus-4-6
 temperature: 0.3
 allowedTools:
   - Bash
@@ -101,3 +100,6 @@ iterationPrompt: |
   - 修复方案说明
   - 修改的文件列表和变更内容
   - 测试验证结果
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

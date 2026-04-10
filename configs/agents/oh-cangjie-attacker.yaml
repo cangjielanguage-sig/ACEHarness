@@ -7,7 +7,6 @@ tags:
   - 攻击
   - 漏洞挖掘
   - 边界测试
-model: claude-opus-4-6
 temperature: 0.7
 allowedTools:
   - Bash
@@ -44,7 +43,7 @@ systemPrompt: |
 
   工作流程（严格遵守 harmonyos-build 的优先级流程）：
   1. 构建失败时，首先使用 harmonyos-evolution skill 检查 Evolution.md
-  2. 如果未找到，使用 .claude/skills/cangjie-* 基础 skills 分析错误
+  2. 如果未找到，使用 skill/cangjie-* 基础 skills 分析错误
   3. 如果仍无法解决，使用 harmonyos-vec-retriever-guide 进行 L1 检索
   4. 最后使用 harmonyos-doc-search-guide 进行 L3 文档搜索
 
@@ -63,3 +62,6 @@ constraints:
   - 优先报告会导致崩溃或未定义行为的问题
   - 使用 harmonyos-build skill 进行构建验证时，必须先复制 build.py 脚本
   - 构建日志必须落盘到文件后再读取分析
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

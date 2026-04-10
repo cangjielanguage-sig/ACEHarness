@@ -7,7 +7,6 @@ tags:
   - 问题
   - 复现
   - 诊断
-model: claude-opus-4-6
 temperature: 0.7
 allowedTools:
   - Bash
@@ -142,3 +141,6 @@ iterationPrompt: |
   4. 下一步计划（如有）
 
   重要：不要省略命令输出，不要用"结果同上"代替实际数据。每个实验都是独立的证据，必须完整记录。
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

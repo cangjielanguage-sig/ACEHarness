@@ -48,17 +48,41 @@ function TreeFileItem({
 
 function TreeDirItem({
   node,
+  workspacePath,
   selectedFile,
   onSelectFile,
   depth,
 }: {
   node: TreeNode
+  workspacePath: string
   selectedFile: string | null
   onSelectFile: (filePath: string) => void
   depth: number
 }) {
+  const [children, setChildren] = React.useState<TreeNode[] | undefined>(node.children)
+  const [loadingChildren, setLoadingChildren] = React.useState(false)
+
+  // Sync with prop when parent re-fetches
+  React.useEffect(() => { setChildren(node.children) }, [node.children])
+
+  const handleOpenChange = React.useCallback(async (open: boolean) => {
+    // Lazy load: children === undefined means not yet fetched
+    if (open && children === undefined && !loadingChildren) {
+      setLoadingChildren(true)
+      try {
+        const params = new URLSearchParams({ path: workspacePath, sub: node.path, depth: '2' })
+        const res = await fetch(`/api/workspace/tree?${params}`)
+        if (res.ok) {
+          const data = await res.json()
+          setChildren(data.tree || [])
+        }
+      } catch { /* ignore */ }
+      setLoadingChildren(false)
+    }
+  }, [children, loadingChildren, workspacePath, node.path])
+
   return (
-    <Collapsible className="group/collapsible">
+    <Collapsible className="group/collapsible" onOpenChange={handleOpenChange}>
       <CollapsibleTrigger asChild>
         <button
           className="flex items-center gap-2 w-full px-2 py-1 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground"
@@ -71,23 +95,31 @@ function TreeDirItem({
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        {node.children?.map((child) =>
-          child.type === "directory" ? (
-            <TreeDirItem
-              key={child.path}
-              node={child}
-              selectedFile={selectedFile}
-              onSelectFile={onSelectFile}
-              depth={depth + 1}
-            />
-          ) : (
-            <TreeFileItem
-              key={child.path}
-              node={child}
-              selectedFile={selectedFile}
-              onSelectFile={onSelectFile}
-              depth={depth + 1}
-            />
+        {loadingChildren ? (
+          <div className="flex items-center gap-2 px-2 py-1" style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}>
+            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">加载中...</span>
+          </div>
+        ) : (
+          children?.map((child) =>
+            child.type === "directory" ? (
+              <TreeDirItem
+                key={child.path}
+                node={child}
+                workspacePath={workspacePath}
+                selectedFile={selectedFile}
+                onSelectFile={onSelectFile}
+                depth={depth + 1}
+              />
+            ) : (
+              <TreeFileItem
+                key={child.path}
+                node={child}
+                selectedFile={selectedFile}
+                onSelectFile={onSelectFile}
+                depth={depth + 1}
+              />
+            )
           )
         )}
       </CollapsibleContent>
@@ -126,6 +158,7 @@ export function FileTreeSidebar({
               <TreeDirItem
                 key={node.path}
                 node={node}
+                workspacePath={workspacePath}
                 selectedFile={selectedFile}
                 onSelectFile={onSelectFile}
                 depth={0}

@@ -5,7 +5,6 @@ tags:
   - 设计
   - 架构
   - 系统设计
-model: claude-opus-4-6
 temperature: 0.7
 allowedTools:
   - Bash
@@ -107,3 +106,6 @@ iterationPrompt: |
   - 禁止出现"补丁"、"增量修改"、"相比上一轮"等措辞
   - 读者无需翻阅任何历史迭代记录即可理解全貌并直接用于编码
 _file: architect.yaml
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""

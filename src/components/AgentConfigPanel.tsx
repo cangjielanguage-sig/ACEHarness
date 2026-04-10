@@ -89,7 +89,7 @@ export default function AgentConfigPanel({ agents, onSaveAgent, onDeleteAgent }:
                   <Badge className={teamBadgeClass[role.team]}>{role.team}</Badge>
                 </div>
                 <div className="flex gap-2 mt-1">
-                  <Badge variant="secondary" className="text-xs">{role.model}</Badge>
+                  <Badge variant="secondary" className="text-xs">{role.engineModels?.[role.activeEngine] || Object.values(role.engineModels || {})[0] || '未配置'}</Badge>
                   {role.temperature !== undefined && (
                     <Badge variant="secondary" className="text-xs">temp: {role.temperature}</Badge>
                   )}
@@ -142,7 +142,8 @@ function RoleEditForm({
     defaultValues: role || {
       name: '',
       team: 'blue',
-      model: 'claude-opus-4-6',
+      engineModels: { '': 'claude-sonnet-4-20250514' },
+      activeEngine: '',
       capabilities: [],
       systemPrompt: '',
       keywords: [],
@@ -181,12 +182,8 @@ function RoleEditForm({
         </div>
       </div>
       <div className="space-y-1">
-        <Label>模型</Label>
-        <select {...register('model')} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-          <option value="claude-opus-4-6">Opus</option>
-          <option value="claude-haiku-4-5-20251001">Haiku</option>
-          <option value="claude-sonnet-4-5-20250929">Sonnet</option>
-        </select>
+        <Label>引擎</Label>
+        <Input {...register('activeEngine')} placeholder="留空跟随全局" />
       </div>
       <div className="space-y-1">
         <Label>Temperature</Label>

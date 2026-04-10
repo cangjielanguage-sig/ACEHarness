@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { useTranslations } from '@/hooks/useTranslations';
-import { Search, ArrowLeft, RefreshCw, FileText, Tag, Calendar, User, Download, Puzzle, X } from 'lucide-react';
+import { Search, ArrowLeft, FileText, Tag, Calendar, User, Upload, Download, Puzzle, X } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import Markdown from '@/components/Markdown';
 
@@ -26,6 +26,7 @@ interface Skill {
   contributors?: string[];
   detailedDescription?: string;
   source?: string;
+  hasPromptMd?: boolean;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -39,14 +40,15 @@ export default function SkillsPage() {
   const { toast } = useToast();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [syncingAnthropic, setSyncingAnthropic] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
-  const [autoCloning, setAutoCloning] = useState(false);
   const [selectedSource, setSelectedSource] = useState<string>('all');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedForExport, setSelectedForExport] = useState<Set<string>>(new Set());
+  const [uploading, setUploading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadSkills();
@@ -60,8 +62,6 @@ export default function SkillsPage() {
       const data = await response.json();
       if (data.error) {
         setError(data.error);
-      } else if (!data.isCloned) {
-        await autoCloneSkills();
       } else {
         setSkills(data.skills || []);
       }
@@ -72,64 +72,70 @@ export default function SkillsPage() {
     }
   };
 
-  const autoCloneSkills = async () => {
-    setAutoCloning(true);
+  const handleUploadZip = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
     try {
-      const response = await fetch('/api/skills', { method: 'POST' });
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch('/api/skills', { method: 'POST', body: formData });
       const data = await response.json();
       if (data.success) {
-        const reloadResponse = await fetch('/api/skills');
-        const reloadData = await reloadResponse.json();
-        if (reloadData.error) {
-          setError(reloadData.error);
-        } else {
-          setSkills(reloadData.skills || []);
-        }
+        toast('success', data.message || '导入成功');
+        await loadSkills();
       } else {
-        setError(data.error || '自动拉取 Skills 仓库失败');
+        toast('error', data.error || '导入失败');
       }
     } catch (err) {
-      setError('自动拉取 Skills 仓库失败');
+      toast('error', '导入失败');
     } finally {
-      setAutoCloning(false);
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const handleSync = async () => {
-    setSyncing(true);
+  const handleExport = async () => {
+    if (selectedForExport.size === 0) {
+      toast('error', '请先选择要导出的 Skill');
+      return;
+    }
+    setExporting(true);
     try {
-      const response = await fetch('/api/skills', { method: 'POST' });
-      const data = await response.json();
-      if (data.success) {
-        toast('success', 'Skills 仓库已同步');
-        await loadSkills();
-      } else {
-        toast('error', data.error || '更新失败');
+      const response = await fetch('/api/skills', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skills: Array.from(selectedForExport) }),
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        toast('error', data.error || '导出失败');
+        return;
       }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'skills-export.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('success', `已导出 ${selectedForExport.size} 个 Skill`);
     } catch (err) {
-      toast('error', '更新失败');
+      toast('error', '导出失败');
     } finally {
-      setSyncing(false);
+      setExporting(false);
     }
   };
 
-  const handleSyncAnthropic = async () => {
-    setSyncingAnthropic(true);
-    try {
-      const response = await fetch('/api/skills', { method: 'PUT' });
-      const data = await response.json();
-      if (data.success) {
-        toast('success', data.message || 'Anthropics Skills 已更新');
-        await loadSkills();
-      } else {
-        toast('error', data.error || '更新失败');
-      }
-    } catch (err) {
-      toast('error', '从 Anthropics 更新失败');
-    } finally {
-      setSyncingAnthropic(false);
-    }
+  const toggleExportSelection = (name: string) => {
+    setSelectedForExport(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
   };
+
+  // PLACEHOLDER_REST
 
   // Get all unique tags
   const allTags = useMemo(() =>
@@ -161,7 +167,6 @@ export default function SkillsPage() {
     });
   }, [skills, selectedSource, selectedTags, searchQuery]);
 
-  // Group by source
   const groupedSkills = useMemo(() => ({
     cangjie: filteredSkills.filter(s => (s.source || 'cangjie') === 'cangjie'),
     anthropics: filteredSkills.filter(s => s.source === 'anthropics'),
@@ -173,6 +178,8 @@ export default function SkillsPage() {
   const getDisplayDescription = (skill: Skill) => {
     return skill.descriptionZh || skill.description;
   };
+
+  // PLACEHOLDER_RENDER
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -188,13 +195,30 @@ export default function SkillsPage() {
           <h1 className="text-lg font-semibold">Skills 管理</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={handleSyncAnthropic} disabled={syncingAnthropic}>
-            <Download className={`w-4 h-4 mr-1 ${syncingAnthropic ? 'animate-bounce' : ''}`} />
-            {syncingAnthropic ? '更新中...' : '从官方更新'}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip"
+            className="hidden"
+            onChange={handleUploadZip}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+          >
+            <Upload className={`w-4 h-4 mr-1 ${uploading ? 'animate-bounce' : ''}`} />
+            {uploading ? '导入中...' : '上传 Skill (ZIP)'}
           </Button>
-          <Button size="sm" variant="outline" onClick={handleSync} disabled={syncing}>
-            <RefreshCw className={`w-4 h-4 mr-1 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? '同步中...' : '同步仓库'}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleExport}
+            disabled={exporting || selectedForExport.size === 0}
+          >
+            <Download className={`w-4 h-4 mr-1 ${exporting ? 'animate-bounce' : ''}`} />
+            {exporting ? '导出中...' : `导出选中 (${selectedForExport.size})`}
           </Button>
           <LanguageToggle />
           <ThemeToggle />
@@ -210,35 +234,20 @@ export default function SkillsPage() {
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-64"
           />
-
           <div className="flex gap-2 items-center">
             <span className="text-sm text-muted-foreground">来源:</span>
-            <Button
-              size="sm"
-              variant={selectedSource === 'all' ? 'default' : 'outline'}
-              onClick={() => setSelectedSource('all')}
-            >
-              全部 ({skills.length})
-            </Button>
-            <Button
-              size="sm"
-              variant={selectedSource === 'cangjie' ? 'default' : 'outline'}
-              onClick={() => setSelectedSource('cangjie')}
-              className={selectedSource === 'cangjie' ? SOURCE_COLORS.cangjie : ''}
-            >
-              Cangjie ({skills.filter(s => (s.source || 'cangjie') === 'cangjie').length})
-            </Button>
-            <Button
-              size="sm"
-              variant={selectedSource === 'anthropics' ? 'default' : 'outline'}
-              onClick={() => setSelectedSource('anthropics')}
-              className={selectedSource === 'anthropics' ? SOURCE_COLORS.anthropics : ''}
-            >
-              Anthropics ({skills.filter(s => s.source === 'anthropics').length})
-            </Button>
+            {(['all', 'cangjie', 'anthropics'] as const).map(src => (
+              <Button
+                key={src}
+                size="sm"
+                variant={selectedSource === src ? 'default' : 'outline'}
+                onClick={() => setSelectedSource(src)}
+              >
+                {src === 'all' ? `全部 (${skills.length})` : `${sourceLabels[src]} (${skills.filter(s => (s.source || 'cangjie') === src).length})`}
+              </Button>
+            ))}
           </div>
         </div>
-
         {allTags.length > 0 && (
           <div className="flex gap-2 items-center mt-3 flex-wrap">
             <span className="text-sm text-muted-foreground shrink-0">标签:</span>
@@ -260,11 +269,9 @@ export default function SkillsPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-6">
-        {loading || autoCloning ? (
+        {loading ? (
           <div className="flex items-center justify-center h-64">
-            <div className="text-muted-foreground">
-              {autoCloning ? '正在拉取 Skills 仓库，请稍候...' : '加载中...'}
-            </div>
+            <div className="text-muted-foreground">加载中...</div>
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center h-64">
@@ -273,68 +280,59 @@ export default function SkillsPage() {
           </div>
         ) : filteredSkills.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-            <span className="material-symbols-outlined text-5xl mb-4">extension</span>
-            <p>{searchQuery ? '没有找到匹配的 Skills' : '暂无 Skills'}</p>
+            <Puzzle className="w-12 h-12 mb-4" />
+            <p>{searchQuery ? '没有匹配的 Skills' : '暂无 Skills'}</p>
           </div>
         ) : (
           <div className="space-y-8">
-            {(['cangjie', 'anthropics'] as const).map(source => (
-              groupedSkills[source].length > 0 && (
+            {Object.entries(groupedSkills).map(([source, sourceSkills]) =>
+              sourceSkills.length > 0 && (
                 <div key={source}>
                   <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                     <span>{sourceIcons[source]}</span>
                     {sourceLabels[source]}
-                    <span className="text-sm font-normal text-muted-foreground">
-                      ({groupedSkills[source].length})
-                    </span>
+                    <Badge variant="secondary">{sourceSkills.length}</Badge>
                   </h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {groupedSkills[source].map((skill, index) => (
+                    {sourceSkills.map(skill => (
                       <motion.div
                         key={skill.name}
-                        initial={{ opacity: 0, y: 20 }}
+                        initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.03 }}
-                        className={`bg-card border rounded-lg p-4 hover:shadow-lg transition-all cursor-pointer border-l-4 ${
-                          source === 'anthropics' ? 'border-l-orange-500 bg-orange-500/5' : 'border-l-blue-500 bg-blue-500/5'
+                        className={`bg-card border rounded-lg p-4 hover:shadow-lg transition-shadow cursor-pointer relative ${
+                          selectedForExport.has(skill.name) ? 'ring-2 ring-primary' : ''
                         }`}
                         onClick={() => setSelectedSkill(skill)}
                       >
-                        <div className="flex items-start justify-between mb-2">
-                          <h3 className="font-semibold text-sm">{skill.name}</h3>
-                          {skill.version && (
-                            <Badge variant="secondary" className="text-[10px] shrink-0">v{skill.version}</Badge>
-                          )}
+                        {/* Export checkbox */}
+                        <div
+                          className="absolute top-2 right-2"
+                          onClick={(e) => { e.stopPropagation(); toggleExportSelection(skill.name); }}
+                        >
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer ${
+                            selectedForExport.has(skill.name) ? 'bg-primary border-primary' : 'border-muted-foreground/40'
+                          }`}>
+                            {selectedForExport.has(skill.name) && <span className="text-white text-xs">✓</span>}
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground mb-2 line-clamp-2">
+
+                        <div className="flex items-start gap-2 mb-2 pr-6">
+                          <h3 className="font-semibold text-sm">{skill.name}</h3>
+                        </div>
+                        <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
                           {getDisplayDescription(skill)}
                         </p>
-
-                        {skill.tags && skill.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mb-2">
-                            {skill.tags.slice(0, 3).map((tag) => (
-                              <span key={tag} className="text-[10px] px-1.5 py-0.5 bg-secondary rounded">
-                                {tag}
-                              </span>
-                            ))}
-                            {skill.tags.length > 3 && (
-                              <span className="text-[10px] text-muted-foreground">+{skill.tags.length - 3}</span>
-                            )}
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                          {skill.updatedAt && (
-                            <span className="flex items-center gap-0.5">
-                              <Calendar className="w-3 h-3" />
-                              {skill.updatedAt}
-                            </span>
+                        <div className="flex flex-wrap gap-1">
+                          {skill.hasPromptMd && (
+                            <Badge variant="default" className="text-xs bg-green-500/20 text-green-400 border-green-500/30">
+                              PROMPT
+                            </Badge>
                           )}
-                          {skill.contributors && skill.contributors.length > 0 && (
-                            <span className="flex items-center gap-0.5">
-                              <User className="w-3 h-3" />
-                              {skill.contributors.join(', ')}
-                            </span>
+                          {skill.tags?.slice(0, 3).map(tag => (
+                            <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
+                          ))}
+                          {(skill.tags?.length || 0) > 3 && (
+                            <Badge variant="outline" className="text-xs">+{skill.tags!.length - 3}</Badge>
                           )}
                         </div>
                       </motion.div>
@@ -342,75 +340,52 @@ export default function SkillsPage() {
                   </div>
                 </div>
               )
-            ))}
+            )}
           </div>
         )}
       </div>
 
       {/* Skill Detail Modal */}
       {selectedSkill && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setSelectedSkill(null)}>
-          <div className="bg-card rounded-lg w-[800px] max-w-[90%] max-h-[80vh] overflow-hidden border" onClick={(e) => e.stopPropagation()}>
-            <div className="p-5 border-b flex items-center justify-between">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => setSelectedSkill(null)}>
+          <div
+            className="bg-card rounded-lg border w-full max-w-3xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 border-b flex items-center justify-between flex-shrink-0">
               <div>
-                <h3 className="text-xl font-semibold flex items-center gap-2">
-                  {selectedSkill.name}
-                  {selectedSkill.version && <Badge variant="secondary">v{selectedSkill.version}</Badge>}
-                  {selectedSkill.source && (
-                    <Badge variant="outline" className={SOURCE_COLORS[selectedSkill.source] || ''}>
-                      {selectedSkill.source}
+                <h2 className="text-xl font-semibold">{selectedSkill.name}</h2>
+                <div className="flex gap-2 mt-1">
+                  <Badge className={SOURCE_COLORS[selectedSkill.source || 'cangjie']}>
+                    {selectedSkill.source || 'cangjie'}
+                  </Badge>
+                  {selectedSkill.hasPromptMd && (
+                    <Badge variant="default" className="bg-green-500/20 text-green-400 border-green-500/30">
+                      PROMPT.md
                     </Badge>
                   )}
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">{getDisplayDescription(selectedSkill)}</p>
+                </div>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedSkill(null)}>
-                <span className="material-symbols-outlined text-sm">close</span>
+              <Button variant="ghost" size="icon" onClick={() => setSelectedSkill(null)}>
+                <X className="w-4 h-4" />
               </Button>
             </div>
-            <div className="p-5 overflow-y-auto max-h-[60vh]">
-              {/* Meta info */}
-              <div className="flex flex-wrap gap-4 mb-6 text-sm">
-                {selectedSkill.updatedAt && (
-                  <span className="flex items-center gap-1 text-muted-foreground">
-                    <Calendar className="w-4 h-4" />
-                    更新于 {selectedSkill.updatedAt}
-                  </span>
-                )}
-                {selectedSkill.contributors && selectedSkill.contributors.length > 0 && (
-                  <span className="flex items-center gap-1 text-muted-foreground">
-                    <User className="w-4 h-4" />
-                    贡献者: {selectedSkill.contributors.join(', ')}
-                  </span>
-                )}
+            <div className="flex-1 overflow-auto p-6 space-y-6">
+              {/* Description */}
+              <div>
+                <p className="text-sm text-muted-foreground">{getDisplayDescription(selectedSkill)}</p>
               </div>
 
               {/* Tags */}
               {selectedSkill.tags && selectedSkill.tags.length > 0 && (
-                <div className="mb-6">
+                <div>
                   <h4 className="text-sm font-medium mb-2 flex items-center gap-1">
                     <Tag className="w-4 h-4" />
                     标签
                   </h4>
                   <div className="flex flex-wrap gap-2">
                     {selectedSkill.tags.map((tag) => (
-                      <span key={tag} className="text-xs px-3 py-1 bg-secondary rounded-full">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Platforms */}
-              {selectedSkill.platforms && selectedSkill.platforms.length > 0 && (
-                <div className="mb-6">
-                  <h4 className="text-sm font-medium mb-2">支持平台</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedSkill.platforms.map((platform) => (
-                      <span key={platform} className="text-xs px-3 py-1 bg-muted rounded">
-                        {platform}
-                      </span>
+                      <span key={tag} className="text-xs px-3 py-1 bg-secondary rounded-full">{tag}</span>
                     ))}
                   </div>
                 </div>

@@ -5,7 +5,6 @@ tags:
   - 设计
   - 修复方案
   - 缺陷修复
-model: claude-opus-4-6
 temperature: 0.5
 allowedTools:
   - Read
@@ -78,3 +77,6 @@ iterationPrompt: |
   - 新增缺陷的修复方案
   - 修复实施顺序更新
   - 整体风险评估更新
+engineModels:
+  "": gpt-5.3-codex
+activeEngine: ""
