@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     const { exec } = await import('child_process');
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
-    await execAsync(`unzip -o "${zipPath}" -d "${extractDir}"`);
+    await execAsync(`unzip -o "${zipPath}" -d "${extractDir}"`, { maxBuffer: 50 * 1024 * 1024 });
 
     // Find valid skills (directories containing SKILL.md)
     const imported: string[] = [];
@@ -172,7 +172,7 @@ export async function PUT(request: NextRequest) {
     const { exec } = await import('child_process');
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
-    await execAsync(`cd "${tmpDir}" && zip -r "${zipPath}" .`);
+    await execAsync(`cd "${tmpDir}" && zip -r "${zipPath}" .`, { maxBuffer: 50 * 1024 * 1024 });
 
     const zipBuffer = await fs.readFile(zipPath);
 
