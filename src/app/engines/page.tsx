@@ -446,7 +446,7 @@ export default function EnginesPage() {
                     placeholder="选择默认模型"
                     triggerClassName="h-9 text-sm"
                   />
-                  {engine.id !== 'claude-code' && engine.id !== 'cangjie-magic' && (
+                  {!['claude-code', 'cangjie-magic', 'codex'].includes(engine.id) && (
                     <Button
                       variant="outline"
                       size="sm"
