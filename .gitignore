@@ -53,3 +53,13 @@ runs/
 # ACEHarness data
 data/*
 .engine.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# User-specific configs
+configs/unreachable.yaml
+
+# Temp files
+.tmp/
