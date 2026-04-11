@@ -1314,6 +1314,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       // Execute step (reuse existing process manager logic)
       const stepResult = await this.runAgentStep(step, context, config, stepId);
       const output = stepResult.output;
+      const conclusion = stepResult.lastRoundOutput || output;
 
       agent.status = 'completed';
       agent.completedTasks++;
@@ -1375,7 +1376,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       // Save output to file system
       if (this.currentRunId) {
         const stepFileName = stepKey;
-        await saveProcessOutput(this.currentRunId, stepFileName, output).catch(() => {});
+        await saveProcessOutput(this.currentRunId, stepFileName, conclusion).catch(() => {});
       }
 
       return output;
@@ -1665,7 +1666,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     context: string,
     config: StateMachineWorkflowConfig,
     stepId?: string
-  ): Promise<{ output: string; costUsd: number; durationMs: number; sessionId?: string }> {
+  ): Promise<{ output: string; lastRoundOutput: string; costUsd: number; durationMs: number; sessionId?: string }> {
     // Find agent config for system prompt and model
     const roleConfig = this.agentConfigs.find(r => r.name === step.agent)
       || config.roles?.find(r => r.name === step.agent);
@@ -1682,6 +1683,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const agent = this.agents.find(a => a.name === step.agent);
     let currentSessionId: string | undefined = agent?.sessionId || undefined;
     let accumulatedOutput = '';
+    let lastRoundOutput = '';
     let accumulatedStream = '';
     let accumulatedCost = 0;
     let accumulatedDuration = 0;
@@ -1819,6 +1821,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       }
 
       accumulatedOutput += (accumulatedOutput ? '\n\n---\n\n' : '') + (result.result || '');
+      lastRoundOutput = result.result || '';
       accumulatedCost += result.cost_usd || 0;
       accumulatedDuration += result.duration_ms || 0;
 
@@ -1862,7 +1865,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     } finally {
       processManager.off('stream', streamFlushHandler);
     }
-    return { output: accumulatedOutput, costUsd: accumulatedCost, durationMs: accumulatedDuration, sessionId: currentSessionId };
+    return { output: accumulatedOutput, lastRoundOutput, costUsd: accumulatedCost, durationMs: accumulatedDuration, sessionId: currentSessionId };
   }
 
   private async evaluateTransitions(

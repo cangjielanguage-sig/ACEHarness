@@ -189,6 +189,7 @@ export default function WorkbenchPage() {
   const [forceTransitionModal, setForceTransitionModal] = useState<{ targetState: string; instruction: string } | null>(null);
   const liveStreamRef = useRef<EventSource | ReturnType<typeof setInterval> | null>(null);
   const liveStreamLenRef = useRef(0);
+  const liveStreamRawRef = useRef('');
   const liveStreamStepRef = useRef<string>('');
   const liveStreamScrollRef = useRef<HTMLDivElement | null>(null);
   const LIVE_STREAM_PAGE_SIZE = 30;
@@ -1390,6 +1391,7 @@ export default function WorkbenchPage() {
     setShowLiveStream(true);
     if (liveStreamFeedbackRef.current) liveStreamFeedbackRef.current.value = '';
     liveStreamLenRef.current = 0;
+    liveStreamRawRef.current = '';
     setLiveStreamVisibleCount(LIVE_STREAM_PAGE_SIZE);
     liveStreamUserScrolledUp.current = false;
     setInlineFeedbacks([]);
@@ -1473,6 +1475,7 @@ export default function WorkbenchPage() {
         if (curStep !== liveStreamStepRef.current) {
           liveStreamStepRef.current = curStep;
           liveStreamLenRef.current = 0;
+          liveStreamRawRef.current = '';
           setLiveStream([]);
           setInlineFeedbacks([]);
         }
@@ -1491,20 +1494,37 @@ export default function WorkbenchPage() {
         }
 
         if (content) {
-          // Rebuild chunks from the full persisted stream content.
-          // IMPORTANT: polling may fetch arbitrary-length deltas between ticks; appending
-          // delta slices can split markdown fences/details across chunk boundaries and
-          // break rendering (e.g. fenced blocks becoming inline text).
-          const parts = content.split(CHUNK_SEP);
-          const trailing = parts.pop() || '';
-          const rebuilt = [...parts.filter(Boolean), ...(trailing ? [trailing] : [])];
-          liveStreamLenRef.current = content.length;
-          setLiveStream(prev => {
-            if (prev.length === rebuilt.length && prev.every((v, i) => v === rebuilt[i])) {
-              return prev;
-            }
-            return rebuilt;
-          });
+          const prevRaw = liveStreamRawRef.current;
+          const isContinuous =
+            content.length >= prevRaw.length &&
+            content.startsWith(prevRaw);
+
+          // Abnormal stream update (reset/overwrite/step mismatch): rebuild once from full content
+          if (!isContinuous) {
+            const parts = content.split(CHUNK_SEP);
+            const trailing = parts.pop() || '';
+            const rebuilt = [...parts.filter(Boolean), ...(trailing ? [trailing] : [])];
+            liveStreamRawRef.current = content;
+            liveStreamLenRef.current = content.length;
+            setLiveStream(rebuilt);
+          } else if (content.length > prevRaw.length) {
+            // Continuous append: only process delta to keep UI responsive
+            const delta = content.slice(prevRaw.length);
+            liveStreamRawRef.current = content;
+            liveStreamLenRef.current = content.length;
+
+            setLiveStream(prev => {
+              const next = [...prev];
+              const oldTail = next.length > 0 ? next.pop() || '' : '';
+              const merged = oldTail + delta;
+              const segs = merged.split(CHUNK_SEP);
+              const newTail = segs.pop() || '';
+              const completed = segs.filter(Boolean);
+              next.push(...completed);
+              if (newTail) next.push(newTail);
+              return next;
+            });
+          }
         }
 
         if (!processes.some((p: any) => p.status === 'running') && !isRunning) {
@@ -1520,6 +1540,7 @@ export default function WorkbenchPage() {
       else clearInterval(liveStreamRef.current);
       liveStreamRef.current = null;
     }
+    liveStreamRawRef.current = '';
     setShowLiveStream(false);
     setLiveStreamFullscreen(false);
   };
