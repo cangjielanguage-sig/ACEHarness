@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { logout, isValidToken, getAdminInfo } from '@/lib/admin-auth';
+import { validateToken, getUserById, toPublicUser, removeToken } from '@/lib/user-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,16 +9,21 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
 
-  if (!token || !isValidToken(token)) {
+  if (!token) {
     return NextResponse.json({ error: '未登录或登录已过期' }, { status: 401 });
   }
 
-  const admin = await getAdminInfo();
-  if (!admin) {
+  const info = validateToken(token);
+  if (!info) {
+    return NextResponse.json({ error: '未登录或登录已过期' }, { status: 401 });
+  }
+
+  const user = await getUserById(info.userId);
+  if (!user) {
     return NextResponse.json({ error: '用户不存在' }, { status: 401 });
   }
 
-  return NextResponse.json({ user: admin });
+  return NextResponse.json({ user: toPublicUser(user) });
 }
 
 /**
@@ -27,7 +32,7 @@ export async function GET(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const token = request.headers.get('Authorization')?.replace('Bearer ', '');
   if (token) {
-    await logout(token);
+    removeToken(token);
   }
   return NextResponse.json({ success: true });
 }

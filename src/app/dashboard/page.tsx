@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import NewConfigModal from '@/components/NewConfigModal';
 import EnvVarsDialog from '@/components/EnvVarsDialog';
+import UserMenu from '@/components/UserMenu';
 import { RobotLogo } from '@/components/chat/ChatMessage';
 
 interface DashboardStats {
@@ -49,6 +50,14 @@ export default function DashboardPage() {
   const [agentUsageData, setAgentUsageData] = useState<any[]>([]);
   const [activityData, setActivityData] = useState<any[]>([]);
   const [runningRuns, setRunningRuns] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState<{ username: string; email: string; role: 'admin' | 'user'; avatar?: string } | null>(null);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('auth-user');
+      if (stored) setCurrentUser(JSON.parse(stored));
+    } catch {}
+  }, []);
 
   const CACHE_KEY = 'dashboard-cache';
   const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -210,17 +219,7 @@ export default function DashboardPage() {
                 </Button>
                 <LanguageToggle />
                 <ThemeToggle />
-                <Button size="sm" onClick={() => setShowNewModal(true)}>
-                  <Play className="w-4 h-4 mr-2" />
-                  {t('dashboard.quickActions.newWorkflow')}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => {
-                  localStorage.removeItem('auth-token');
-                  localStorage.removeItem('auth-user');
-                  router.push('/login');
-                }} title="退出登录">
-                  <span className="material-symbols-outlined text-sm">lock_open</span>
-                </Button>
+                <UserMenu user={currentUser} />
               </div>
             </div>
           </div>

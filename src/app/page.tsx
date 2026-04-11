@@ -14,6 +14,7 @@ import ChatSidebar from '@/components/chat/ChatSidebar';
 import ChatMessage, { RobotLogo } from '@/components/chat/ChatMessage';
 import QuickActions, { QuickActionsBar } from '@/components/chat/QuickActions';
 import AuthGuard from '@/components/AuthGuard';
+import UserMenu from '@/components/UserMenu';
 
 // 动态导入 RichTextEditor - TipTap 是重量级库，延迟加载
 import type { RichTextEditorHandle } from '@/components/ui/RichTextEditor';
@@ -65,6 +66,15 @@ function ChatPageContent() {
   const editEditorRef = useRef<RichTextEditorHandle | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+  const [currentUser, setCurrentUser] = useState<{ username: string; email: string; role: 'admin' | 'user'; avatar?: string } | null>(null);
+
+  // Load current user info
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('auth-user');
+      if (stored) setCurrentUser(JSON.parse(stored));
+    } catch {}
+  }, []);
 
   // Load saved width
   useEffect(() => {
@@ -280,13 +290,7 @@ function ChatPageContent() {
               <span className="material-symbols-outlined" style={{ fontSize: '20px', marginRight: '4px' }}>dashboard</span>
               <span className="hidden sm:inline">控制台</span>
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => {
-              localStorage.removeItem('auth-token');
-              localStorage.removeItem('auth-user');
-              router.push('/login');
-            }} title="退出登录">
-              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>lock_open</span>
-            </Button>
+            <UserMenu user={currentUser} />
           </div>
         </div>
 

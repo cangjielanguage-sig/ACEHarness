@@ -182,7 +182,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     fetch('/api/chat/settings').then(r => r.json()).then(data => {
       if (data.skills) setSkillSettings(data.skills);
       if (data.discoveredSkills) setDiscoveredSkills(data.discoveredSkills);
-      if (data.workingDirectory) setWorkingDirectoryState(data.workingDirectory);
+      if (data.workingDirectory) {
+        setWorkingDirectoryState(data.workingDirectory);
+      } else {
+        // Default to user's personalDir if no workingDirectory is set
+        try {
+          const stored = localStorage.getItem('auth-user');
+          if (stored) {
+            const user = JSON.parse(stored);
+            if (user.personalDir) setWorkingDirectoryState(user.personalDir);
+          }
+        } catch {}
+      }
     }).catch(() => {});
   }, []);
 

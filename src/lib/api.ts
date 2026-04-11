@@ -4,6 +4,17 @@
 
 const API_BASE = '/api';
 
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('auth-token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function authFetch(url: string, init?: RequestInit): Promise<Response> {
+  const headers = { ...getAuthHeaders(), ...(init?.headers || {}) };
+  return fetch(url, { ...init, headers });
+}
+
 interface ConfigListResponse {
   files: string[];
   configs: {
@@ -98,13 +109,13 @@ interface RunRecord {
 
 export const configApi = {
   async listConfigs(): Promise<ConfigListResponse> {
-    const response = await fetch(`${API_BASE}/configs`);
+    const response = await authFetch(`${API_BASE}/configs`);
     if (!response.ok) throw new Error('获取配置列表失败');
     return response.json();
   },
 
   async getConfig(filename: string): Promise<ConfigResponse> {
-    const response = await fetch(`${API_BASE}/configs/${filename}`);
+    const response = await authFetch(`${API_BASE}/configs/${filename}`);
     if (!response.ok) {
       const data = await response.json().catch(() => null);
       const available = data?.availableConfigs;
@@ -118,7 +129,7 @@ export const configApi = {
   },
 
   async saveConfig(filename: string, config: any): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/configs/${filename}`, {
+    const response = await authFetch(`${API_BASE}/configs/${filename}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config }),
@@ -132,7 +143,7 @@ export const configApi = {
   },
 
   async copyConfig(filename: string, newFilename: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/configs/${filename}/copy`, {
+    const response = await authFetch(`${API_BASE}/configs/${filename}/copy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ newFilename }),
@@ -145,7 +156,7 @@ export const configApi = {
   },
 
   async deleteConfig(filename: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/configs/${filename}`, {
+    const response = await authFetch(`${API_BASE}/configs/${filename}`, {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('删除配置失败');
@@ -155,19 +166,19 @@ export const configApi = {
 
 export const agentApi = {
   async listAgents(): Promise<{ agents: any[] }> {
-    const response = await fetch(`${API_BASE}/agents`);
+    const response = await authFetch(`${API_BASE}/agents`);
     if (!response.ok) throw new Error('获取 Agent 列表失败');
     return response.json();
   },
 
   async getAgent(name: string): Promise<{ agent: any; raw: string }> {
-    const response = await fetch(`${API_BASE}/agents/${encodeURIComponent(name)}`);
+    const response = await authFetch(`${API_BASE}/agents/${encodeURIComponent(name)}`);
     if (!response.ok) throw new Error('读取 Agent 配置失败');
     return response.json();
   },
 
   async saveAgent(name: string, agent: any): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/agents/${encodeURIComponent(name)}`, {
+    const response = await authFetch(`${API_BASE}/agents/${encodeURIComponent(name)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent }),
@@ -177,7 +188,7 @@ export const agentApi = {
   },
 
   async deleteAgent(name: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/agents/${encodeURIComponent(name)}`, {
+    const response = await authFetch(`${API_BASE}/agents/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('删除 Agent 配置失败');
@@ -185,7 +196,7 @@ export const agentApi = {
   },
 
   async batchReplaceModel(engine: string | undefined, fromModel: string, toModel: string): Promise<ApiResponse & { updatedCount: number }> {
-    const response = await fetch(`${API_BASE}/agents/batch`, {
+    const response = await authFetch(`${API_BASE}/agents/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'replace-model', engine, fromModel, toModel }),
@@ -197,25 +208,25 @@ export const agentApi = {
 
 export const runsApi = {
   async listAll(): Promise<{ runs: RunRecord[] }> {
-    const response = await fetch(`${API_BASE}/runs`);
+    const response = await authFetch(`${API_BASE}/runs`);
     if (!response.ok) throw new Error('获取运行记录失败');
     return response.json();
   },
 
   async listByConfig(configFile: string): Promise<{ runs: RunRecord[] }> {
-    const response = await fetch(`${API_BASE}/runs/by-config/${encodeURIComponent(configFile)}`);
+    const response = await authFetch(`${API_BASE}/runs/by-config/${encodeURIComponent(configFile)}`);
     if (!response.ok) throw new Error('获取运行记录失败');
     return response.json();
   },
 
   async getRunDetail(id: string): Promise<any> {
-    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/detail`);
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/detail`);
     if (!response.ok) throw new Error('获取运行详情失败');
     return response.json();
   },
 
   async deleteRun(id: string): Promise< ApiResponse> {
-    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/delete`, {
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/delete`, {
       method: 'DELETE',
     });
     if (!response.ok) {
@@ -226,31 +237,31 @@ export const runsApi = {
   },
 
   async listOutputFiles(id: string): Promise<{ files: { stepName: string; filename: string; size: number; agent: string; phaseName: string; role: string; iteration: number | null; maxIterations: number | null; timestamp: string; status: string }[] }> {
-    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/outputs`);
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/outputs`);
     if (!response.ok) throw new Error('获取输出文件列表失败');
     return response.json();
   },
 
   async getStepOutput(id: string, stepName: string): Promise<{ stepName: string; content: string }> {
-    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/outputs?step=${encodeURIComponent(stepName)}`);
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/outputs?step=${encodeURIComponent(stepName)}`);
     if (!response.ok) throw new Error('获取步骤输出失败');
     return response.json();
   },
 
   async listDocuments(id: string): Promise<{ files: { filename: string; stepName: string; baseName: string; iteration: number | null; agent: string; phaseName: string; role: string; size: number; modifiedTime: string }[] }> {
-    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`);
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`);
     if (!response.ok) return { files: [] };
     return response.json();
   },
 
   async getDocumentContent(id: string, filename: string): Promise<{ file: string; content: string }> {
-    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents?file=${encodeURIComponent(filename)}`);
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents?file=${encodeURIComponent(filename)}`);
     if (!response.ok) throw new Error('获取文档内容失败');
     return response.json();
   },
 
   async renameDocument(id: string, file: string, newName: string): Promise<{ ok: boolean; newFilename: string }> {
-    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`, {
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file, newName }),
@@ -260,7 +271,7 @@ export const runsApi = {
   },
 
   async deleteDocuments(id: string, files: string[]): Promise<{ ok: boolean; deleted: string[] }> {
-    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`, {
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/documents`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files }),
@@ -270,7 +281,7 @@ export const runsApi = {
   },
 
   async createRun(data: { configFile: string; totalSteps: number }): Promise<{ id: string }> {
-    const response = await fetch(`${API_BASE}/runs`, {
+    const response = await authFetch(`${API_BASE}/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -280,7 +291,7 @@ export const runsApi = {
   },
 
   async updateRun(id: string, patch: Partial<RunRecord>): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/runs/${id}`, {
+    const response = await authFetch(`${API_BASE}/runs/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
@@ -290,7 +301,7 @@ export const runsApi = {
   },
 
   async batchDeleteRuns(runIds: string[]): Promise<ApiResponse & { deletedCount: number; errors?: string[] }> {
-    const response = await fetch(`${API_BASE}/runs/batch`, {
+    const response = await authFetch(`${API_BASE}/runs/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'delete', runIds }),
@@ -302,7 +313,7 @@ export const runsApi = {
 
 export const workflowApi = {
   async start(configFile: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/workflow/start`, {
+    const response = await authFetch(`${API_BASE}/workflow/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ configFile }),
@@ -315,7 +326,7 @@ export const workflowApi = {
   },
 
   async stop(configFile?: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/workflow/stop`, {
+    const response = await authFetch(`${API_BASE}/workflow/stop`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ configFile }),
@@ -325,7 +336,7 @@ export const workflowApi = {
   },
 
   async resume(runId: string, action?: 'approve' | 'iterate' | 'force-transition', feedback?: string, targetState?: string, instruction?: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/workflow/resume`, {
+    const response = await authFetch(`${API_BASE}/workflow/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ runId, action, feedback, targetState, instruction }),
@@ -338,7 +349,7 @@ export const workflowApi = {
   },
 
   async approve(configFile?: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/workflow/approve`, {
+    const response = await authFetch(`${API_BASE}/workflow/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ configFile }),
@@ -348,7 +359,7 @@ export const workflowApi = {
   },
 
   async iterate(feedback: string, configFile?: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/workflow/iterate`, {
+    const response = await authFetch(`${API_BASE}/workflow/iterate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ feedback, configFile }),
@@ -358,7 +369,7 @@ export const workflowApi = {
   },
 
   async injectFeedback(message: string, interrupt?: boolean, configFile?: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/workflow/inject-feedback`, {
+    const response = await authFetch(`${API_BASE}/workflow/inject-feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, interrupt, configFile }),
@@ -371,7 +382,7 @@ export const workflowApi = {
   },
 
   async recallFeedback(message: string, configFile?: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/workflow/recall-feedback`, {
+    const response = await authFetch(`${API_BASE}/workflow/recall-feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, configFile }),
@@ -384,7 +395,7 @@ export const workflowApi = {
   },
 
   async forceCompleteStep(configFile?: string): Promise<any> {
-    const response = await fetch(`${API_BASE}/workflow/force-complete`, {
+    const response = await authFetch(`${API_BASE}/workflow/force-complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ configFile }),
@@ -397,7 +408,7 @@ export const workflowApi = {
   },
 
   async forceTransition(targetState: string, instruction?: string, configFile?: string): Promise<any> {
-    const response = await fetch(`${API_BASE}/workflow/force-transition`, {
+    const response = await authFetch(`${API_BASE}/workflow/force-transition`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ targetState, instruction, configFile }),
@@ -411,13 +422,13 @@ export const workflowApi = {
 
   async getStatus(configFile?: string): Promise<WorkflowStatusResponse> {
     const params = configFile ? `?configFile=${encodeURIComponent(configFile)}` : '';
-    const response = await fetch(`${API_BASE}/workflow/status${params}`);
+    const response = await authFetch(`${API_BASE}/workflow/status${params}`);
     if (!response.ok) throw new Error('获取状态失败');
     return response.json();
   },
 
   async setContext(scope: 'global' | 'phase', context: string, phase?: string, runId?: string, configFile?: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/workflow/context`, {
+    const response = await authFetch(`${API_BASE}/workflow/context`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scope, phase, context, runId, configFile }),
@@ -434,13 +445,13 @@ export const workflowApi = {
     if (runId) params.set('runId', runId);
     if (configFile) params.set('configFile', configFile);
     const qs = params.toString() ? `?${params.toString()}` : '';
-    const response = await fetch(`${API_BASE}/workflow/context${qs}`);
+    const response = await authFetch(`${API_BASE}/workflow/context${qs}`);
     if (!response.ok) throw new Error('获取上下文失败');
     return response.json();
   },
 
   async rerunFromStep(runId: string, stepName: string): Promise<ApiResponse> {
-    const response = await fetch(`${API_BASE}/workflow/rerun-from-step`, {
+    const response = await authFetch(`${API_BASE}/workflow/rerun-from-step`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ runId, stepName }),
@@ -470,13 +481,13 @@ export const workflowApi = {
 
 export const processApi = {
   async list(): Promise<{ processes: any[]; stats: any }> {
-    const response = await fetch(`${API_BASE}/processes`);
+    const response = await authFetch(`${API_BASE}/processes`);
     if (!response.ok) throw new Error('获取进程列表失败');
     return response.json();
   },
 
   async get(id: string): Promise<any> {
-    const response = await fetch(`${API_BASE}/processes/${encodeURIComponent(id)}`);
+    const response = await authFetch(`${API_BASE}/processes/${encodeURIComponent(id)}`);
     if (!response.ok) throw new Error('获取进程信息失败');
     return response.json();
   },
@@ -484,7 +495,7 @@ export const processApi = {
 
 export const streamApi = {
   async getStreamContent(runId: string, stepName: string): Promise<string> {
-    const response = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/stream?step=${encodeURIComponent(stepName)}`);
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/stream?step=${encodeURIComponent(stepName)}`);
     if (!response.ok) return '';
     const data = await response.json();
     return data.content || '';
@@ -524,17 +535,17 @@ export const streamApi = {
 
 export const scheduleApi = {
   async list(): Promise<{ jobs: any[] }> {
-    const res = await fetch(`${API_BASE}/schedules`);
+    const res = await authFetch(`${API_BASE}/schedules`);
     if (!res.ok) throw new Error('获取定时任务列表失败');
     return res.json();
   },
   async get(id: string): Promise<{ job: any }> {
-    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`);
+    const res = await authFetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`);
     if (!res.ok) throw new Error('获取定时任务失败');
     return res.json();
   },
   async create(job: any): Promise<{ job: any }> {
-    const res = await fetch(`${API_BASE}/schedules`, {
+    const res = await authFetch(`${API_BASE}/schedules`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(job),
@@ -543,7 +554,7 @@ export const scheduleApi = {
     return res.json();
   },
   async update(id: string, patch: any): Promise<{ job: any }> {
-    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, {
+    const res = await authFetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
@@ -552,16 +563,16 @@ export const scheduleApi = {
     return res.json();
   },
   async delete(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const res = await authFetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('删除定时任务失败');
   },
   async trigger(id: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/trigger`, { method: 'POST' });
+    const res = await authFetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/trigger`, { method: 'POST' });
     if (!res.ok) throw new Error('触发定时任务失败');
     return res.json();
   },
   async toggle(id: string): Promise<{ job: any }> {
-    const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/toggle`, { method: 'POST' });
+    const res = await authFetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/toggle`, { method: 'POST' });
     if (!res.ok) throw new Error('切换定时任务状态失败');
     return res.json();
   },
@@ -578,7 +589,7 @@ export interface TreeNode {
 
 export const workspaceApi = {
   async getTree(workspacePath: string, depth = 2): Promise<{ tree: TreeNode[] }> {
-    const res = await fetch(`${API_BASE}/workspace/tree?path=${encodeURIComponent(workspacePath)}&depth=${depth}`);
+    const res = await authFetch(`${API_BASE}/workspace/tree?path=${encodeURIComponent(workspacePath)}&depth=${depth}`);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || '获取文件树失败');
@@ -586,7 +597,7 @@ export const workspaceApi = {
     return res.json();
   },
   async getFile(workspace: string, file: string): Promise<{ content: string; size: number; path: string }> {
-    const res = await fetch(`${API_BASE}/workspace/file?workspace=${encodeURIComponent(workspace)}&file=${encodeURIComponent(file)}`);
+    const res = await authFetch(`${API_BASE}/workspace/file?workspace=${encodeURIComponent(workspace)}&file=${encodeURIComponent(file)}`);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       const err = new Error(data.error || '读取文件失败') as Error & { size?: number };
@@ -596,7 +607,7 @@ export const workspaceApi = {
     return res.json();
   },
   async saveFile(workspace: string, file: string, content: string): Promise<{ success: boolean }> {
-    const res = await fetch(`${API_BASE}/workspace/file`, {
+    const res = await authFetch(`${API_BASE}/workspace/file`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ workspace, file, content }),
@@ -608,10 +619,22 @@ export const workspaceApi = {
     return res.json();
   },
   async getFileBlob(workspace: string, file: string): Promise<Blob> {
-    const res = await fetch(`${API_BASE}/workspace/file?workspace=${encodeURIComponent(workspace)}&file=${encodeURIComponent(file)}&mode=blob`);
+    const res = await authFetch(`${API_BASE}/workspace/file?workspace=${encodeURIComponent(workspace)}&file=${encodeURIComponent(file)}&mode=blob`);
     if (!res.ok) {
       throw new Error('获取文件失败');
     }
     return res.blob();
+  },
+  async manage(workspace: string, action: string, params: Record<string, any>): Promise<{ success: boolean }> {
+    const res = await authFetch(`${API_BASE}/workspace/manage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace, action, ...params }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '操作失败');
+    }
+    return res.json();
   },
 };

@@ -67,10 +67,9 @@ export default function LoginPage() {
         return;
       }
 
-      // Store token
+      // Store token and user info
       localStorage.setItem('auth-token', data.token);
-      const userData = { email };
-      localStorage.setItem('auth-user', JSON.stringify(userData));
+      localStorage.setItem('auth-user', JSON.stringify(data.user || { email }));
 
       router.push('/');
     } catch (err: any) {
@@ -254,7 +253,11 @@ export default function LoginPage() {
           </div>
 
           {/* Footer */}
-          <div className="mt-6 text-center">
+          <div className="mt-6 text-center space-y-1">
+            <Button variant="link" className="text-xs text-muted-foreground" onClick={() => router.push('/login/reset')}>
+              忘记密码？
+            </Button>
+            <br />
             <Button variant="link" className="text-xs text-muted-foreground" onClick={() => router.push('/setup')}>
               首次使用？前往设置
             </Button>

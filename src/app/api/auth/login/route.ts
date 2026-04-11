@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { login, storeToken } from '@/lib/admin-auth';
+import { login } from '@/lib/user-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,11 +20,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: 401 });
     }
 
-    // Store token
-    storeToken(result.token);
-
     return NextResponse.json({
       token: result.token,
+      user: result.user,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || '登录失败' }, { status: 500 });

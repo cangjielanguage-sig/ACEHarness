@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isAdminSetup, setupAdmin } from '@/lib/admin-auth';
+import { isSetup, setupFirstAdmin } from '@/lib/user-store';
 import { saveChatSettings, discoverSkills } from '@/lib/chat-settings';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/auth/setup - Check if admin is setup
  */
 export async function GET() {
-  const setup = await isAdminSetup();
+  const setup = await isSetup();
   return NextResponse.json({ isSetup: setup });
 }
 
@@ -17,7 +17,7 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
-    const { username, email, password, question, answer } = await request.json();
+    const { username, email, password, question, answer, personalDir, avatar } = await request.json();
 
     if (!username || !email || !password || !question || !answer) {
       return NextResponse.json({ error: '所有字段都不能为空' }, { status: 400 });
@@ -27,11 +27,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '密码至少6个字符' }, { status: 400 });
     }
 
-    const result = await setupAdmin(username, email, password, question, answer);
-
-    if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
-    }
+    await setupFirstAdmin({ username, email, password, question, answer, personalDir, avatar });
 
     // Initialize skills settings
     const discovered = await discoverSkills();

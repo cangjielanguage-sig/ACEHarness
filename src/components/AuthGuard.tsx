@@ -29,7 +29,12 @@ export default function AuthGuard({ children }: AuthGuardProps) {
           localStorage.removeItem('auth-user');
           router.push('/login');
         } else {
-          setAuthChecked(true);
+          return res.json().then(data => {
+            if (data.user) {
+              localStorage.setItem('auth-user', JSON.stringify(data.user));
+            }
+            setAuthChecked(true);
+          });
         }
       })
       .catch(() => {

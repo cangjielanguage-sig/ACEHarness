@@ -114,6 +114,12 @@ export class WorkflowManager extends EventEmitter {
   private workspaceSkills: string = '';
   /** Cached workspace skill names for deduplication */
   private workspaceSkillNames: Set<string> = new Set();
+  /** Multi-user: createdBy userId, set by workflow start route */
+  public _createdBy?: string;
+  /** Multi-user: user's personal directory for isolation */
+  public _userPersonalDir?: string;
+  /** The isolated working directory for this run (if isolation is active) */
+  private isolatedDir: string | null = null;
   /** Cached workflow-level skills from context.skills */
   private workflowSkillsContent: string = '';
   /** Skills copied to workspace that need cleanup on finish */
@@ -581,6 +587,22 @@ export class WorkflowManager extends EventEmitter {
       const workflowConfig: WorkflowConfig = parse(content);
 
       this.currentWorkflow = workflowConfig;
+
+      // Directory isolation: if user has personalDir, copy projectRoot into isolated dir
+      if (this._userPersonalDir && workflowConfig.context.projectRoot) {
+        const runId = `run-${formatTimestamp()}`;
+        const isolatedDir = resolve(this._userPersonalDir, runId);
+        await mkdir(isolatedDir, { recursive: true });
+        try {
+          await cp(workflowConfig.context.projectRoot, isolatedDir, { recursive: true });
+        } catch (e: any) {
+          this.emit('log', { message: `目录隔离复制失败: ${e.message}，使用原目录` });
+        }
+        if (existsSync(isolatedDir)) {
+          workflowConfig.context.projectRoot = isolatedDir;
+          this.isolatedDir = isolatedDir;
+        }
+      }
 
       // Load agent configs from configs/agents/*.yaml
       this.agentConfigs = await this.loadAgentConfigs();

@@ -15,7 +15,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable"
-import { FileTreeSidebar } from "./FileTreeSidebar"
+import { FileTreeSidebar, type ClipboardItem } from "./FileTreeSidebar"
 import { EditorPanel } from "./EditorPanel"
 import { FileSearchCommand } from "./FileSearchCommand"
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden"
@@ -56,6 +56,7 @@ export function WorkspaceEditor({
   const [fileBlob, setFileBlob] = React.useState<Blob | null>(null)
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [treeCollapsed, setTreeCollapsed] = React.useState(false)
+  const [clipboard, setClipboard] = React.useState<ClipboardItem | null>(null)
   const treePanelRef = usePanelRef()
 
   const toggleTree = React.useCallback(() => {
@@ -141,6 +142,16 @@ export function WorkspaceEditor({
     setSelectedFile(filePath)
   }, [])
 
+  const handleTreeRefresh = React.useCallback(() => {
+    if (!workspacePath) return
+    setTreeLoading(true)
+    workspaceApi
+      .getTree(workspacePath)
+      .then((data) => setTree(data.tree))
+      .catch(() => setTree([]))
+      .finally(() => setTreeLoading(false))
+  }, [workspacePath])
+
   // Reset state when drawer closes
   const handleOpenChange = React.useCallback(
     (newOpen: boolean) => {
@@ -196,6 +207,9 @@ export function WorkspaceEditor({
                   selectedFile={selectedFile}
                   onSelectFile={handleSelectFile}
                   loading={treeLoading}
+                  clipboard={clipboard}
+                  setClipboard={setClipboard}
+                  onRefresh={handleTreeRefresh}
                 />
               </ResizablePanel>
               <ResizableHandle

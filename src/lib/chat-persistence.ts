@@ -38,6 +38,8 @@ export interface PersistedChatSession {
   createdAt: number;
   updatedAt: number;
   messages: PersistedMessage[];
+  createdBy?: string;
+  visibility?: 'public' | 'private';
 }
 
 export interface ChatSessionSummary {
@@ -48,6 +50,8 @@ export interface ChatSessionSummary {
   updatedAt: number;
   messageCount: number;
   lastMessage?: string;
+  createdBy?: string;
+  visibility?: 'public' | 'private';
 }
 
 async function ensureDir() {
@@ -124,6 +128,8 @@ export async function listChatSessions(): Promise<ChatSessionSummary[]> {
         updatedAt: session.updatedAt,
         messageCount: session.messages?.length || 0,
         lastMessage: lastMsg?.content?.slice(0, 100),
+        createdBy: session.createdBy,
+        visibility: session.visibility,
       });
     } catch { /* skip corrupted */ }
   }

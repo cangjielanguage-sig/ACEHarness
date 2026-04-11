@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { RobotLogo } from '@/components/chat/ChatMessage';
+import AvatarPicker from '@/components/AvatarPicker';
 
 interface DiscoveredSkill {
   name: string;
@@ -30,6 +31,8 @@ export default function SetupPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
+  const [personalDir, setPersonalDir] = useState('');
+  const [avatar, setAvatar] = useState('');
 
   // Skills
   const [skills, setSkills] = useState<DiscoveredSkill[]>([]);
@@ -95,7 +98,7 @@ export default function SetupPage() {
       const setupRes = await fetch('/api/auth/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, email, password, question, answer }),
+        body: JSON.stringify({ username, email, password, question, answer, personalDir, avatar }),
       });
 
       const setupData = await setupRes.json();
@@ -128,7 +131,7 @@ export default function SetupPage() {
 
       if (loginRes.ok) {
         localStorage.setItem('auth-token', loginData.token);
-        localStorage.setItem('auth-user', JSON.stringify({ username, email }));
+        localStorage.setItem('auth-user', JSON.stringify(loginData.user || { username, email }));
         router.push('/');
       } else {
         setError('设置成功，请登录');
@@ -265,6 +268,23 @@ export default function SetupPage() {
                   className="h-10"
                 />
                 <p className="text-xs text-muted-foreground mt-1">用于找回密码，请妥善保管</p>
+              </div>
+
+              <div className="border-t pt-4">
+                <label className="text-sm font-medium mb-1.5 block">个人目录（可选）</label>
+                <Input
+                  type="text"
+                  placeholder="例如：/data/users/admin"
+                  value={personalDir}
+                  onChange={(e) => setPersonalDir(e.target.value)}
+                  className="h-10"
+                />
+                <p className="text-xs text-muted-foreground mt-1">工作流执行时的隔离目录</p>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">选择头像</label>
+                <AvatarPicker value={avatar} onChange={setAvatar} />
               </div>
 
               {error && (

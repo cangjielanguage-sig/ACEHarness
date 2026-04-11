@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { workflowRegistry } from '@/lib/workflow-registry';
+import { requireAuth } from '@/lib/auth-middleware';
 
 export async function POST(request: NextRequest) {
+  const user = await requireAuth(request);
+  if (user instanceof NextResponse) return user;
+
   try {
     const body = await request.json();
     const { configFile } = body;
@@ -24,6 +28,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Pass userId for createdBy tracking
+    (manager as any)._createdBy = user.id;
+    (manager as any)._userPersonalDir = user.personalDir;
     manager.start(configFile).catch(() => {});
 
     return NextResponse.json({

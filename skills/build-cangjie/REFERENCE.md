@@ -6,7 +6,7 @@
 |----------|--------|---------|-------------|
 | `--platform` | `linux_x86_64`, `linux_aarch64`, `mac_x86_64`, `mac_aarch64` | auto-detect | Target platform |
 | `-t`, `--build-type` | `release`, `relwithdebinfo`, `debug` | `relwithdebinfo` (prompted if interactive) | Build type |
-| `--version` | version string | `1.1.0.beta.999` | Version number |
+| `--version` | version string | `0.0.1` | Version number |
 | `--component` | `all`, `compiler`, `cjc`, `runtime`, `stdlib`, `stdx`, `tools` | `all` | Component to build |
 | `--no-tests` | flag | off | Skip unittest compilation (recommended for faster builds) |
 | `--incremental` | flag | off | Incremental build with parallel compilation (cjc only) |

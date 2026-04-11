@@ -439,6 +439,22 @@ export class StateMachineWorkflowManager extends EventEmitter {
         throw new Error('配置文件不是状态机模式');
       }
 
+      // Directory isolation: if user has personalDir, copy projectRoot into isolated dir
+      if (this._userPersonalDir && workflowConfig.context?.projectRoot) {
+        const isoRunId = `run-${Date.now()}`;
+        const isoDir = resolve(this._userPersonalDir, isoRunId);
+        await mkdir(isoDir, { recursive: true });
+        try {
+          await cp(workflowConfig.context.projectRoot, isoDir, { recursive: true });
+        } catch (e: any) {
+          this.emit('log', { message: `目录隔离复制失败: ${e.message}，使用原目录` });
+        }
+        if (existsSync(isoDir)) {
+          workflowConfig.context.projectRoot = isoDir;
+          this.isolatedDir = isoDir;
+        }
+      }
+
       // Load agent configs from configs/agents/
       await this.loadAgentConfigs();
 
@@ -2184,6 +2200,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private iterationFeedback: string = '';
   /** 最近一次预执行命令（preCommands）的输出，会注入到对应步骤上下文中 */
   private lastPreCommandOutput: string | null = null;
+  /** Multi-user: createdBy userId, set by workflow start route */
+  public _createdBy?: string;
+  /** Multi-user: user's personal directory for isolation */
+  public _userPersonalDir?: string;
+  /** The isolated working directory for this run (if isolation is active) */
+  private isolatedDir: string | null = null;
 
   setQueuedApprovalAction(action: 'approve' | 'iterate'): void {
     this.queuedApprovalAction = action;
