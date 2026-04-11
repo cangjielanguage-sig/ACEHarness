@@ -21,7 +21,7 @@
 
 ```bash
 # 在 scripts 目录下执行
-cd cangjie_ace_skills/skills/cangjie_compiler_knowledge/scripts
+cd cangjie_ace_skills/cangjie_compiler_knowledge/scripts
 
 # 生成完整知识库（使用默认路径）
 python3 generate_knowledge.py

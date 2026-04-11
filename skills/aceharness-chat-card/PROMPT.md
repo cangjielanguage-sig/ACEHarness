@@ -20,7 +20,7 @@
 
 ```bash
 # 先生成 JSON，然后验证
-echo '你的JSON' | node skills/skills/aceharness-chat-card/scripts/validate-card.mjs
+echo '你的JSON' | node */skills/aceharness-chat-card/scripts/validate-card.mjs
 ```
 
 发现错误**立即修正**后，再输出到用户可见区域。**禁止跳过验证步骤**。
@@ -164,7 +164,7 @@ type Block =
 
 **生成 card 后必须验证：**
 ```bash
-echo '{"header": {...}, "blocks": [...]}' | node skills/skills/aceharness-chat-card/scripts/validate-card.mjs
+echo '{"header": {...}, "blocks": [...]}' | node */skills/aceharness-chat-card/scripts/validate-card.mjs
 ```
 
 ---

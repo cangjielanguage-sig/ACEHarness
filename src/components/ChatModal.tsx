@@ -30,10 +30,29 @@ export default function ChatModal() {
   const [engine, setEngine] = useState('');
   const effectiveEngine = useCurrentEngine(engine);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const autoScrollLockedRef = useRef(false);
+  const isProgrammaticScrollRef = useRef(false);
   const editorRef = useRef<RichTextEditorHandle>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (isProgrammaticScrollRef.current) return;
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+      autoScrollLockedRef.current = !nearBottom;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!autoScrollLockedRef.current) {
+      isProgrammaticScrollRef.current = true;
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      setTimeout(() => { isProgrammaticScrollRef.current = false; }, 500);
+    }
   }, [messages, loading]);
 
   useEffect(() => {
@@ -43,6 +62,7 @@ export default function ChatModal() {
   const send = async (textToSend?: string) => {
     const text = textToSend || editorRef.current?.getMarkdown().trim() || input.trim();
     if (!text || loading) return;
+    autoScrollLockedRef.current = false;
     setInput('');
     editorRef.current?.clear();
     setMessages(prev => [...prev, { role: 'user', content: text }]);
@@ -111,7 +131,7 @@ export default function ChatModal() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3">
             {messages.length === 0 && !loading && (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                 <RobotLogo size={48} className="mb-2 opacity-50" />

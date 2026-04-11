@@ -4,19 +4,18 @@ import { resolve } from 'path';
 import { stringify } from 'yaml';
 import { newConfigFormSchema } from '@/lib/schemas';
 
-function createPhaseBasedConfig(workflowName: string, description?: string) {
+function createPhaseBasedConfig(workflowName: string, workingDirectory: string, description?: string) {
   return {
     workflow: {
       name: workflowName,
       description: description || '',
-      type: 'phase-based',
       phases: [
         {
           name: '阶段 1',
           steps: [
             {
               name: '步骤 1',
-              agent: 'agent-1',
+              agent: 'developer',
               task: '请描述任务内容',
             },
           ],
@@ -24,51 +23,91 @@ function createPhaseBasedConfig(workflowName: string, description?: string) {
       ],
     },
     context: {
-      projectRoot: '',
+      projectRoot: workingDirectory,
       requirements: '',
     },
   };
 }
 
-function createStateMachineConfig(workflowName: string, description?: string) {
+function createStateMachineConfig(workflowName: string, workingDirectory: string, description?: string) {
   return {
     workflow: {
       name: workflowName,
       description: description || '',
-      type: 'state-machine',
-      initialState: '设计',
-      states: {
-        '设计': {
+      mode: 'state-machine',
+      maxTransitions: 30,
+      states: [
+        {
+          name: '设计',
+          description: '执行设计任务，蓝队实施、红队挑战、裁判评审',
+          isInitial: true,
+          isFinal: false,
           maxSelfTransitions: 3,
-          onEnter: '执行设计任务',
+          position: { x: 100, y: 200 },
+          steps: [
+            { name: '方案设计', agent: 'architect', role: 'defender', task: '根据需求设计技术方案，输出设计文档' },
+            { name: '方案挑战', agent: 'design-breaker', role: 'attacker', task: '审查设计方案，寻找潜在缺陷和风险点' },
+            { name: '设计评审', agent: 'design-judge', role: 'judge', task: '综合蓝队方案和红队意见，给出评审结论和 verdict' },
+          ],
           transitions: [
-            { event: '完成', target: '实施' },
-            { event: '有问题', target: '设计' },
+            { to: '实施', condition: { verdict: 'pass' }, priority: 1, label: '设计通过' },
+            { to: '设计', condition: { verdict: 'conditional_pass' }, priority: 2, label: '需要修改' },
+            { to: '设计', condition: { verdict: 'fail' }, priority: 3, label: '重新设计' },
           ],
         },
-        '实施': {
+        {
+          name: '实施',
+          description: '执行实施任务，蓝队编码、红队审查、裁判验收',
+          isInitial: false,
+          isFinal: false,
           maxSelfTransitions: 3,
-          onEnter: '执行实施任务',
+          position: { x: 400, y: 200 },
+          steps: [
+            { name: '编码实施', agent: 'developer', role: 'defender', task: '根据设计方案进行编码实施' },
+            { name: '代码审查', agent: 'code-hunter', role: 'attacker', task: '审查代码实现，检查安全性、性能和代码质量' },
+            { name: '实施评审', agent: 'code-judge', role: 'judge', task: '综合实施结果和审查意见，给出评审结论和 verdict' },
+          ],
           transitions: [
-            { event: '完成', target: '测试' },
-            { event: '失败', target: '设计' },
+            { to: '测试', condition: { verdict: 'pass' }, priority: 1, label: '实施完成' },
+            { to: '实施', condition: { verdict: 'conditional_pass' }, priority: 2, label: '需要修改' },
+            { to: '设计', condition: { verdict: 'fail' }, priority: 3, label: '设计有问题' },
           ],
         },
-        '测试': {
+        {
+          name: '测试',
+          description: '执行测试验证，蓝队测试、红队攻击、裁判判定',
+          isInitial: false,
+          isFinal: false,
           maxSelfTransitions: 3,
-          onEnter: '执行测试任务',
+          position: { x: 700, y: 200 },
+          steps: [
+            { name: '功能测试', agent: 'tester', role: 'defender', task: '编写并执行测试用例，验证功能正确性' },
+            { name: '压力测试', agent: 'stress-tester', role: 'attacker', task: '进行边界测试和压力测试，寻找潜在问题' },
+            { name: '测试评审', agent: 'code-judge', role: 'judge', task: '综合测试结果，给出最终评审结论和 verdict' },
+          ],
           transitions: [
-            { event: '通过', target: '完成' },
-            { event: '失败', target: '实施' },
+            { to: '完成', condition: { verdict: 'pass' }, priority: 1, label: '测试通过' },
+            { to: '实施', condition: { verdict: 'conditional_pass' }, priority: 2, label: '需要修复' },
+            { to: '设计', condition: { verdict: 'fail' }, priority: 3, label: '严重问题' },
           ],
         },
-        '完成': {
-          type: 'final',
+        {
+          name: '完成',
+          description: '工作流结束，生成总结报告',
+          isInitial: false,
+          isFinal: true,
+          position: { x: 1000, y: 200 },
+          steps: [
+            { name: '生成报告', agent: 'developer', role: 'defender', task: '汇总各阶段成果，生成最终报告' },
+            { name: '报告审查', agent: 'code-auditor', role: 'attacker', task: '审查最终报告的完整性和准确性' },
+            { name: '最终确认', agent: 'code-judge', role: 'judge', task: '确认报告质量，给出最终结论' },
+          ],
+          transitions: [],
         },
-      },
+      ],
     },
     context: {
-      projectRoot: '',
+      projectRoot: workingDirectory,
       requirements: '',
     },
   };
@@ -90,7 +129,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { filename, workflowName, description, mode, requirements } = validationResult.data;
+    const { filename, workflowName, workingDirectory, description, mode, requirements } = validationResult.data;
     const workflowMode = mode || 'phase-based';
 
     // 检查文件是否已存在
@@ -126,16 +165,25 @@ export async function POST(request: NextRequest) {
         defaultConfig = result.config;
       } catch (e) {
         // 如果 AI 生成失败，使用默认模板
-        defaultConfig = createPhaseBasedConfig(workflowName, description);
+        defaultConfig = createPhaseBasedConfig(workflowName, workingDirectory, description);
       }
     } else if (workflowMode === 'state-machine') {
-      defaultConfig = createStateMachineConfig(workflowName, description);
+      defaultConfig = createStateMachineConfig(workflowName, workingDirectory, description);
     } else {
-      defaultConfig = createPhaseBasedConfig(workflowName, description);
+      defaultConfig = createPhaseBasedConfig(workflowName, workingDirectory, description);
     }
 
     const yamlContent = stringify(defaultConfig);
     await writeFile(filepath, yamlContent, 'utf-8');
+
+    // Determine the generated mode for the response message
+    const generatedMode = defaultConfig?.workflow?.mode === 'state-machine' ? 'state-machine' : 'phase-based';
+    let message = '配置文件已创建';
+    if (workflowMode === 'ai-guided') {
+      message = generatedMode === 'state-machine'
+        ? 'AI 已根据需求生成状态机工作流，请在设计页面调整状态和转移。'
+        : 'AI 已根据需求生成阶段工作流，请在设计页面调整阶段和步骤。';
+    }
 
     return NextResponse.json({
       success: true,

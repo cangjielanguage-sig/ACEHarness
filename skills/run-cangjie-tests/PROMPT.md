@@ -9,4 +9,4 @@
 
 常用参数：`-j`并行数 | `--timeout`超时 | `-pFAIL`只显失败 | `--retry`重试
 
-详细命令和配置路径，见 `skills/skills/run-cangjie-tests/SKILL.md`
+详细命令和配置路径，见 `skills/run-cangjie-tests/SKILL.md`

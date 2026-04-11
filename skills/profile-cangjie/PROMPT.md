@@ -7,7 +7,7 @@
 - 「profile 报告」「性能瓶颈在哪」
 
 ### 分析脚本
-`python3 skills/skills/profile-cangjie/scripts/profile-cangjie.py [options]`
+`python3 skills/profile-cangjie/scripts/profile-cangjie.py [options]`
 
 ### 常用参数
 - `--both` — 同时分析时间和内存
@@ -25,4 +25,4 @@ cjc --profile-compile-memory test.cj -o test  # 生成 test.cj.mem.prof
 **⚠️ 注意：使用 --profile 标志无需重编译编译器，直接在 cjc 命令行指定即可。**
 
 ### 使用方式
-- 详细说明见 `skills/skills/profile-cangjie/SKILL.md`
+- 详细说明见 `skills/profile-cangjie/SKILL.md`

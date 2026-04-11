@@ -7,7 +7,6 @@ import dynamic from 'next/dynamic';
 import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
 import { EngineModelSelect } from '@/components/EngineModelSelect';
-import { useCurrentEngine } from '@/components/EngineSelect';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import ChatSidebar from '@/components/chat/ChatSidebar';
@@ -48,7 +47,7 @@ function ChatPageContent() {
     activeSession, sessions, createSession, sendMessage, stopStreaming,
     deleteMessage, retryFromMessage, continueFromMessage,
     loading, streamingMessageId,
-    model, setModel, engine, setEngine,
+    model, setModel, engine, effectiveEngine, setEngine,
     confirmAction, rejectAction, undoActionById, retryAction,
     skillSettings,
   } = useChat();
@@ -57,7 +56,6 @@ function ChatPageContent() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [editorLoaded, setEditorLoaded] = useState(false);
-  const effectiveEngine = useCurrentEngine(engine);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -65,6 +63,10 @@ function ChatPageContent() {
   const editorRef = useRef<RichTextEditorHandle | null>(null);
   const editEditorRef = useRef<RichTextEditorHandle | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const autoScrollLockedRef = useRef(false);
+  const isProgrammaticScrollRef = useRef(false);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
   const isMobile = useIsMobile();
   const [currentUser, setCurrentUser] = useState<{ username: string; email: string; role: 'admin' | 'user'; avatar?: string } | null>(null);
 
@@ -113,46 +115,80 @@ function ChatPageContent() {
     };
   }, [isResizing]);
 
+  // Detect user scroll to lock/unlock auto-scroll
+  const hasMessages = (activeSession?.messages?.length ?? 0) > 0;
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (isProgrammaticScrollRef.current) return;
+      const threshold = 80;
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+      autoScrollLockedRef.current = !nearBottom;
+      setShowScrollBtn(!nearBottom && hasMessages);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [hasMessages]);
+
+  // Auto-scroll to bottom only if not locked by user
+  useEffect(() => {
+    if (!autoScrollLockedRef.current) {
+      isProgrammaticScrollRef.current = true;
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      setTimeout(() => { isProgrammaticScrollRef.current = false; }, 500);
+    }
   }, [activeSession?.messages, loading]);
 
   useEffect(() => {
     editorRef.current?.focus();
   }, [activeSession?.id]);
 
+  const unlockAutoScroll = useCallback(() => {
+    autoScrollLockedRef.current = false;
+    setShowScrollBtn(false);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    unlockAutoScroll();
+    isProgrammaticScrollRef.current = true;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => { isProgrammaticScrollRef.current = false; }, 500);
+  }, [unlockAutoScroll]);
+
   const handleSend = useCallback(async () => {
     const text = editorRef.current?.getMarkdown().trim() || input.trim();
     if (!text || loading) return;
 
-    // If editing, delete the original message first
     if (editingMessageId) {
       deleteMessage(editingMessageId);
       setEditingMessageId(null);
     }
 
+    unlockAutoScroll();
     setInput('');
     editorRef.current?.clear();
     await sendMessage(text);
     editorRef.current?.focus();
-  }, [input, loading, sendMessage, editingMessageId, deleteMessage]);
+  }, [input, loading, sendMessage, editingMessageId, deleteMessage, unlockAutoScroll]);
 
   const handleEditorEnter = useCallback(async (text: string) => {
     if (!text || loading) return;
 
-    // If editing, delete the original message first
     if (editingMessageId) {
       deleteMessage(editingMessageId);
       setEditingMessageId(null);
     }
 
+    unlockAutoScroll();
     setInput('');
     editorRef.current?.clear();
     await sendMessage(text);
-  }, [loading, sendMessage, editingMessageId, deleteMessage]);
+  }, [loading, sendMessage, editingMessageId, deleteMessage, unlockAutoScroll]);
 
   const handleQuickAction = useCallback((prompt: string) => {
     if (prompt && !prompt.includes('\n')) {
+      unlockAutoScroll();
       setInput('');
       editorRef.current?.clear();
       sendMessage(prompt);
@@ -160,7 +196,7 @@ function ChatPageContent() {
       setInput(prompt);
       editorRef.current?.focus();
     }
-  }, [sendMessage]);
+  }, [sendMessage, unlockAutoScroll]);
 
   const messages = activeSession?.messages || [];
 
@@ -295,38 +331,49 @@ function ChatPageContent() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 lg:px-16">
-          {messages.length === 0 && !loading && (
-            <div className="flex flex-col items-center justify-center h-full gap-8">
-              <div className="text-center">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-                  className="inline-flex p-3 mb-4"
-                >
-                  <RobotLogo size={56} className="animate-robotPulse" />
-                </motion.div>
-                <motion.h2
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="text-2xl font-bold bg-gradient-to-r from-primary via-blue-500 to-purple-500 bg-clip-text text-transparent mb-2"
-                >
-                  ACEHarness Multi-Agent 助手
-                </motion.h2>
-                <motion.p
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.1 }}
-                  className="text-sm text-muted-foreground"
-                >
-                  通过对话实现全流程 Multi-Agent 智能编排
-                </motion.p>
+        <div className="flex-1 relative min-h-0">
+          <div ref={scrollContainerRef} className="absolute inset-0 overflow-y-auto px-4 py-6 md:px-8 lg:px-16">
+            {messages.length === 0 && !loading && (
+              <div className="flex flex-col items-center justify-center h-full gap-8">
+                <div className="text-center">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+                    className="inline-flex p-3 mb-4"
+                  >
+                    <RobotLogo size={56} className="animate-robotPulse" />
+                  </motion.div>
+                  <motion.h2
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-2xl font-bold bg-gradient-to-r from-primary via-blue-500 to-purple-500 bg-clip-text text-transparent mb-2"
+                  >
+                    ACEHarness Multi-Agent 助手
+                  </motion.h2>
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.1 }}
+                    className="text-sm text-muted-foreground"
+                  >
+                    通过对话实现全流程 Multi-Agent 智能编排
+                  </motion.p>
+                </div>
+                <QuickActions onAction={handleQuickAction} skillSettings={skillSettings} />
               </div>
-              <QuickActions onAction={handleQuickAction} skillSettings={skillSettings} />
-            </div>
+            )}
+            {renderedMessages}
+            <div ref={messagesEndRef} />
+          </div>
+          {showScrollBtn && (
+            <button
+              onClick={scrollToBottom}
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary/90 text-primary-foreground text-xs shadow-lg hover:bg-primary transition-colors"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>arrow_downward</span>
+              新消息
+            </button>
           )}
-          {renderedMessages}
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Input area */}

@@ -7,6 +7,7 @@
 
 import { EventEmitter } from 'events';
 import type { Engine, EngineOptions, EngineResult, EngineStreamEvent } from './engine-interface';
+import { fenced } from '../markdown-utils';
 
 export class CodexEngineWrapper extends EventEmitter implements Engine {
   private currentThread: any = null;
@@ -91,7 +92,7 @@ export class CodexEngineWrapper extends EventEmitter implements Engine {
                 content += `\n💻 执行命令: \`${cmd}\`\n`;
               } else {
                 content += `\n💻 执行命令 (${cmdLines.length} 行)\n`;
-                content += `\n<details><summary>查看命令</summary>\n\n\`\`\`bash\n${cmd}\n\`\`\`\n\n</details>\n`;
+                content += `\n<details><summary>查看命令</summary>\n\n${fenced(cmd, 'bash')}\n\n</details>\n`;
               }
               this.emit('stream', {
                 type: 'tool',
@@ -131,16 +132,16 @@ export class CodexEngineWrapper extends EventEmitter implements Engine {
               if (resultText) {
                 const lines = resultText.split('\n');
                 if (lines.length <= 15) {
-                  this.emit('stream', { type: 'text', content: `\n\`\`\`\n${resultText}\n\`\`\`\n` } as EngineStreamEvent);
+                  this.emit('stream', { type: 'text', content: `\n${fenced(resultText)}\n` } as EngineStreamEvent);
                 } else {
-                  this.emit('stream', { type: 'text', content: `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n\`\`\`\n${resultText}\n\`\`\`\n\n</details>\n` } as EngineStreamEvent);
+                  this.emit('stream', { type: 'text', content: `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n${fenced(resultText)}\n\n</details>\n` } as EngineStreamEvent);
                 }
               }
             } else if (item.type === 'file_change') {
               const changes = (item as any).changes || [];
               const summary = changes.map((c: any) => `  ${c.kind}: ${c.path}`).join('\n');
               if (summary) {
-                this.emit('stream', { type: 'text', content: `\n\`\`\`\n${summary}\n\`\`\`\n` } as EngineStreamEvent);
+                this.emit('stream', { type: 'text', content: `\n${fenced(summary)}\n` } as EngineStreamEvent);
               }
             } else if (item.type === 'todo_list') {
               const items = (item as any).items || [];

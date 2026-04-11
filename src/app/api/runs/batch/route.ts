@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteRun } from '@/lib/run-store';
+import { resolve } from 'path';
+import { existsSync } from 'fs';
+import { readFile, rm } from 'fs/promises';
+import { parse } from 'yaml';
+import { workflowRegistry } from '@/lib/workflow-registry';
+
+const RUNS_DIR = resolve(process.cwd(), 'runs');
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { action, runIds } = body;
+    const { action, runIds, cleanWorkDir } = body;
 
     if (action !== 'delete') {
       return NextResponse.json(
@@ -25,6 +32,30 @@ export async function POST(request: NextRequest) {
 
     for (const runId of runIds) {
       try {
+        // If cleanWorkDir, read state.yaml for workingDirectory and stop if running
+        if (cleanWorkDir) {
+          try {
+            const stateFile = resolve(RUNS_DIR, runId, 'state.yaml');
+            if (existsSync(stateFile)) {
+              const content = await readFile(stateFile, 'utf-8');
+              const state = parse(content);
+              // Stop if running
+              if (state.configFile) {
+                try {
+                  const manager = await workflowRegistry.getManager(state.configFile);
+                  const status = manager.getStatus();
+                  if (status.runId === runId && (status.status === 'running' || status.status === 'preparing')) {
+                    await manager.stop();
+                  }
+                } catch { /* ignore */ }
+              }
+              // Clean working directory
+              if (state.workingDirectory && existsSync(state.workingDirectory)) {
+                await rm(state.workingDirectory, { recursive: true, force: true });
+              }
+            }
+          } catch { /* ignore */ }
+        }
         await deleteRun(runId);
         deletedCount++;
       } catch (error: any) {

@@ -54,7 +54,7 @@ export interface PersistedStepLog {
 export interface PersistedRunState {
   runId: string;
   configFile: string;
-  status: 'running' | 'completed' | 'failed' | 'stopped' | 'crashed' | 'pending';
+  status: 'preparing' | 'running' | 'completed' | 'failed' | 'stopped' | 'crashed' | 'pending';
   statusReason?: string;
   startTime: string;
   endTime: string | null;
@@ -129,6 +129,8 @@ export interface PersistedRunState {
     stateName: string;
     stepName: string;
   } | null;
+  /** 实际工作目录（隔离的 run-xxx 目录或原始 projectRoot） */
+  workingDirectory?: string;
 }
 
 function runDir(runId: string): string {

@@ -12,7 +12,14 @@ function getAuthHeaders(): Record<string, string> {
 
 function authFetch(url: string, init?: RequestInit): Promise<Response> {
   const headers = { ...getAuthHeaders(), ...(init?.headers || {}) };
-  return fetch(url, { ...init, headers });
+  return fetch(url, { ...init, headers }).then(res => {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      localStorage.removeItem('auth-token');
+      // Dispatch a custom event so AuthGuard / page can react
+      window.dispatchEvent(new CustomEvent('auth:expired'));
+    }
+    return res;
+  });
 }
 
 interface ConfigListResponse {
@@ -41,6 +48,7 @@ interface ApiResponse {
 
 interface WorkflowStatusResponse {
   status: string;
+  statusReason?: string;
   runId: string | null;
   currentConfigFile: string | null;
   logs: any[];
@@ -53,6 +61,7 @@ interface WorkflowStatusResponse {
   iterationStates: Record<string, any>;
   globalContext?: string;
   phaseContexts?: Record<string, string>;
+  workingDirectory?: string | null;
   // State machine specific fields
   stateHistory?: any[];
   issueTracker?: any[];
@@ -101,7 +110,7 @@ interface RunRecord {
   configName: string;
   startTime: string;
   endTime: string | null;
-  status: 'running' | 'completed' | 'failed' | 'stopped' | 'crashed';
+  status: 'preparing' | 'running' | 'completed' | 'failed' | 'stopped' | 'crashed';
   currentPhase: string | null;
   totalSteps: number;
   completedSteps: number;
@@ -230,8 +239,9 @@ export const runsApi = {
     return response.json();
   },
 
-  async deleteRun(id: string): Promise< ApiResponse> {
-    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/delete`, {
+  async deleteRun(id: string, cleanWorkDir = false): Promise< ApiResponse> {
+    const params = cleanWorkDir ? '?cleanWorkDir=true' : '';
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/delete${params}`, {
       method: 'DELETE',
     });
     if (!response.ok) {
@@ -305,11 +315,11 @@ export const runsApi = {
     return response.json();
   },
 
-  async batchDeleteRuns(runIds: string[]): Promise<ApiResponse & { deletedCount: number; errors?: string[] }> {
+  async batchDeleteRuns(runIds: string[], cleanWorkDir = false): Promise<ApiResponse & { deletedCount: number; errors?: string[] }> {
     const response = await authFetch(`${API_BASE}/runs/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', runIds }),
+      body: JSON.stringify({ action: 'delete', runIds, cleanWorkDir }),
     });
     if (!response.ok) throw new Error('批量删除运行记录失败');
     return response.json();

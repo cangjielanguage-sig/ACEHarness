@@ -7,7 +7,7 @@
 最简单的使用方式是通过搜索脚本：
 
 ```bash
-cd cangjie_ace_skills/skills/cangjie_compiler_knowledge
+cd cangjie_ace_skills/cangjie_compiler_knowledge
 python3 scripts/search.py "lambda"
 ```
 

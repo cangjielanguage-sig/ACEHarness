@@ -11,8 +11,7 @@ interface EngineInfo {
   icon: string;
 }
 
-const ALL_ENGINES: EngineInfo[] = [
-  { id: '', name: '跟随全局', icon: '🌐' },
+const CONCRETE_ENGINES: EngineInfo[] = [
   { id: 'claude-code', name: 'Claude Code', icon: '🤖' },
   { id: 'kiro-cli', name: 'Kiro CLI', icon: '⚡' },
   { id: 'opencode', name: 'OpenCode', icon: '🌐' },
@@ -42,29 +41,54 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
   }, []);
 
   const effectiveEngine = engine || globalEngine;
+  const globalEngineInfo = CONCRETE_ENGINES.find(e => e.id === globalEngine);
+  const globalLabel = globalEngineInfo ? `${globalEngineInfo.icon} ${globalEngineInfo.name}` : globalEngine;
 
-  // Composite value: "engineId::modelValue"
+  // Composite value: "engineId::modelValue" — empty engineId = follow system
   const compositeValue = `${engine}::${model}`;
 
-  // Build groups: one per engine, each containing its compatible models
   const groups: ComboboxGroupDef[] = useMemo(() => {
-    return ALL_ENGINES.filter(eng => eng.id !== '').map(eng => {
+    const result: ComboboxGroupDef[] = [];
+
+    // "跟随系统" group — uses the global engine's compatible models
+    const sysModels = models.filter(
+      m => !m.engines || m.engines.length === 0 || m.engines.includes(globalEngine),
+    );
+    if (sysModels.length > 0) {
+      result.push({
+        label: `🔄 跟随系统 (${globalLabel})`,
+        icon: undefined,
+        items: sysModels.map(m => ({
+          value: `::${m.value}`,
+          label: `🔄 ${m.label}`,
+        })),
+      });
+    }
+
+    // Concrete engine groups
+    for (const eng of CONCRETE_ENGINES) {
       const engineModels = models.filter(
         m => !m.engines || m.engines.length === 0 || m.engines.includes(eng.id),
       );
-      return {
-        label: `${eng.icon} ${eng.name}`,
-        icon: undefined,
-        items: engineModels.map(m => ({
-          value: `${eng.id}::${m.value}`,
-          label: `${eng.icon} ${m.label}`,
-        })),
-      };
-    }).filter(g => g.items.length > 0);
-  }, [models]);
+      if (engineModels.length > 0) {
+        result.push({
+          label: `${eng.icon} ${eng.name}`,
+          icon: undefined,
+          items: engineModels.map(m => ({
+            value: `${eng.id}::${m.value}`,
+            label: `${eng.icon} ${m.label}`,
+          })),
+        });
+      }
+    }
 
-  const engineInfo = ALL_ENGINES.find(e => e.id === effectiveEngine) || ALL_ENGINES[0];
+    return result;
+  }, [models, globalEngine, globalLabel]);
+
+  const engineInfo = CONCRETE_ENGINES.find(e => e.id === effectiveEngine);
   const modelLabel = models.find(m => m.value === model)?.label || model || '选择模型';
+  const isFollowSystem = !engine;
+  const displayIcon = isFollowSystem ? '🔄' : (engineInfo?.icon || '🤖');
 
   const handleValueChange = (val: string) => {
     if (!val) return;
@@ -72,7 +96,9 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
     const modelVal = rest.join('::');
     onEngineChange(engId);
     onModelChange(modelVal);
-    const engName = ALL_ENGINES.find(e => e.id === engId)?.name || engId;
+    const engName = engId
+      ? (CONCRETE_ENGINES.find(e => e.id === engId)?.name || engId)
+      : `跟随系统 (${globalLabel})`;
     const modLabel = models.find(m => m.value === modelVal)?.label || modelVal;
     toast('info', `已切换: ${engName} / ${modLabel}`);
   };
@@ -82,7 +108,7 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
       value={compositeValue}
       onValueChange={handleValueChange}
       groups={groups}
-      placeholder={`${engineInfo.icon} ${modelLabel}`}
+      placeholder={`${displayIcon} ${modelLabel}`}
       triggerClassName={`h-8 text-xs ${className}`}
     />
   );

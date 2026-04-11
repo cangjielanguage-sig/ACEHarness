@@ -12,7 +12,7 @@ export interface RunRecord {
   configName: string;
   startTime: string;
   endTime: string | null;
-  status: 'running' | 'completed' | 'failed' | 'stopped' | 'crashed';
+  status: 'preparing' | 'running' | 'completed' | 'failed' | 'stopped' | 'crashed';
   currentPhase: string | null;
   totalSteps: number;
   completedSteps: number;

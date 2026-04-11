@@ -153,11 +153,49 @@ const HTML_TAGS = new Set([
   'u','ul','var','video','wbr',
 ]);
 
+/**
+ * Close any unclosed code fence (common during streaming).
+ * Supports both backtick and tilde fences.
+ * Uses strict CommonMark rules: a closing fence must have >= opening width
+ * and no info string.
+ */
+function closeUnterminatedFences(content: string): string {
+  const lines = content.split('\n');
+  let inCodeBlock = false;
+  let fenceWidth = 0;
+  let fenceChar: '`' | '~' | null = null;
+
+  for (const line of lines) {
+    if (!inCodeBlock) {
+      const m = line.match(/^(`{3,}|~{3,})/);
+      if (m) {
+        inCodeBlock = true;
+        fenceWidth = m[1].length;
+        fenceChar = m[1][0] as '`' | '~';
+      }
+    } else {
+      const closeRe = fenceChar === '~' ? /^(~{3,})\s*$/ : /^(`{3,})\s*$/;
+      const m = line.match(closeRe);
+      if (m && m[1].length >= fenceWidth) {
+        inCodeBlock = false;
+        fenceChar = null;
+      }
+    }
+  }
+
+  if (inCodeBlock && fenceChar) {
+    return content + '\n' + fenceChar.repeat(fenceWidth);
+  }
+  return content;
+}
+
 // Preprocess: convert bare URLs to markdown links for GFM autolink,
 // and escape non-standard HTML-like tags (e.g. <float64>) so rehypeRaw doesn't choke.
 function preprocessMarkdown(content: string): string {
+  // 0. Close any unterminated code fence (streaming)
+  const closed = closeUnterminatedFences(content);
   // 1. Escape angle brackets around non-standard tag names
-  const escaped = content.replace(
+  const escaped = closed.replace(
     /<\/?([a-zA-Z][a-zA-Z0-9._-]*)(\s[^>]*)?\/?>/g,
     (match, tagName) => {
       if (HTML_TAGS.has(tagName.toLowerCase())) return match;

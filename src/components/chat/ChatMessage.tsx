@@ -6,6 +6,15 @@ import ActionCard from './ActionCard';
 import UniversalCard from './cards/UniversalCard';
 import { memo } from 'react';
 
+const ENGINE_LABELS: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  'kiro-cli': 'Kiro CLI',
+  'opencode': 'OpenCode',
+  'codex': 'Codex',
+  'cursor': 'Cursor',
+  'cangjie-magic': 'CangjieMagic',
+};
+
 interface ChatMessageProps {
   message: {
     id: string;
@@ -14,6 +23,8 @@ interface ChatMessageProps {
     rawContent?: string;
     actions?: ActionState[];
     cards?: any[];
+    engine?: string;
+    model?: string;
     costUsd?: number;
     durationMs?: number;
     usage?: { input_tokens: number; output_tokens: number };
@@ -256,11 +267,21 @@ export default memo(function ChatMessage({ message, isStreaming, onConfirmAction
         {message.cards?.map((card, i) => (
           <UniversalCard key={i} card={card} onAction={onAction} />
         ))}
-        {(message.usage || message.costUsd !== undefined || message.durationMs !== undefined) && (
-          <div className="text-xs text-muted-foreground px-1 opacity-60">
-            {message.usage && `${message.usage.input_tokens}↓ ${message.usage.output_tokens}↑`}
-            {message.costUsd !== undefined && ` · $${message.costUsd.toFixed(4)}`}
-            {message.durationMs !== undefined && ` · ${(message.durationMs / 1000).toFixed(1)}s`}
+        {(message.engine || message.model || message.usage || message.costUsd !== undefined || message.durationMs !== undefined) && (
+          <div className="text-xs text-muted-foreground px-1 opacity-60 flex items-center gap-1 flex-wrap">
+            {message.engine && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted/80 font-medium">
+                {ENGINE_LABELS[message.engine] || message.engine}
+              </span>
+            )}
+            {message.model && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted/80">
+                {message.model}
+              </span>
+            )}
+            {message.usage && <span>{message.usage.input_tokens}↓ {message.usage.output_tokens}↑</span>}
+            {message.costUsd !== undefined && <span>· ${message.costUsd.toFixed(4)}</span>}
+            {message.durationMs !== undefined && <span>· {(message.durationMs / 1000).toFixed(1)}s</span>}
           </div>
         )}
       </div>

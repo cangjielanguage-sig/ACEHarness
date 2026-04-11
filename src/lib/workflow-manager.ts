@@ -13,6 +13,7 @@ import { existsSync } from 'fs';
 // webpack/Next.js file tracing from over-matching the skills directory
 const SKILLS_SUBDIR = 'skills';
 import { parse } from 'yaml';
+import { fenced } from './markdown-utils';
 import { processManager } from './process-manager';
 import type { EngineJsonResult } from './engines/engine-interface';
 import { createRun, updateRun } from './run-store';
@@ -79,7 +80,7 @@ export interface IterationState {
 export class WorkflowManager extends EventEmitter {
   private currentWorkflow: WorkflowConfig | null = null;
   private logs: any[] = [];
-  private status: 'idle' | 'running' | 'completed' | 'failed' | 'stopped' = 'idle';
+  private status: 'idle' | 'preparing' | 'running' | 'completed' | 'failed' | 'stopped' = 'idle';
   private agents: AgentState[] = [];
   private currentPhase: string | null = null;
   private currentStep: string | null = null;
@@ -120,6 +121,8 @@ export class WorkflowManager extends EventEmitter {
   public _userPersonalDir?: string;
   /** The isolated working directory for this run (if isolation is active) */
   private isolatedDir: string | null = null;
+  /** Original projectRoot from config (before isolation) */
+  private currentProjectRoot: string | null = null;
   /** Cached workflow-level skills from context.skills */
   private workflowSkillsContent: string = '';
   /** Skills copied to workspace that need cleanup on finish */
@@ -243,7 +246,16 @@ export class WorkflowManager extends EventEmitter {
         if (step.skills) step.skills.forEach((s: string) => needed.add(s));
       }
     }
-    if (needed.size === 0) return;
+    if (needed.size === 0) {
+      // 没有指定 skills，symlink 整个 skills 目录（像 chat 一样）
+      if (!existsSync(workspaceSkillsDir)) {
+        try {
+          const { symlinkSync } = await import('fs');
+          symlinkSync(serverSkillsDir, workspaceSkillsDir);
+        } catch { /* ignore */ }
+      }
+      return;
+    }
 
     const dirExistedBefore = existsSync(workspaceSkillsDir);
     await mkdir(workspaceSkillsDir, { recursive: true });
@@ -521,6 +533,7 @@ export class WorkflowManager extends EventEmitter {
         pendingCheckpoint: this.pendingCheckpoint || undefined,
         globalContext: this.globalContext || undefined,
         phaseContexts: this.phaseContexts.size > 0 ? Object.fromEntries(this.phaseContexts) : undefined,
+        workingDirectory: this.isolatedDir || undefined,
       };
       await saveRunState(state);
     } catch { /* non-critical */ }
@@ -554,11 +567,11 @@ export class WorkflowManager extends EventEmitter {
   }
 
   async start(configFile: string): Promise<void> {
-    if (this.status === 'running') {
+    if (this.status === 'running' || this.status === 'preparing') {
       throw new Error('已有工作流正在运行');
     }
 
-    this.status = 'running';
+    this.status = 'preparing';
     this.statusReason = null;
     this.logs = [];
     this.agents = [];
@@ -576,7 +589,8 @@ export class WorkflowManager extends EventEmitter {
     this.globalContext = '';
     this.workspaceSkills = '';
     this.phaseContexts.clear();
-    this.emit('status', { status: 'running', message: '开始执行工作流...' });
+    this.isolatedDir = null;
+    this.currentProjectRoot = null;
 
     // Reset process manager counters in case previous run left stale state
     processManager.reset();
@@ -587,37 +601,72 @@ export class WorkflowManager extends EventEmitter {
       const workflowConfig: WorkflowConfig = parse(content);
 
       this.currentWorkflow = workflowConfig;
+      // Resolve projectRoot to absolute path relative to user's personal dir
+      this.currentProjectRoot = workflowConfig.context.projectRoot
+        ? (this._userPersonalDir ? resolve(this._userPersonalDir, workflowConfig.context.projectRoot) : resolve(workflowConfig.context.projectRoot))
+        : null;
 
-      // Directory isolation: if user has personalDir, copy projectRoot into isolated dir
+      // === Create run FIRST so frontend can see it immediately ===
+      const totalSteps = workflowConfig.workflow.phases.reduce(
+        (sum, p) => sum + p.steps.length, 0
+      );
+      const runId = `run-${formatTimestamp()}`;
+      this.currentRunId = runId;
+
+      try {
+        await createRun({
+          id: runId, configFile, configName: configFile, startTime: this.runStartTime,
+          endTime: null, status: 'preparing', currentPhase: null,
+          totalSteps, completedSteps: 0,
+        });
+      } catch { /* non-critical */ }
+
+      this.emit('status', {
+        status: 'preparing',
+        message: '准备中...',
+        runId,
+        currentConfigFile: this.currentConfigFile,
+      });
+      await this.persistState();
+
+      // === Preparing phase: directory isolation (cp for independence) ===
       if (this._userPersonalDir && workflowConfig.context.projectRoot) {
-        const runId = `run-${formatTimestamp()}`;
-        const isolatedDir = resolve(this._userPersonalDir, runId);
-        await mkdir(isolatedDir, { recursive: true });
-        try {
-          await cp(workflowConfig.context.projectRoot, isolatedDir, { recursive: true });
-        } catch (e: any) {
-          this.emit('log', { message: `目录隔离复制失败: ${e.message}，使用原目录` });
-        }
-        if (existsSync(isolatedDir)) {
-          workflowConfig.context.projectRoot = isolatedDir;
-          this.isolatedDir = isolatedDir;
+        if (this.shouldStop) return;
+        const srcDir = resolve(this._userPersonalDir, workflowConfig.context.projectRoot);
+        if (!existsSync(srcDir)) {
+          this.emit('log', { message: `项目目录不存在: ${srcDir}，跳过目录隔离` });
+        } else {
+          const isoRunId = `run-${formatTimestamp()}`;
+          const isolatedDir = resolve(this._userPersonalDir, isoRunId);
+          try {
+            await mkdir(isolatedDir, { recursive: true });
+            await cp(srcDir, isolatedDir, { recursive: true });
+            if (this.shouldStop) {
+              // Stopped during copy — clean up incomplete dir
+              await rm(isolatedDir, { recursive: true, force: true }).catch(() => {});
+              return;
+            }
+            workflowConfig.context.projectRoot = isolatedDir;
+            this.isolatedDir = isolatedDir;
+          } catch (e: any) {
+            if (this.shouldStop) return;
+            this.emit('log', { message: `目录隔离复制失败: ${e.message}，使用原目录` });
+          }
         }
       }
 
-      // Load agent configs from configs/agents/*.yaml
+      if (this.shouldStop) return;
+
+      // === Preparing phase: load agents, init engine, sync skills ===
       this.agentConfigs = await this.loadAgentConfigs();
-
-      // Initialize engine
+      if (this.shouldStop) return;
       await this.initializeEngine();
-
-      // Sync skills to workspace before execution
+      if (this.shouldStop) return;
       await this.syncSkillsToWorkspace(workflowConfig);
 
-      // Discover workspace skills from projectRoot/skills/
       if (workflowConfig.context.projectRoot) {
         this.workspaceSkills = await this.discoverWorkspaceSkills(workflowConfig.context.projectRoot);
 
-        // Load workflow-level skills from context.skills
         if (workflowConfig.context.skills && workflowConfig.context.skills.length > 0) {
           this.workflowSkillsContent = await this.loadWorkflowSkills(
             workflowConfig.context.skills,
@@ -626,7 +675,6 @@ export class WorkflowManager extends EventEmitter {
         }
       }
 
-      // Load workflow-level skills from context.skills
       this.workflowSkillsContent = '';
       if (workflowConfig.context.skills && workflowConfig.context.skills.length > 0) {
         this.workflowSkillsContent = await this.loadWorkflowSkills(
@@ -637,23 +685,9 @@ export class WorkflowManager extends EventEmitter {
 
       this.initializeAgents(workflowConfig);
 
-      // Create run record
-      const totalSteps = workflowConfig.workflow.phases.reduce(
-        (sum, p) => sum + p.steps.length, 0
-      );
-      const runId = `run-${formatTimestamp()}`;
-      this.currentRunId = runId;
-      try {
-        await createRun({
-          id: runId, configFile, configName: configFile, startTime: new Date().toISOString(),
-          endTime: null, status: 'running', currentPhase: null,
-          totalSteps, completedSteps: 0,
-        });
-      } catch { /* non-critical */ }
-
-      // Notify frontend of the run ID
-      this.emit('status', { status: 'running', message: '工作流已启动', runId });
-
+      // === Switch to running ===
+      this.status = 'running';
+      this.emit('status', { status: 'running', message: '工作流已启动', runId, workingDirectory: this.isolatedDir || null });
       await this.persistState();
 
       await this.executeWorkflow(workflowConfig);
@@ -1734,7 +1768,7 @@ export class WorkflowManager extends EventEmitter {
         if (fullPath) {
           prompt += `完整文档路径: \`${fullPath}\`\n\n`;
         }
-        prompt += `\`\`\`\n${summary}\n\`\`\`\n\n`;
+        prompt += `${fenced(summary)}\n\n`;
       }
     }
 
@@ -2489,6 +2523,7 @@ export class WorkflowManager extends EventEmitter {
       stepLogs: this.stepLogs,
       workflow: this.currentWorkflow,
       iterationStates: Object.fromEntries(this.iterationStates),
+      workingDirectory: this.isolatedDir || null,
     };
   }
 

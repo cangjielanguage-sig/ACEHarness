@@ -13,6 +13,7 @@
 import { ACPWrapperBase } from './acp-wrapper-base';
 import type { EngineOptions } from './engine-interface';
 import type { EngineStreamEvent } from './engine-interface';
+import { fenced } from '../markdown-utils';
 import { ACPEngineConfig } from './acp-engine';
 
 export class CursorEngineWrapper extends ACPWrapperBase {
@@ -218,7 +219,7 @@ export class CursorEngineWrapper extends ACPWrapperBase {
         output += `\n💻 执行命令: \`${cmd}\`\n`;
       } else {
         output += `\n💻 执行命令 (${cmdLines.length} 行)\n`;
-        output += `\n<details><summary>查看命令</summary>\n\n\`\`\`bash\n${cmd}\n\`\`\`\n\n</details>\n`;
+        output += `\n<details><summary>查看命令</summary>\n\n${fenced(cmd, 'bash')}\n\n</details>\n`;
       }
     } else if (rawInput.pattern && rawInput.path) {
       output += `\n🔍 搜索: \`${rawInput.pattern}\` in \`${rawInput.path}\`\n`;
@@ -286,9 +287,9 @@ export class CursorEngineWrapper extends ACPWrapperBase {
             const text = inner.text.trim();
             const lines = text.split('\n');
             if (lines.length > 15) {
-              parts.push(`\n<details><summary>查看内容 (${lines.length} 行)</summary>\n\n\`\`\`\n${text}\n\`\`\`\n\n</details>\n`);
+              parts.push(`\n<details><summary>查看内容 (${lines.length} 行)</summary>\n\n${fenced(text)}\n\n</details>\n`);
             } else if (text) {
-              parts.push(`\n\`\`\`\n${text}\n\`\`\`\n`);
+              parts.push(`\n${fenced(text)}\n`);
             }
           }
         }
@@ -306,8 +307,8 @@ export class CursorEngineWrapper extends ACPWrapperBase {
       if (raw.error) {
         const err = String(raw.error).trim();
         if (err.includes('IO error for operation on')) return '';
-        if (err.includes('Path does not exist')) return `\n\`\`\`\n⚠️ ${err}\n\`\`\`\n`;
-        return `\n\`\`\`\n⚠️ ${err}\n\`\`\`\n`;
+        if (err.includes('Path does not exist')) return `\n${fenced(`⚠️ ${err}`)}\n`;
+        return `\n${fenced(`⚠️ ${err}`)}\n`;
       }
 
       // Structured command result with output field
@@ -317,9 +318,9 @@ export class CursorEngineWrapper extends ACPWrapperBase {
         const lines = text.split('\n');
         let result = '';
         if (lines.length > 15) {
-          result = `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n\`\`\`\n${text}\n\`\`\`\n\n</details>\n`;
+          result = `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n${fenced(text)}\n\n</details>\n`;
         } else {
-          result = `\n\`\`\`\n${text}\n\`\`\`\n`;
+          result = `\n${fenced(text)}\n`;
         }
         if (raw.exit !== undefined && raw.exit !== 0) result += `(exit code: ${raw.exit})\n`;
         return result;
@@ -329,10 +330,10 @@ export class CursorEngineWrapper extends ACPWrapperBase {
       if (raw.content && typeof raw.content === 'string') {
         const lines = raw.content.split('\n');
         if (lines.length > 15) {
-          return `\n<details><summary>查看内容 (${lines.length} 行)</summary>\n\n\`\`\`\n${raw.content}\n\`\`\`\n\n</details>\n`;
+          return `\n<details><summary>查看内容 (${lines.length} 行)</summary>\n\n${fenced(raw.content)}\n\n</details>\n`;
         }
         if (lines.length > 0) {
-          return `\n\`\`\`\n${raw.content}\n\`\`\`\n`;
+          return `\n${fenced(raw.content)}\n`;
         }
         return '';
       }

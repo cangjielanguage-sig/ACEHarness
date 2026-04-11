@@ -17,6 +17,7 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
   protected lastBlockWasTool = false;
   protected seenToolIds = new Set<string>();
   protected streaming = false;
+  protected collectedOutput = '';
 
   abstract getName(): string;
   protected abstract getACPConfig(options: EngineOptions): ACPEngineConfig;
@@ -26,6 +27,7 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
     try {
       this.seenToolIds.clear();
       this.lastBlockWasTool = false;
+      this.collectedOutput = '';
 
       // Reuse existing engine if resuming a session, otherwise create new
       const canReuse = options.sessionId && this.engine && this.currentSessionId === options.sessionId;
@@ -79,16 +81,31 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
 
       return {
         success: isSuccess,
-        output: '',
+        output: this.collectedOutput.trim(),
         sessionId: this.currentSessionId ?? undefined,
         stopReason
       };
     } catch (error) {
       this.streaming = false;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const hasUsableOutput = this.collectedOutput.trim().length > 0;
+      const isConnectionClosed = /connection\s+closed/i.test(errorMessage);
+
+      // Some ACP engines may close the connection right after streaming final output.
+      // In this case, treat the run as successful if we already captured non-empty content.
+      if (isConnectionClosed && hasUsableOutput) {
+        return {
+          success: true,
+          output: this.collectedOutput.trim(),
+          sessionId: this.currentSessionId ?? undefined,
+          stopReason: 'end_turn',
+        };
+      }
+
       return {
         success: false,
         output: '',
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage
       };
     }
   }
@@ -118,6 +135,7 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
         prefix = '\n\n<!-- chunk-boundary -->\n\n';
         this.lastBlockWasTool = false;
       }
+      this.collectedOutput += prefix + text;
       this.emit('stream', { type: 'text', content: prefix + text } as EngineStreamEvent);
     });
 
@@ -137,6 +155,7 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
         this.seenToolIds.add(toolId);
         const formatted = this.formatToolCall(toolCall);
         this.lastBlockWasTool = true;
+        this.collectedOutput += formatted;
         this.emit('stream', { type: 'text', content: formatted, metadata: toolCall } as EngineStreamEvent);
       }
     });
@@ -151,6 +170,7 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
           this.seenToolIds.add(toolId);
           const formatted = this.formatToolCall(toolUpdate);
           this.lastBlockWasTool = true;
+          this.collectedOutput += formatted;
           this.emit('stream', { type: 'text', content: formatted, metadata: toolUpdate } as EngineStreamEvent);
         }
       }
@@ -168,6 +188,7 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
         }
         const formatted = this.formatToolResult(resultText, toolUpdate);
         if (formatted) {
+          this.collectedOutput += formatted;
           this.emit('stream', { type: 'text', content: formatted, metadata: toolUpdate } as EngineStreamEvent);
         }
       }

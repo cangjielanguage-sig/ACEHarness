@@ -75,7 +75,7 @@ export interface StateTransitionRecord {
 }
 
 export class StateMachineWorkflowManager extends EventEmitter {
-  private status: 'idle' | 'running' | 'completed' | 'failed' | 'stopped' = 'idle';
+  private status: 'idle' | 'preparing' | 'running' | 'completed' | 'failed' | 'stopped' = 'idle';
   private statusReason: string | null = null;
   private shouldStop = false;
   private currentState: string | null = null;
@@ -298,7 +298,16 @@ export class StateMachineWorkflowManager extends EventEmitter {
         if (step.skills) step.skills.forEach(s => needed.add(s));
       }
     }
-    if (needed.size === 0) return;
+    if (needed.size === 0) {
+      // 没有指定 skills，symlink 整个 skills 目录（像 chat 一样）
+      if (!existsSync(workspaceSkillsDir)) {
+        try {
+          const { symlinkSync } = await import('fs');
+          symlinkSync(serverSkillsDir, workspaceSkillsDir);
+        } catch { /* ignore */ }
+      }
+      return;
+    }
 
     const dirExistedBefore = existsSync(workspaceSkillsDir);
     await mkdir(workspaceSkillsDir, { recursive: true });
@@ -390,28 +399,31 @@ export class StateMachineWorkflowManager extends EventEmitter {
       pendingSdkPlanQuestion: this.pendingSdkPlanQuestionPayload,
       pendingSdkPlanSubtask: this.pendingSdkPlanSubtaskPayload,
       pendingPlanReview: this.pendingPlanReviewPayload,
+      workingDirectory: this.isolatedDir || null,
     };
   }
 
   async start(configFile: string, requirements?: string): Promise<void> {
-    if (this.status === 'running') {
+    if (this.status === 'running' || this.status === 'preparing') {
       throw new Error('工作流已在运行中');
     }
 
     try {
-      this.status = 'running';
+      this.status = 'preparing';
       this.shouldStop = false;
       this.stateHistory = [];
       this.issueTracker = [];
       this.transitionCount = 0;
-      this.selfTransitionCounts = new Map(); // Reset self-transition counts for new run
+      this.selfTransitionCounts = new Map();
       this.completedSteps = [];
       this.supervisorFlow = [];
       this.agentFlow = [];
       this.stepLogs = [];
-      this.currentState = null; // Reset state — will be set from persisted state or initial state
+      this.currentState = null;
       this.runStartTime = new Date().toISOString();
       this.currentConfigFile = configFile;
+      this.isolatedDir = null;
+      this.currentProjectRoot = null;
 
       // Clear stale in-memory flags from previous run
       this.pendingForceTransition = null;
@@ -425,49 +437,23 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.interruptFlag = false;
       this.feedbackInterrupt = false;
       this.liveFeedback = [];
+
       // Load config
       const configPath = resolve(process.cwd(), 'configs', configFile);
       const configContent = await readFile(configPath, 'utf-8');
       const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
       this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
-
-      // Use passed requirements, fallback to config context.requirements
       this.currentRequirements = requirements || workflowConfig.context?.requirements || '';
+      // Resolve projectRoot to absolute path relative to user's personal dir
+      this.currentProjectRoot = workflowConfig.context?.projectRoot
+        ? (this._userPersonalDir ? resolve(this._userPersonalDir, workflowConfig.context.projectRoot) : resolve(workflowConfig.context.projectRoot))
+        : null;
 
-      // Validate mode
       if (workflowConfig.workflow.mode !== 'state-machine') {
         throw new Error('配置文件不是状态机模式');
       }
 
-      // Directory isolation: if user has personalDir, copy projectRoot into isolated dir
-      if (this._userPersonalDir && workflowConfig.context?.projectRoot) {
-        const isoRunId = `run-${Date.now()}`;
-        const isoDir = resolve(this._userPersonalDir, isoRunId);
-        await mkdir(isoDir, { recursive: true });
-        try {
-          await cp(workflowConfig.context.projectRoot, isoDir, { recursive: true });
-        } catch (e: any) {
-          this.emit('log', { message: `目录隔离复制失败: ${e.message}，使用原目录` });
-        }
-        if (existsSync(isoDir)) {
-          workflowConfig.context.projectRoot = isoDir;
-          this.isolatedDir = isoDir;
-        }
-      }
-
-      // Load agent configs from configs/agents/
-      await this.loadAgentConfigs();
-
-      // Initialize agents
-      this.initializeAgents(workflowConfig);
-
-      // Initialize engine based on .engine.json
-      await this.initializeEngine();
-
-      // Sync skills to workspace before execution
-      await this.syncSkillsToWorkspace(workflowConfig);
-
-      // Create run record
+      // === Create run FIRST so frontend can see it immediately ===
       const totalSteps = workflowConfig.workflow.states.reduce(
         (sum, s) => sum + s.steps.length, 0
       );
@@ -480,11 +466,57 @@ export class StateMachineWorkflowManager extends EventEmitter {
         configName: workflowConfig.workflow.name,
         startTime: this.runStartTime,
         endTime: null,
-        status: 'running',
+        status: 'preparing',
         currentPhase: null,
         totalSteps,
         completedSteps: 0,
       });
+
+      this.emit('status', {
+        status: 'preparing',
+        message: '准备中...',
+        runId,
+        startTime: this.runStartTime,
+        currentConfigFile: this.currentConfigFile,
+      });
+      await this.persistState();
+
+      // === Preparing phase: directory isolation (cp for independence) ===
+      if (this._userPersonalDir && workflowConfig.context?.projectRoot) {
+        // Resolve projectRoot relative to user's personal dir (not server cwd)
+        const srcDir = resolve(this._userPersonalDir, workflowConfig.context.projectRoot);
+        if (this.shouldStop) return;
+        if (!existsSync(srcDir)) {
+          this.emit('log', { message: `项目目录不存在: ${srcDir}，跳过目录隔离` });
+        } else {
+          const isoRunId = `run-${Date.now()}`;
+          const isoDir = resolve(this._userPersonalDir, isoRunId);
+          try {
+            await mkdir(isoDir, { recursive: true });
+            await cp(srcDir, isoDir, { recursive: true });
+            if (this.shouldStop) {
+              // Stopped during copy — clean up incomplete dir
+              await rm(isoDir, { recursive: true, force: true }).catch(() => {});
+              return;
+            }
+            workflowConfig.context.projectRoot = isoDir;
+            this.isolatedDir = isoDir;
+          } catch (e: any) {
+            if (this.shouldStop) return;
+            this.emit('log', { message: `目录隔离复制失败: ${e.message}，使用原目录` });
+          }
+        }
+      }
+
+      if (this.shouldStop) return;
+
+      // === Preparing phase: load agents, init engine, sync skills ===
+      await this.loadAgentConfigs();
+      if (this.shouldStop) return;
+      this.initializeAgents(workflowConfig);
+      await this.initializeEngine();
+      if (this.shouldStop) return;
+      await this.syncSkillsToWorkspace(workflowConfig);
 
       // Try to load existing state (for continuing previous runs)
       const existingState = await loadRunState(runId);
@@ -497,16 +529,17 @@ export class StateMachineWorkflowManager extends EventEmitter {
         this.runStartTime = existingState.startTime;
       }
 
+      // === Switch to running ===
+      this.status = 'running';
       this.emit('status', {
         status: 'running',
         message: '状态机工作流已启动',
         runId,
         startTime: this.runStartTime,
         endTime: this.runEndTime,
-        currentConfigFile: this.currentConfigFile
+        currentConfigFile: this.currentConfigFile,
+        workingDirectory: this.isolatedDir || null,
       });
-
-      // Persist initial state
       await this.persistState();
 
       await this.executeStateMachine(workflowConfig, this.currentRequirements);
@@ -707,6 +740,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         } : {}),
         // 等待 Plan 审批时持久化，以便页面刷新后恢复弹窗
         pendingPlanReview: !finalStatus ? (this.pendingPlanReviewPayload || null) : null,
+        workingDirectory: this.isolatedDir || undefined,
       });
     } catch (err) {
       console.error('[StateMachine] persistState failed:', err);
@@ -1187,8 +1221,19 @@ export class StateMachineWorkflowManager extends EventEmitter {
         const errorMsg = stepError.message || String(stepError);
         console.error(`[StateMachineWorkflowManager] Step "${step.name}" in state "${state.name}" failed: ${errorMsg}`);
         stepOutputs.push(`ERROR: ${errorMsg}`);
+        const isEngineLevelFailure =
+          /acp\s+connection\s+closed/i.test(errorMsg)
+          || /引擎执行失败/.test(errorMsg)
+          || /engine\s+.*failed/i.test(errorMsg);
+
+        if (isEngineLevelFailure) {
+          // Engine-level failures are fatal for state-machine execution to avoid
+          // uncontrolled fallback iterations and token burn.
+          throw new Error(`引擎异常，已停止工作流：${errorMsg}`);
+        }
+
         verdict = 'fail';
-        // Abort remaining steps in this state on engine failure
+        // Abort remaining steps in this state on non-engine step failure
         break;
       }
     }
@@ -1977,6 +2022,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   private parseVerdict(output: string): 'pass' | 'conditional_pass' | 'fail' {
+    // Empty judge output is invalid for transition decisions.
+    // Treat as fail to prevent conditional_pass self-loop token burn.
+    if (!output || !output.trim()) {
+      return 'fail';
+    }
+
     const jsonMatch = output.match(/```json\s*\n\s*(\{[\s\S]*?\})\s*\n\s*```/);
     if (jsonMatch) {
       try {
@@ -2206,6 +2257,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
   public _userPersonalDir?: string;
   /** The isolated working directory for this run (if isolation is active) */
   private isolatedDir: string | null = null;
+  /** Original projectRoot from config (before isolation) */
+  private currentProjectRoot: string | null = null;
 
   setQueuedApprovalAction(action: 'approve' | 'iterate'): void {
     this.queuedApprovalAction = action;

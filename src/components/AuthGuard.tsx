@@ -44,6 +44,16 @@ export default function AuthGuard({ children }: AuthGuardProps) {
       });
   }, [router]);
 
+  // Listen for auth:expired events from authFetch
+  useEffect(() => {
+    const handleExpired = () => {
+      localStorage.removeItem('auth-user');
+      router.push('/login');
+    };
+    window.addEventListener('auth:expired', handleExpired);
+    return () => window.removeEventListener('auth:expired', handleExpired);
+  }, [router]);
+
   if (!authChecked) {
     return (
       <div className="h-screen flex items-center justify-center bg-background">

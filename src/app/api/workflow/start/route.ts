@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
     // Check if this specific config is already running
     const currentStatus = manager.getStatus();
-    if (currentStatus.status === 'running') {
+    if (currentStatus.status === 'running' || currentStatus.status === 'preparing') {
       return NextResponse.json(
         { error: '该配置的工作流已在运行中' },
         { status: 409 }
@@ -31,7 +31,15 @@ export async function POST(request: NextRequest) {
     // Pass userId for createdBy tracking
     (manager as any)._createdBy = user.id;
     (manager as any)._userPersonalDir = user.personalDir;
-    manager.start(configFile).catch(() => {});
+    manager.start(configFile).catch((err: any) => {
+      console.error(`[Workflow] start failed for ${configFile}:`, err?.message || err);
+      // Ensure status reflects the failure so frontend can detect it
+      try {
+        (manager as any).status = 'failed';
+        (manager as any).statusReason = err?.message || '启动失败';
+        manager.emit('status', { status: 'failed', message: err?.message || '启动失败' });
+      } catch { /* best effort */ }
+    });
 
     return NextResponse.json({
       success: true,

@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
 
     // Non-Claude engines: stream through Engine wrapper events
     if (engine) {
-      registerEngineStream(chatId, frontendSessionId);
+      registerEngineStream(chatId, frontendSessionId, configuredEngine);
 
       // Register in processManager so recovery endpoint can find it
       const proc = processManager.registerExternalProcess(chatId, 'chat', 'chat');
@@ -237,6 +237,7 @@ export async function GET(request: NextRequest) {
         chatId: engineState.chatId,
         streamContent: engineState.streamContent || '',
         status: engineState.status,
+        engine: engineState.engine || '',
       });
     }
 
@@ -248,6 +249,7 @@ export async function GET(request: NextRequest) {
         chatId: activeChatId,
         streamContent: proc?.streamContent || '',
         status: proc?.status || 'running',
+        engine: '',
       });
     }
     return NextResponse.json({ active: false });

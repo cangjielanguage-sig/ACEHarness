@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useState, useRef } from 'react';
+import { useEffect, useCallback, useState, useRef, useMemo } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ClipLoader } from 'react-spinners';
@@ -208,7 +208,21 @@ export default function WorkbenchPage() {
   const isRunMode = state.viewMode === 'run';
   const isHistoryMode = state.viewMode === 'history';
 
-  const isRunning = workflowStatus === 'running';
+  // Resolve projectRoot to absolute path using user's personalDir
+  const resolvedProjectRoot = useMemo(() => {
+    if (!projectRoot) return '';
+    if (projectRoot.startsWith('/')) return projectRoot;
+    try {
+      const stored = localStorage.getItem('auth-user');
+      if (stored) {
+        const user = JSON.parse(stored);
+        if (user.personalDir) return `${user.personalDir}/${projectRoot}`;
+      }
+    } catch {}
+    return projectRoot;
+  }, [projectRoot]);
+
+  const isRunning = workflowStatus === 'running' || workflowStatus === 'preparing';
   const totalSteps = workflowConfig?.workflow?.mode === 'state-machine'
     ? (workflowConfig?.workflow?.states?.reduce(
         (sum: number, state: any) => sum + (state.steps?.length ?? 0), 0
@@ -230,12 +244,20 @@ export default function WorkbenchPage() {
         }
 
         dispatch({ type: 'SET_WORKFLOW_STATUS', payload: status.status });
+        if (status.status === 'failed' && status.statusReason) {
+          addLog('system', 'error', `工作流启动失败: ${status.statusReason}`);
+        }
         if (status.runId) dispatch({ type: 'SET_RUN_ID', payload: status.runId });
         if (status.currentPhase) dispatch({ type: 'SET_CURRENT_PHASE', payload: status.currentPhase });
         if (status.currentStep) dispatch({ type: 'SET_CURRENT_STEP', payload: status.currentStep });
         if (status.agents?.length) dispatch({ type: 'SET_AGENTS', payload: status.agents });
         if (status.completedSteps) dispatch({ type: 'SET_COMPLETED_STEPS', payload: status.completedSteps });
         dispatch({ type: 'SET_FAILED_STEPS', payload: status.failedSteps || [] });
+
+        // Restore workingDirectory
+        if (status.workingDirectory) {
+          dispatch({ type: 'SET_WORKING_DIRECTORY', payload: status.workingDirectory });
+        }
 
         // Restore contexts
         if (status.globalContext !== undefined) {
@@ -543,6 +565,8 @@ export default function WorkbenchPage() {
       if (detail.phaseContexts) {
         dispatch({ type: 'SET_PHASE_CONTEXTS', payload: detail.phaseContexts });
       }
+      // Restore workingDirectory for file tree
+      dispatch({ type: 'SET_WORKING_DIRECTORY', payload: detail.workingDirectory || null });
 
       // Switch to run view
       setViewingHistoryRun(true);
@@ -630,6 +654,7 @@ export default function WorkbenchPage() {
         if (event.data.runId) dispatch({ type: 'SET_RUN_ID', payload: event.data.runId });
         if (event.data.startTime) setRunStartTime(event.data.startTime);
         if (event.data.endTime) setRunEndTime(event.data.endTime);
+        if (event.data.workingDirectory) dispatch({ type: 'SET_WORKING_DIRECTORY', payload: event.data.workingDirectory });
         addLog('system', 'info', event.data.message);
         break;
       case 'phase':
@@ -939,7 +964,7 @@ export default function WorkbenchPage() {
       const rid = runId || selectedRun?.id;
 
       // 先查后端内存里的实际状态，避免重复 resume
-      const liveStatus = await workflowApi.getStatus(configFile);      const alreadyRunningInMemory = liveStatus.status === 'running';
+      const liveStatus = await workflowApi.getStatus(configFile);      const alreadyRunningInMemory = liveStatus.status === 'running' || liveStatus.status === 'preparing';
 
       if (!alreadyRunningInMemory && rid) {
         // 内存里没有运行中的 workflow，先 resume 再 force-transition
@@ -1003,7 +1028,7 @@ export default function WorkbenchPage() {
       const rid = runId || selectedRun?.id;
 
       // 先查后端内存里的实际状态，避免重复 resume
-      const liveStatus = await workflowApi.getStatus(configFile);      const alreadyRunningInMemory = liveStatus.status === 'running';
+      const liveStatus = await workflowApi.getStatus(configFile);      const alreadyRunningInMemory = liveStatus.status === 'running' || liveStatus.status === 'preparing';
 
       if (!alreadyRunningInMemory) {
         // 内存里没有运行中的 workflow，先弹确认再 resume
@@ -1084,22 +1109,42 @@ export default function WorkbenchPage() {
   };
 
   const getStatusText = (status: string) => {
-    const texts: Record<string, string> = { idle: '空闲', running: '运行中', completed: '已完成', failed: '失败', stopped: '已停止', crashed: '崩溃' };
+    const texts: Record<string, string> = { idle: '空闲', preparing: '准备中', running: '运行中', completed: '已完成', failed: '失败', stopped: '已停止', crashed: '崩溃' };
     return texts[status] || status;
   };
 
   const handleDeleteRun = async (runId: string) => {
+    // Fetch run detail to get workingDirectory path
+    let workingDir: string | null = null;
+    try {
+      const detail = await runsApi.getRunDetail(runId);
+      workingDir = detail?.workingDirectory || null;
+    } catch { /* ignore */ }
+
     const confirmed = await confirm({
       title: '删除运行记录',
       description: '确定要删除这个运行记录吗？此操作不可撤销。',
       confirmLabel: '删除',
       cancelLabel: '取消',
+      variant: 'destructive',
     });
     if (!confirmed) return;
 
+    // Ask whether to also clean the working directory (only if it exists)
+    let cleanWorkDir = false;
+    if (workingDir) {
+      cleanWorkDir = await confirm({
+        title: '清理工作目录',
+        description: `是否删除当前运行记录的工作目录 ${workingDir} ？`,
+        confirmLabel: '删除工作目录',
+        cancelLabel: '仅删除记录',
+        variant: 'destructive',
+      });
+    }
+
     try {
-      await runsApi.deleteRun(runId);
-      toast('success', '运行记录已删除');
+      await runsApi.deleteRun(runId, cleanWorkDir);
+      toast('success', cleanWorkDir ? '运行记录和工作目录已删除' : '运行记录已删除');
       // Reload history
       await loadHistory();
     } catch (error: any) {
@@ -1182,12 +1227,21 @@ export default function WorkbenchPage() {
       description: `确定要删除选中的 ${selectedRunIds.length} 条运行记录吗？此操作不可撤销。`,
       confirmLabel: '删除',
       cancelLabel: '取消',
+      variant: 'destructive',
     });
     if (!confirmed) return;
 
+    const cleanWorkDir = await confirm({
+      title: '清理工作目录',
+      description: `是否同时删除选中的 ${selectedRunIds.length} 条运行记录的工作目录？`,
+      confirmLabel: '删除工作目录',
+      cancelLabel: '仅删除记录',
+      variant: 'destructive',
+    });
+
     setBatchDeleting(true);
     try {
-      const result = await runsApi.batchDeleteRuns(selectedRunIds);
+      const result = await runsApi.batchDeleteRuns(selectedRunIds, cleanWorkDir);
       toast('success', result.message);
       setSelectedRunIds([]);
       await loadHistory();
@@ -1205,10 +1259,10 @@ export default function WorkbenchPage() {
   };
 
   const toggleAllRunsSelection = () => {
-    if (selectedRunIds.length === historyRuns.filter(r => r.status !== 'running').length) {
+    if (selectedRunIds.length === historyRuns.filter(r => r.status !== 'running' && r.status !== 'preparing').length) {
       setSelectedRunIds([]);
     } else {
-      setSelectedRunIds(historyRuns.filter(r => r.status !== 'running').map(r => r.id));
+      setSelectedRunIds(historyRuns.filter(r => r.status !== 'running' && r.status !== 'preparing').map(r => r.id));
     }
   };
 
@@ -1401,7 +1455,19 @@ export default function WorkbenchPage() {
       try {
         const { processes } = await processApi.list();
         const curRid = runId || selectedRun?.id;
-        const runningProc = processes.find((p: any) => p.status === 'running' && (!curRid || p.runId === curRid));
+
+        // Only show workflow step processes, not dashboard chat processes
+        const workflowProcesses = processes.filter((p: any) => !(p.agent === 'chat' && p.step === 'chat'));
+
+        // If no runId yet, don't show anything — avoid cross-contamination
+        if (!curRid) {
+          if (!workflowProcesses.some((p: any) => p.status === 'running')) {
+            // No workflow processes running, nothing to show
+          }
+          return;
+        }
+
+        const runningProc = workflowProcesses.find((p: any) => p.status === 'running' && p.runId === curRid);
         const curStep = runningProc?.step || currentStep || selectedStep?.name;
 
         if (curStep !== liveStreamStepRef.current) {
@@ -1416,21 +1482,29 @@ export default function WorkbenchPage() {
           content = await streamApi.getStreamContent(curRid, curStep);
         }
         if (!content) {
-          const running = processes.find((p: any) => p.status === 'running' && (!curRid || p.runId === curRid));
-          content = running?.streamContent || processes
-            .filter((p: any) => !curRid || p.runId === curRid)
+          const running = workflowProcesses.find((p: any) => p.status === 'running' && p.runId === curRid);
+          content = running?.streamContent || workflowProcesses
+            .filter((p: any) => p.runId === curRid)
             .sort((a: any, b: any) =>
               new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
             )[0]?.streamContent;
         }
 
-        if (content && content.length > liveStreamLenRef.current) {
-          const newContent = content.slice(liveStreamLenRef.current);
+        if (content) {
+          // Rebuild chunks from the full persisted stream content.
+          // IMPORTANT: polling may fetch arbitrary-length deltas between ticks; appending
+          // delta slices can split markdown fences/details across chunk boundaries and
+          // break rendering (e.g. fenced blocks becoming inline text).
+          const parts = content.split(CHUNK_SEP);
+          const trailing = parts.pop() || '';
+          const rebuilt = [...parts.filter(Boolean), ...(trailing ? [trailing] : [])];
           liveStreamLenRef.current = content.length;
-          const newChunks = newContent.split(CHUNK_SEP).filter(Boolean);
-          if (newChunks.length > 0) {
-            setLiveStream(prev => [...prev, ...newChunks]);
-          }
+          setLiveStream(prev => {
+            if (prev.length === rebuilt.length && prev.every((v, i) => v === rebuilt[i])) {
+              return prev;
+            }
+            return rebuilt;
+          });
         }
 
         if (!processes.some((p: any) => p.status === 'running') && !isRunning) {
@@ -1938,7 +2012,7 @@ export default function WorkbenchPage() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {isRunMode && (<>
-            <Button size="sm" className="h-7 text-xs" onClick={startWorkflow} disabled={starting || isRunning || workflowStatus === 'running'}>
+            <Button size="sm" className="h-7 text-xs" onClick={startWorkflow} disabled={starting || isRunning}>
               {starting ? (
                 <ClipLoader color="currentColor" size={14} className="mr-1" />
               ) : (
@@ -1978,6 +2052,9 @@ export default function WorkbenchPage() {
         <div className="flex items-center gap-2 ml-auto shrink-0">
           {workflowStatus === 'idle' && (
             <Badge variant="secondary"><span className="w-2 h-2 rounded-full bg-current animate-pulse" />{getStatusText(workflowStatus)}</Badge>
+          )}
+          {workflowStatus === 'preparing' && (
+            <Badge className="bg-yellow-500/20 text-yellow-400"><span className="w-2 h-2 rounded-full bg-current animate-pulse" />{getStatusText(workflowStatus)}</Badge>
           )}
           {workflowStatus === 'running' && (
             <Badge className="bg-blue-500/20 text-blue-400"><span className="w-2 h-2 rounded-full bg-current animate-pulse" />{getStatusText(workflowStatus)}</Badge>
@@ -2779,7 +2856,7 @@ export default function WorkbenchPage() {
                                 分析
                               </Button>
                             )}
-                            {run.status !== 'running' && (
+                            {run.status !== 'running' && run.status !== 'preparing' && (
                               <Button size="sm" variant="outline" className="text-red-500 hover:text-red-600" onClick={() => handleDeleteRun(run.id)}>
                                 <span className="material-symbols-outlined text-sm mr-1">delete</span>
                                 删除
@@ -3585,11 +3662,11 @@ export default function WorkbenchPage() {
         </div>
       )}
 
-      {projectRoot && (
+      {resolvedProjectRoot && (
         <WorkspaceEditor
           open={workspaceEditorOpen}
           onOpenChange={setWorkspaceEditorOpen}
-          workspacePath={projectRoot}
+          workspacePath={state.workingDirectory || resolvedProjectRoot}
         />
       )}
     </div>

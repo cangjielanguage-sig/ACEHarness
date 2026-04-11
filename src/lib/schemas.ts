@@ -119,6 +119,9 @@ export const newConfigFormSchema = z.object({
     .min(1, '文件名不能为空')
     .regex(/^[a-zA-Z0-9_-]+\.yaml$/, '文件名必须以 .yaml 结尾且只包含字母、数字、下划线和连字符'),
   workflowName: z.string().min(1, '工作流名称不能为空'),
+  workingDirectory: z
+    .string()
+    .min(1, '工作目录不能为空'),
   description: z.string().optional(),
   mode: z.enum(['phase-based', 'state-machine', 'ai-guided']).default('phase-based').optional(),
   requirements: z.string().optional(), // AI 引导模式下的需求描述
@@ -147,7 +150,7 @@ export const runRecordSchema = z.object({
   configName: z.string(),
   startTime: z.string(),
   endTime: z.string().nullable(),
-  status: z.enum(['running', 'completed', 'failed', 'stopped', 'crashed']),
+  status: z.enum(['preparing', 'running', 'completed', 'failed', 'stopped', 'crashed']),
   currentPhase: z.string().nullable(),
   totalSteps: z.number(),
   completedSteps: z.number(),

@@ -55,6 +55,7 @@ export interface WorkflowState {
   selectedAgent: Agent | null;
   selectedStep: any | null;
   projectRoot: string;
+  workingDirectory: string | null;
   requirements: string;
   timeoutMinutes: number;
   engine: string;
@@ -108,6 +109,7 @@ type WorkflowAction =
   | { type: 'SET_GLOBAL_CONTEXT'; payload: string }
   | { type: 'SET_PHASE_CONTEXT'; payload: { phase: string; context: string } }
   | { type: 'SET_PHASE_CONTEXTS'; payload: Record<string, string> }
+  | { type: 'SET_WORKING_DIRECTORY'; payload: string | null }
   | { type: 'RESET_RUN' };
 
 function createInitialState(initialViewMode: ViewMode = 'run'): WorkflowState {
@@ -133,6 +135,7 @@ function createInitialState(initialViewMode: ViewMode = 'run'): WorkflowState {
     selectedAgent: null,
     selectedStep: null,
     projectRoot: '',
+    workingDirectory: null,
     requirements: '',
     timeoutMinutes: 30,
     engine: '',
@@ -201,13 +204,15 @@ function workflowReducer(state: WorkflowState, action: WorkflowAction): Workflow
       return { ...state, agents };
     }
     case 'RESET_RUN':
-      return { ...state, runId: null, logs: [], completedSteps: [], failedSteps: [], stepResults: {}, stepIdMap: {}, iterationStates: {} };
+      return { ...state, runId: null, logs: [], completedSteps: [], failedSteps: [], stepResults: {}, stepIdMap: {}, iterationStates: {}, workingDirectory: null };
     case 'SET_GLOBAL_CONTEXT':
       return { ...state, globalContext: action.payload };
     case 'SET_PHASE_CONTEXT':
       return { ...state, phaseContexts: { ...state.phaseContexts, [action.payload.phase]: action.payload.context } };
     case 'SET_PHASE_CONTEXTS':
       return { ...state, phaseContexts: action.payload };
+    case 'SET_WORKING_DIRECTORY':
+      return { ...state, workingDirectory: action.payload };
     default:
       return state;
   }

@@ -216,25 +216,56 @@ export async function adminResetPassword(userId: string, newPwd: string): Promis
   });
 }
 
-// --- Token Store (multi-user) ---
+// --- Token Store (multi-user, persisted to disk) ---
+const TOKENS_FILE = resolve(process.cwd(), 'data', 'tokens.json');
 const tokenStore = new Map<string, { userId: string; expiry: number }>();
+let tokensLoaded = false;
+
+function loadTokensSync(): void {
+  if (tokensLoaded) return;
+  tokensLoaded = true;
+  try {
+    if (existsSync(TOKENS_FILE)) {
+      const content = require('fs').readFileSync(TOKENS_FILE, 'utf-8');
+      const entries: [string, { userId: string; expiry: number }][] = JSON.parse(content);
+      const now = Date.now();
+      for (const [token, info] of entries) {
+        if (info.expiry > now) tokenStore.set(token, info);
+      }
+    }
+  } catch { /* ignore corrupt file */ }
+}
+
+function persistTokens(): void {
+  try {
+    const { mkdirSync, writeFileSync } = require('fs');
+    mkdirSync(resolve(process.cwd(), 'data'), { recursive: true });
+    writeFileSync(TOKENS_FILE, JSON.stringify([...tokenStore.entries()]), 'utf-8');
+  } catch { /* ignore */ }
+}
 
 export function storeToken(token: string, userId: string): void {
+  loadTokensSync();
   tokenStore.set(token, { userId, expiry: Date.now() + 7 * 24 * 60 * 60 * 1000 });
+  persistTokens();
 }
 
 export function validateToken(token: string): { userId: string } | null {
+  loadTokensSync();
   const info = tokenStore.get(token);
   if (!info) return null;
   if (info.expiry < Date.now()) {
     tokenStore.delete(token);
+    persistTokens();
     return null;
   }
   return { userId: info.userId };
 }
 
 export function removeToken(token: string): void {
+  loadTokensSync();
   tokenStore.delete(token);
+  persistTokens();
 }
 
 export async function login(email: string, password: string): Promise<{ success: true; token: string; user: PublicUser } | { success: false; error: string }> {

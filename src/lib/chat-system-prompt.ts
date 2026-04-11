@@ -32,6 +32,9 @@ async function loadSkillDocs(skillName: string): Promise<string> {
 
 /** 构建完整的 dashboard 模式系统提示词 */
 export async function buildDashboardSystemPrompt(enabledSkills?: string[]): Promise<string> {
+  const aceflowRoot = process.cwd();
+  const envInfo = `\n\n## 环境信息\n\nACEFlow 项目根目录: ${aceflowRoot}\n所有工作流配置文件位于 ${aceflowRoot}/configs/ 目录下，Agent 配置位于 ${aceflowRoot}/configs/agents/ 目录下，Skills 位于 ${aceflowRoot}/skills/ 目录下。操作配置文件时请使用绝对路径。`;
+
   let skillDocs = '';
 
   if (enabledSkills && enabledSkills.length > 0) {
@@ -45,5 +48,5 @@ export async function buildDashboardSystemPrompt(enabledSkills?: string[]): Prom
     }
   }
 
-  return CORE_PROMPT + skillDocs;
+  return CORE_PROMPT + envInfo + skillDocs;
 }

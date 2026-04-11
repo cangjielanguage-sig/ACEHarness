@@ -102,3 +102,147 @@ models:
     endpoints: []
     engines:
       - kiro-cli
+  - value: default[]
+    label: Auto
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: composer-2[fast=true]
+    label: composer-2
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: composer-1.5[]
+    label: composer-1.5
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5.3-codex[reasoning=medium,fast=false]
+    label: gpt-5.3-codex
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5.4[reasoning=medium,context=272k,fast=false]
+    label: gpt-5.4 (MAX mode)
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: claude-sonnet-4-6[thinking=true,context=200k,effort=medium]
+    label: claude-sonnet-4-6
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: claude-opus-4-6[thinking=true,context=200k,effort=high,fast=false]
+    label: claude-opus-4-6
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: claude-opus-4-5[thinking=true]
+    label: claude-opus-4-5
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5.2[reasoning=medium,fast=false]
+    label: gpt-5.2
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gemini-3.1-pro[]
+    label: gemini-3.1-pro
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5.4-mini[reasoning=medium]
+    label: gpt-5.4-mini
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5.4-nano[reasoning=medium]
+    label: gpt-5.4-nano
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: claude-haiku-4-5[thinking=true]
+    label: claude-haiku-4-5
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5.3-codex-spark[reasoning=medium]
+    label: gpt-5.3-codex-spark
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: claude-sonnet-4-5[thinking=true,context=200k]
+    label: claude-sonnet-4-5
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5.2-codex[reasoning=medium,fast=false]
+    label: gpt-5.2-codex
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5.1-codex-max[reasoning=medium,fast=false]
+    label: gpt-5.1-codex-max
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5.1[reasoning=medium]
+    label: gpt-5.1
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gemini-3-flash[]
+    label: gemini-3-flash
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5.1-codex-mini[reasoning=medium]
+    label: gpt-5.1-codex-mini
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: claude-sonnet-4[thinking=false,context=200k]
+    label: claude-sonnet-4
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gpt-5-mini[]
+    label: gpt-5-mini
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: gemini-2.5-flash[]
+    label: gemini-2.5-flash
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor
+  - value: kimi-k2.5[]
+    label: kimi-k2.5
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - cursor

@@ -65,13 +65,13 @@ export default function WorkflowModeSelector({
       id: 'ai-guided',
       name: 'AI 引导创建',
       icon: Sparkles,
-      tagline: '描述需求，AI 生成模板',
-      description: '告诉 AI 你的工作流需求，AI 自动生成合适的工作流模板',
+      tagline: '描述需求，AI 选择最佳实践',
+      description: '描述你的工作流需求，AI 自动选择最佳实践并生成阶段或状态机工作流',
       features: [
         '自然语言描述需求',
-        'AI 自动生成模板',
-        '智能推荐阶段和步骤',
-        '可后续调整优化',
+        'AI 自动选择最佳模式',
+        '红蓝对抗最佳实践',
+        '交互式确认后创建',
       ],
       pros: ['零基础友好', '快速启动', '智能适配'],
       cons: ['需要 AI 运行时间', '可能需要微调'],
@@ -226,6 +226,26 @@ export default function WorkflowModeSelector({
                     )}
                   </div>
                   {idx < 3 && (
+                    <ArrowRight className="w-5 h-5 text-gray-400" />
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : value === 'ai-guided' ? (
+            <div className="flex items-center justify-center gap-3 py-4">
+              {[
+                { label: '描述需求', color: 'green', sub: '人类输入' },
+                { label: 'AI 分析', color: 'green', sub: '选择最佳实践' },
+                { label: '阶段 / 状态机', color: 'green', sub: '自动生成' },
+              ].map((step, idx) => (
+                <div key={step.label} className="flex items-center gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className="w-24 h-20 rounded-lg bg-green-100 dark:bg-green-900 flex flex-col items-center justify-center border-2 border-green-300 dark:border-green-700 px-2">
+                      <span className="text-sm font-medium text-green-700 dark:text-green-300 text-center">{step.label}</span>
+                      <span className="text-xs text-green-600 dark:text-green-400 mt-1">{step.sub}</span>
+                    </div>
+                  </div>
+                  {idx < 2 && (
                     <ArrowRight className="w-5 h-5 text-gray-400" />
                   )}
                 </div>

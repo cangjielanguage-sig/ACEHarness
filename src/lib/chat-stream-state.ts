@@ -4,6 +4,7 @@ interface EngineStreamState {
   chatId: string;
   frontendSessionId?: string;
   backendSessionId?: string;
+  engine?: string;
   status: EngineStreamStatus;
   streamContent: string;
 }
@@ -12,10 +13,11 @@ const chatsById = new Map<string, EngineStreamState>();
 const frontendToChatId = new Map<string, string>();
 const backendToChatId = new Map<string, string>();
 
-export function registerEngineStream(chatId: string, frontendSessionId?: string): void {
+export function registerEngineStream(chatId: string, frontendSessionId?: string, engine?: string): void {
   chatsById.set(chatId, {
     chatId,
     frontendSessionId,
+    engine,
     status: 'running',
     streamContent: '',
   });

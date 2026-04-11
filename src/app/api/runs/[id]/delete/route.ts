@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { stat, rm } from 'fs/promises';
+import { stat, rm, readFile } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { parse } from 'yaml';
+import { workflowRegistry } from '@/lib/workflow-registry';
 
 const RUNS_DIR = resolve(process.cwd(), 'runs');
 
@@ -12,6 +14,7 @@ export async function DELETE(
   try {
     const runId = (await params).id;
     const runDir = resolve(RUNS_DIR, runId);
+    const cleanWorkDir = request.nextUrl.searchParams.get('cleanWorkDir') === 'true';
 
     // Check if run exists
     if (!existsSync(runDir)) {
@@ -30,8 +33,39 @@ export async function DELETE(
       );
     }
 
-    // Delete the entire run directory
+    // Read state.yaml to get workingDirectory and check if running
+    let workingDirectory: string | null = null;
+    let configFile: string | null = null;
+    try {
+      const stateFile = resolve(runDir, 'state.yaml');
+      if (existsSync(stateFile)) {
+        const content = await readFile(stateFile, 'utf-8');
+        const state = parse(content);
+        workingDirectory = state.workingDirectory || null;
+        configFile = state.configFile || null;
+      }
+    } catch { /* ignore */ }
+
+    // If workflow is running/preparing, stop it first
+    if (configFile) {
+      try {
+        const manager = await workflowRegistry.getManager(configFile);
+        const status = manager.getStatus();
+        if (status.runId === runId && (status.status === 'running' || status.status === 'preparing')) {
+          await manager.stop();
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Delete the run directory
     await rm(runDir, { recursive: true, force: true });
+
+    // Optionally clean up the working directory
+    if (cleanWorkDir && workingDirectory && existsSync(workingDirectory)) {
+      try {
+        await rm(workingDirectory, { recursive: true, force: true });
+      } catch { /* ignore */ }
+    }
 
     return NextResponse.json({ success: true, message: '运行记录已删除' });
   } catch (error: any) {

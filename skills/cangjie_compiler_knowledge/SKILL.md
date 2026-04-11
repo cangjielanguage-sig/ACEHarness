@@ -25,7 +25,7 @@ When users ask about compiler internals, follow this workflow:
 
 ### Method 1: Search Script (Recommended - Now with improved precision!)
 ```bash
-cd cangjie_ace_skills/skills/cangjie_compiler_knowledge
+cd cangjie_ace_skills/cangjie_compiler_knowledge
 python3 scripts/search.py "关键词"
 ```
 

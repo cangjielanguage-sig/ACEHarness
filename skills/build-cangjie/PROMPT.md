@@ -38,4 +38,4 @@ cjc编译 | 编译仓颉 | build cjc/runtime/stdlib/stdx | 搭建编译环境
 - 默认会构建单元测试（耗时较长）
 - 使用 `--no-tests` 跳过单元测试构建（推荐，加快速度）
 
-详细构建步骤、平台支持、组件顺序，见 `skills/skills/build-cangjie/SKILL.md`
+详细构建步骤、平台支持、组件顺序，见 `skills/build-cangjie/SKILL.md`

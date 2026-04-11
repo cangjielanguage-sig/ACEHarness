@@ -12,6 +12,8 @@ export interface ChatMessage {
   rawContent?: string;
   actions?: ActionState[];
   cards?: any[];
+  engine?: string;
+  model?: string;
   costUsd?: number;
   durationMs?: number;
   usage?: { input_tokens: number; output_tokens: number };
@@ -61,6 +63,7 @@ interface DashboardChatContextType {
   model: string;
   setModel: (m: string) => void;
   engine: string;
+  effectiveEngine: string;
   setEngine: (e: string) => void;
   confirmAction: (messageId: string, actionId: string) => Promise<void>;
   rejectAction: (messageId: string, actionId: string) => void;
@@ -82,7 +85,7 @@ const DashboardChatContext = createContext<DashboardChatContextType>({
   deleteMessage: () => {}, retryFromMessage: () => {}, continueFromMessage: async () => {},
   loading: false, streamingMessageId: null,
   model: 'claude-sonnet-4-6', setModel: () => {},
-  engine: '', setEngine: () => {},
+  engine: '', effectiveEngine: 'claude-code', setEngine: () => {},
   confirmAction: async () => {}, rejectAction: () => {},
   undoActionById: async () => {}, retryAction: async () => {},
   skillSettings: { 'power-gitcode': true }, discoveredSkills: [], toggleSkill: () => {},
@@ -147,30 +150,40 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return 'claude-sonnet-4-6';
   });
 
-  // Persist model selection to localStorage whenever it changes
+  // Per-chat engine override (empty = use global)
+  const [engine, setEngineState] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('chat-engine') || '';
+    }
+    return '';
+  });
+  // Resolved global engine for when per-chat engine is empty
+  const [globalEngine, setGlobalEngine] = useState('claude-code');
+  const effectiveEngine = engine || globalEngine;
+
+  const handleSetEngine = useCallback((e: string) => {
+    setEngineState(e);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chat-engine', e);
+    }
+    updateActiveSession(s => ({ ...s, engine: e }));
+  }, []);
+
   const handleSetModel = useCallback((m: string) => {
     setModel(m);
     if (typeof window !== 'undefined') {
       localStorage.setItem('chat-model', m);
     }
+    updateActiveSession(s => ({ ...s, model: m }));
   }, []);
 
-  // Per-chat engine override (empty = use global)
-  const [engine, setEngineState] = useState('');
-  const handleSetEngine = useCallback((e: string) => {
-    setEngineState(e);
-    // Also store on the active session
-    updateActiveSession(s => ({ ...s, engine: e }));
-  }, []);
-
-  // Load engine's default model if user hasn't explicitly chosen one
+  // Load global engine config and default model on mount
   useEffect(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem('chat-model') : null;
-    if (!saved) {
-      fetch('/api/engine').then(r => r.json()).then(data => {
-        if (data.defaultModel) setModel(data.defaultModel);
-      }).catch(() => {});
-    }
+    fetch('/api/engine').then(r => r.json()).then(data => {
+      if (data.engine) setGlobalEngine(data.engine);
+      const savedModel = typeof window !== 'undefined' ? localStorage.getItem('chat-model') : null;
+      if (!savedModel && data.defaultModel) setModel(data.defaultModel);
+    }).catch(() => {});
   }, []);
 
   const [skillSettings, setSkillSettings] = useState<Record<string, boolean>>({ 'power-gitcode': true });
@@ -279,14 +292,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         messages: s.messages.filter(m => !(m.role === 'assistant' && !m.content && !m.actions?.length && !m.cards?.length)),
       };
       setActiveSession(reparseSession(cleaned));
-      // Sync per-chat engine override
-      setEngineState(cleaned.engine || '');
+      // Restore per-session engine & model selections
+      if (cleaned.engine) {
+        setEngineState(cleaned.engine);
+      }
+      if (cleaned.model) {
+        setModel(cleaned.model);
+      }
 
       // Check if there's an active stream for this session and reconnect
       try {
         const checkRes = await fetch(`/api/chat/stream?checkActive=${encodeURIComponent(activeSessionId)}`);
         const checkData = await checkRes.json();
-        if (checkData.active && checkData.chatId) {
+        // Skip reconnect if engine has changed since the stream was started
+        const streamEngine = checkData.engine || '';
+        const currentEngine = cleaned.engine || '';
+        if (checkData.active && checkData.chatId && streamEngine === currentEngine) {
           // Always create a fresh assistant message for recovery — never reuse an existing one
           // to avoid overwriting completed historical messages with new streaming content
           const recoveryMsg = { id: genId(), role: 'assistant' as const, content: '', timestamp: Date.now() };
@@ -430,7 +451,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const createSession = useCallback(() => {
     const id = genId();
     const session: ChatSession = {
-      id, title: '新对话', model, messages: [],
+      id, title: '新对话', model, engine: engine || undefined, messages: [],
       createdAt: Date.now(), updatedAt: Date.now(),
     };
     const summary: SessionSummary = {
@@ -443,7 +464,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setActiveSessionId(id);
     apiCreateSession(session).catch(console.error);
     return id;
-  }, [model]);
+  }, [model, engine]);
 
   const deleteSession = useCallback((id: string) => {
     setSessions(prev => {
@@ -531,8 +552,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const followUpPrompt = `以下是刚才自动执行的操作返回的数据，请根据这些数据用 \`\`\`card 代码块生成结构化的可视化分析卡片，并在卡片的 actions 中给出 2-3 个上下文相关的后续操作建议：\n\n${summary}`;
 
       const followUpMsgId = genId();
+      const followUpEngine = effectiveEngine;
       const followUpMsg: ChatMessage = {
-        id: followUpMsgId, role: 'assistant', content: '', timestamp: Date.now(),
+        id: followUpMsgId, role: 'assistant', content: '', engine: followUpEngine, model: model || undefined, timestamp: Date.now(),
       };
       updateActiveSession(s => ({ ...s, updatedAt: Date.now(), messages: [...s.messages, followUpMsg] }));
       setLoading(true);
@@ -544,7 +566,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const startRes = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: followUpPrompt, model, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard' }),
+          body: JSON.stringify({ message: followUpPrompt, model, engine: followUpEngine || undefined, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard' }),
         });
         const { chatId } = await startRes.json();
         if (!chatId) throw new Error('Failed to start stream');
@@ -667,8 +689,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       messages: [...s.messages, userMsg],
     }));
 
+    // If engine changed from what session was using, clear backendSessionId to start fresh
+    const sessionEngine = activeSessionRef.current?.engine || '';
+    if (engine !== sessionEngine) {
+      updateActiveSession(s => ({ ...s, engine, backendSessionId: undefined }));
+    }
+
     const assistantMsgId = genId();
-    const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', timestamp: Date.now() };
+    const resolvedEngine = effectiveEngine;
+    const assistantMsg: ChatMessage = { id: assistantMsgId, role: 'assistant', content: '', engine: resolvedEngine, model: model || undefined, timestamp: Date.now() };
     updateActiveSession(s => ({ ...s, updatedAt: Date.now(), messages: [...s.messages, assistantMsg] }));
     setLoading(true);
     setStreamingMessageId(assistantMsgId);
@@ -676,11 +705,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const backendSid = activeSessionRef.current?.backendSessionId;
       const frontendSid = activeSessionRef.current?.id;
-      console.log('[ChatSend] backendSessionId:', backendSid, 'frontendSessionId:', frontendSid, 'model:', model, 'engine:', engine);
+      console.log('[ChatSend] backendSessionId:', backendSid, 'frontendSessionId:', frontendSid, 'model:', model, 'engine:', resolvedEngine);
       const startRes = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, model, engine: engine || undefined, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard' }),
+        body: JSON.stringify({ message: text, model, engine: resolvedEngine || undefined, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard' }),
       });
       const startData = await startRes.json();
       if (!startRes.ok || startData.error) {
@@ -864,7 +893,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     // Note: setLoading(false) is called inside the Promise's done/error handlers
     // to properly handle autoExecuteSafeActions
-  }, [activeSessionId, createSession, model, updateActiveSession, autoExecuteSafeActions]);
+  }, [activeSessionId, createSession, model, effectiveEngine, engine, updateActiveSession, autoExecuteSafeActions]);
   sendMessageRef.current = sendMessage;
   const confirmAction = useCallback(async (messageId: string, actionId: string) => {
     const msg = activeSession?.messages.find(m => m.id === messageId);
@@ -956,11 +985,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const msg = session.messages.find(m => m.id === messageId);
     if (!msg || msg.role !== 'error') return;
 
-    // Check if this is a timeout error
     if (!msg.content.includes('超时') && !msg.content.includes('timeout')) return;
 
+    // If engine has changed since the error, the old backendSessionId is invalid
     const backendSid = session.backendSessionId;
-    if (!backendSid) return;
+    const sessionEngine = session.engine || '';
+    if (!backendSid || engine !== sessionEngine) return;
 
     setLoading(true);
     try {
@@ -1023,7 +1053,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       createSession, deleteSession, renameSession, setActiveSessionId,
       sendMessage, stopStreaming, deleteMessage, retryFromMessage, continueFromMessage,
       loading, streamingMessageId, model, setModel: handleSetModel,
-      engine, setEngine: handleSetEngine,
+      engine, effectiveEngine, setEngine: handleSetEngine,
       confirmAction, rejectAction, undoActionById, retryAction,
       skillSettings, discoveredSkills, toggleSkill,
       workingDirectory, setWorkingDirectory,

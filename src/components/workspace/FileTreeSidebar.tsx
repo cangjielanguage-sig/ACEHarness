@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { File, Folder, FolderOpen, ChevronRight, Loader2, FilePlus, FolderPlus, Pencil, Copy, Scissors, Clipboard, Trash2 } from "lucide-react"
+import { ChevronRight, Loader2, FilePlus, FolderPlus, Pencil, Copy, Scissors, Clipboard, Trash2 } from "lucide-react"
 import { workspaceApi, type TreeNode } from "@/lib/api"
 import {
   Collapsible,
@@ -90,6 +90,200 @@ function getParentDir(filePath: string): string {
   return parts.length > 1 ? parts.slice(0, -1).join("/") : ""
 }
 
+const FILE_TYPE_ICON_DIR = "/file_type"
+
+const FILE_EXT_ALIAS_ICON_MAP: Record<string, string> = {
+  // C/C++ and headers
+  cc: "cpp.svg",
+  cxx: "cpp.svg",
+  h: "header.svg",
+  hpp: "header.svg",
+  hxx: "header.svg",
+  hh: "header.svg",
+  // CUDA / Cangjie
+  cuh: "cuda_header.svg",
+  cjh: "cangjie.svg",
+  // Python
+  py: "python.svg",
+  pyw: "python.svg",
+  // TS/JS ecosystem
+  ts: "typescript.svg",
+  js: "javascript.svg",
+  mjs: "javascript.svg",
+  cjs: "javascript.svg",
+  // Markdown / TeX
+  md: "markdown.svg",
+  markdown: "markdown.svg",
+  aux: "latex_aux.svg",
+  texi: "tex.svg",
+  btx: "bib.svg",
+  // Data / config
+  yml: "yaml.svg",
+  gql: "graphql.svg",
+  graphqls: "graphql.svg",
+  proto: "protobuf.svg",
+  pcss: "postcss.svg",
+  // Shell
+  bashrc: "shell.svg",
+  zshrc: "shell.svg",
+  ksh: "shell.svg",
+  tcsh: "shell.svg",
+  csh: "shell.svg",
+  sh: "shell.svg",
+  bash: "shell.svg",
+  zsh: "shell.svg",
+  fish: "shell.svg",
+  bat: "shell.svg",
+  cmd: "shell.svg",
+  ps1: "shell.svg",
+  jpg: "image.svg",
+  jpeg: "image.svg",
+  png: "image.svg",
+  gif: "image.svg",
+  svg: "image.svg",
+  webp: "image.svg",
+  bmp: "image.svg",
+  ico: "image.svg",
+  avif: "image.svg",
+  tif: "image.svg",
+  tiff: "image.svg",
+  // Generic text
+  txt: "text.svg",
+  log: "text.svg",
+  conf: "text.svg",
+  ini: "text.svg",
+  properties: "text.svg",
+  // Archive
+  zip: "archive.svg",
+  tar: "archive.svg",
+  gz: "archive.svg",
+  tgz: "archive.svg",
+  tbz: "archive.svg",
+  tbz2: "archive.svg",
+  bz2: "archive.svg",
+  xz: "archive.svg",
+  rar: "archive.svg",
+  "7z": "archive.svg",
+  jar: "archive.svg",
+  war: "archive.svg",
+  ear: "archive.svg",
+  // Binary / bytecode
+  bin: "binary.svg",
+  o: "binary.svg",
+  obj: "binary.svg",
+  a: "binary.svg",
+  lib: "binary.svg",
+  exe: "binary.svg",
+  dll: "binary.svg",
+  so: "binary.svg",
+  dylib: "binary.svg",
+  wasm: "binary.svg",
+  class: "java_class.svg",
+  // Languages with non-obvious extensions
+  coffee: "coffeescript.svg",
+  cson: "coffeescript.svg",
+  iced: "coffeescript.svg",
+}
+
+function uniqueIcons(icons: string[]): string[] {
+  return [...new Set(icons)]
+}
+
+function getFileIconCandidates(fileName: string): string[] {
+  const lowerName = fileName.toLowerCase()
+  const candidates: string[] = []
+
+  if (lowerName.endsWith(".cj.d") || lowerName.endsWith(".cj")) {
+    candidates.push("cangjie.svg")
+  }
+
+  if (lowerName === "cmakelists.txt" || lowerName.endsWith(".cmake")) {
+    candidates.push("cmake.svg")
+  }
+
+  if (lowerName === "makefile") candidates.push("makefile.svg")
+  if (lowerName === "dockerfile") candidates.push("file_dockerfile.svg")
+  if (
+    lowerName === ".dockerignore"
+    || lowerName === ".gitignore"
+    || lowerName === ".npmignore"
+    || lowerName === ".eslintignore"
+    || lowerName === ".prettierignore"
+    || lowerName === ".ignore"
+  ) {
+    candidates.push("ignore_file.svg")
+  }
+  if (
+    lowerName === ".bashrc"
+    || lowerName === ".zshrc"
+    || lowerName === ".bash_profile"
+    || lowerName === ".zprofile"
+    || lowerName === ".profile"
+  ) {
+    candidates.push("shell.svg")
+  }
+  if (lowerName === ".editorconfig") candidates.push("editorconfig.svg")
+  if (lowerName === ".htaccess") candidates.push("htaccess.svg")
+  if (lowerName === "yarn.lock") candidates.push("yarn.svg")
+  if (lowerName === "pnpm-lock.yaml") candidates.push("pnpm_dark.svg")
+  if (lowerName.startsWith("docker-compose.") || lowerName.startsWith("compose.")) candidates.push("dockercompose.svg")
+  if (lowerName.startsWith("postcss.config.")) candidates.push("postcss.svg")
+  if (lowerName.startsWith("eslint.config.") || lowerName.startsWith(".eslintrc")) candidates.push("eslint.svg")
+  if (lowerName.endsWith(".blade.php")) candidates.push("blade.svg")
+  if (lowerName.endsWith(".d.ts")) candidates.push("typescript.svg")
+  if (lowerName.endsWith(".spec.ts")) candidates.push("test_ts.svg")
+  if (lowerName.endsWith(".spec.tsx")) candidates.push("test_ts.svg")
+  if (lowerName.endsWith(".spec.js")) candidates.push("test_js.svg")
+  if (lowerName.endsWith(".spec.jsx")) candidates.push("test_jsx.svg")
+
+  if (/\.(test|spec)\.tsx$/.test(lowerName) || /\.(test|spec)\.ts$/.test(lowerName)) candidates.push("test_ts.svg")
+  if (/\.(test|spec)\.jsx$/.test(lowerName)) candidates.push("test_jsx.svg")
+  if (/\.(test|spec)\.js$/.test(lowerName)) candidates.push("test_js.svg")
+
+  const ext = lowerName.includes(".") ? lowerName.split(".").pop() || "" : ""
+  if (ext) {
+    if (FILE_EXT_ALIAS_ICON_MAP[ext]) candidates.push(FILE_EXT_ALIAS_ICON_MAP[ext])
+    // Auto-try icon file with the same basename as extension, to support all existing SVG types.
+    candidates.push(`${ext}.svg`)
+  }
+
+  candidates.push("file.svg")
+  return uniqueIcons(candidates).map((icon) => `${FILE_TYPE_ICON_DIR}/${icon}`)
+}
+
+function FileTypeIcon({
+  node,
+  className = "h-4 w-4",
+}: {
+  node: TreeNode
+  className?: string
+}) {
+  const fileCandidates = node.type === "directory"
+    ? [`${FILE_TYPE_ICON_DIR}/folder.svg`]
+    : getFileIconCandidates(node.name)
+  const [iconIndex, setIconIndex] = React.useState(0)
+
+  React.useEffect(() => {
+    setIconIndex(0)
+  }, [node.path, node.name, node.type])
+
+  const src = fileCandidates[Math.min(iconIndex, fileCandidates.length - 1)]
+
+  return (
+    <img
+      src={src}
+      alt=""
+      aria-hidden
+      className={className}
+      onError={() => {
+        if (iconIndex < fileCandidates.length - 1) {
+          setIconIndex(iconIndex + 1)
+        }
+      }}
+    />
+  )
+}
+
 /* --- TreeFileItem --- */
 function TreeFileItem({
   node, selectedFile, depth,
@@ -138,7 +332,7 @@ function TreeFileItem({
           )}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
         >
-          <File className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <FileTypeIcon node={node} className="h-4 w-4 shrink-0" />
           <span className="truncate">{node.name}</span>
         </button>
       </ContextMenuTrigger>
@@ -246,8 +440,7 @@ function TreeDirItem({
               style={{ paddingLeft: `${depth * 12 + 8}px` }}
             >
               <ChevronRight className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]/collapsible:rotate-90" />
-              <Folder className="h-4 w-4 shrink-0 text-muted-foreground group-data-[state=open]/collapsible:hidden" />
-              <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground hidden group-data-[state=open]/collapsible:block" />
+              <FileTypeIcon node={node} className="h-4 w-4 shrink-0" />
               <span className="truncate">{node.name}</span>
             </button>
           </CollapsibleTrigger>
@@ -328,7 +521,7 @@ export function FileTreeSidebar({
     <TreeContext.Provider value={{ workspacePath, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, contextTarget, setContextTarget }}>
       <div className="flex flex-col h-full bg-card">
         <div className="flex items-center gap-2 px-3 py-2 border-b shrink-0">
-          <Folder className="h-4 w-4 shrink-0" />
+          <img src={`${FILE_TYPE_ICON_DIR}/folder.svg`} alt="" aria-hidden className="h-4 w-4 shrink-0" />
           <span className="text-sm font-semibold truncate flex-1">{workspaceName}</span>
         </div>
         <ContextMenu>
