@@ -46,9 +46,14 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
         }
       }
 
+      const engine = this.engine;
+      if (!engine) {
+        throw new Error(`[${this.getName()}] engine not initialized`);
+      }
+
       if (options.model) {
         try {
-          await this.engine.setModel(options.model);
+          await engine.setModel(options.model);
         } catch (modelErr: any) {
           // Emit the error to the stream so the user sees available models in the UI
           this.emit('stream', {
@@ -65,7 +70,7 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
 
       this.streaming = true;
       console.log(`[${this.getName()}] calling sendPrompt...`);
-      const stopReason = await this.engine.sendPrompt(options.prompt);
+      const stopReason = await engine.sendPrompt(options.prompt);
       console.log(`[${this.getName()}] sendPrompt returned: stopReason=${stopReason}`);
       this.streaming = false;
 
@@ -75,7 +80,7 @@ export abstract class ACPWrapperBase extends EventEmitter implements Engine {
       return {
         success: isSuccess,
         output: '',
-        sessionId: this.currentSessionId,
+        sessionId: this.currentSessionId ?? undefined,
         stopReason
       };
     } catch (error) {
