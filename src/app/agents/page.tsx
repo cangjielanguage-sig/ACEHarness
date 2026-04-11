@@ -14,6 +14,7 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { ModelOption } from '@/lib/models';
 import { SingleCombobox, type ComboboxOption, type ComboboxGroupDef } from '@/components/ui/combobox';
+import { useToast } from '@/components/ui/toast';
 
 interface AgentConfig {
   name: string;
@@ -39,6 +40,7 @@ const CATEGORIES = ['测试', '编码', '设计', '压力测试', '审查', '文
 
 export default function AgentsPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,6 +96,8 @@ export default function AgentsPage() {
       engineModels: { '': 'claude-sonnet-4-20250514' },
       activeEngine: '',
       tags: [],
+      capabilities: [],
+      systemPrompt: '',
     });
     setIsNewAgent(true);
   };
@@ -108,8 +112,9 @@ export default function AgentsPage() {
       await agentApi.saveAgent(agent.name, agent);
       await loadAgents();
       setEditingAgent(null);
-    } catch (error) {
-      console.error('Failed to save agent:', error);
+      toast('success', 'Agent 配置已保存');
+    } catch (error: any) {
+      toast('error', error.message || '保存 Agent 配置失败');
     }
   };
 

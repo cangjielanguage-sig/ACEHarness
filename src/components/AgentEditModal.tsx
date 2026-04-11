@@ -71,8 +71,15 @@ export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentE
       alert('请输入 Agent 名称');
       return;
     }
+    if (!formData.systemPrompt?.trim()) {
+      alert('系统提示词不能为空');
+      return;
+    }
+    if (!formData.capabilities?.length) {
+      alert('至少需要添加一个能力');
+      return;
+    }
 
-    // Ensure reviewPanel.enabled is true if there are subAgents
     const dataToSave = { ...formData };
     if (dataToSave.reviewPanel && Object.keys(dataToSave.reviewPanel.subAgents || {}).length > 0) {
       dataToSave.reviewPanel.enabled = true;

@@ -183,7 +183,12 @@ export const agentApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent }),
     });
-    if (!response.ok) throw new Error('保存 Agent 配置失败');
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      const issues = Array.isArray(data?.details) ? data.details : data?.details?.issues;
+      const details = issues?.map((d: any) => `${d.path?.join('.')}: ${d.message}`).join('; ');
+      throw new Error(data?.error ? `${data.error}${details ? ` (${details})` : ''}` : '保存 Agent 配置失败');
+    }
     return response.json();
   },
 
