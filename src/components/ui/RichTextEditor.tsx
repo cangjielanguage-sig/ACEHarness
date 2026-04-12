@@ -36,6 +36,7 @@ interface RichTextEditorProps {
   className?: string;
   autoFocus?: boolean;
   showFullscreenToggle?: boolean;
+  showToolbar?: boolean;
 }
 
 const SingleLineEnter = Extension.create({
@@ -124,6 +125,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
   className = '',
   autoFocus = false,
   showFullscreenToggle = false,
+  showToolbar = false,
 }, ref) => {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const onEnterRef = useRef(onEnter);
@@ -279,7 +281,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
               </div>
             </div>
             <div className="flex-1 overflow-hidden p-4 md:p-6">
-              <MenuBar editor={editor} />
+              {showToolbar && <MenuBar editor={editor} />}
               <EditorContent editor={editor} className="outline-none h-full [&_.ProseMirror]:!outline-none [&_.ProseMirror]:!min-h-[300px] [&_.ProseMirror]:focus:!outline-none [&_.ProseMirror_h1]:text-2xl [&_.ProseMirror_h1]:font-bold [&_.ProseMirror_h1]:my-3 [&_.ProseMirror_h2]:text-xl [&_.ProseMirror_h2]:font-semibold [&_.ProseMirror_h2]:my-3 [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-primary/50 [&_.ProseMirror_blockquote]:pl-3 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_hr]:my-4 [&_.ProseMirror_hr]:border-border" />
             </div>
           </div>
@@ -297,7 +299,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
       <div ref={editorWrapperRef} className="overflow-hidden rounded-lg border border-input bg-background" style={{ maxHeight: `${maxHeight}px`, minHeight: `${minHeight}px` }}>
         <div className="px-2 py-1.5 flex items-start gap-1">
           <div className="flex-1 min-h-[32px] overflow-y-auto">
-            <MenuBar editor={editor} />
+            {showToolbar && <MenuBar editor={editor} />}
             <EditorContent editor={editor} className="outline-none [&_.ProseMirror]:!outline-none [&_.ProseMirror:focus]:!outline-none [&_.ProseMirror_h1]:text-lg [&_.ProseMirror_h1]:font-bold [&_.ProseMirror_h1]:my-2 [&_.ProseMirror_h2]:text-base [&_.ProseMirror_h2]:font-semibold [&_.ProseMirror_h2]:my-2 [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-primary/50 [&_.ProseMirror_blockquote]:pl-3 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-5 [&_.ProseMirror_hr]:my-3 [&_.ProseMirror_hr]:border-border" style={{ maxHeight: `${maxHeight - 16}px` }} />
           </div>
           {showFullscreenToggle && (

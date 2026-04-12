@@ -28,6 +28,7 @@ interface ChatMessageProps {
     costUsd?: number;
     durationMs?: number;
     usage?: { input_tokens: number; output_tokens: number };
+    timestamp?: number;
   };
   isStreaming?: boolean;
   onConfirmAction: (actionId: string) => void;
@@ -39,6 +40,7 @@ interface ChatMessageProps {
   onRetryFromMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
   onContinue?: (messageId: string) => void; // For timeout recovery
+  onSaveAsNotebook?: (messageId: string) => void;
 }
 
 function ThinkingBot() {
@@ -174,7 +176,7 @@ export function RobotLogo({ size = 32, className = '' }: { size?: number; classN
   );
 }
 
-export default memo(function ChatMessage({ message, isStreaming, onConfirmAction, onRejectAction, onUndoAction, onRetryAction, onAction, onDelete, onRetryFromMessage, onEditMessage, onContinue }: ChatMessageProps) {
+export default memo(function ChatMessage({ message, isStreaming, onConfirmAction, onRejectAction, onUndoAction, onRetryAction, onAction, onDelete, onRetryFromMessage, onEditMessage, onContinue, onSaveAsNotebook }: ChatMessageProps) {
   if (message.role === 'user') {
     return (
       <div className="group flex justify-end mb-4 items-start gap-1">
@@ -285,11 +287,18 @@ export default memo(function ChatMessage({ message, isStreaming, onConfirmAction
           </div>
         )}
       </div>
-      {!isStreaming && onDelete && (
+      {!isStreaming && (
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 pt-1">
-          <button onClick={() => onDelete(message.id)} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive" title="删除">
-            <span className="material-symbols-outlined text-sm">delete</span>
-          </button>
+          {onSaveAsNotebook && (
+            <button onClick={() => onSaveAsNotebook(message.id)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="另存为 Notebook">
+              <span className="material-symbols-outlined text-sm">note_add</span>
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={() => onDelete(message.id)} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive" title="删除">
+              <span className="material-symbols-outlined text-sm">delete</span>
+            </button>
+          )}
         </div>
       )}
     </div>

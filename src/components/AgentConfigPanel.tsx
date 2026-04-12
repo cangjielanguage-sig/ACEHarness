@@ -175,7 +175,7 @@ function RoleEditForm({
         <div className="flex gap-3">
           {(['blue', 'red', 'judge'] as const).map((t) => (
             <label key={t} className="flex items-center gap-1 cursor-pointer">
-              <input type="radio" value={t} {...register('team')} />
+              <input type="radio" value={t} {...register('team')} className="h-4 w-4 accent-primary" />
               <Badge className={teamBadgeClass[t]}>{t}</Badge>
             </label>
           ))}

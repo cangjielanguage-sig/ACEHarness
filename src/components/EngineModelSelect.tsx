@@ -1,24 +1,12 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { RefreshCw } from 'lucide-react';
 import type { ModelOption } from '@/lib/models';
-import { SingleCombobox, type ComboboxOption, type ComboboxGroupDef } from '@/components/ui/combobox';
+import { SingleCombobox, type ComboboxGroupDef } from '@/components/ui/combobox';
 import { useToast } from '@/components/ui/toast';
-
-interface EngineInfo {
-  id: string;
-  name: string;
-  icon: string;
-}
-
-const CONCRETE_ENGINES: EngineInfo[] = [
-  { id: 'claude-code', name: 'Claude Code', icon: '🤖' },
-  { id: 'kiro-cli', name: 'Kiro CLI', icon: '⚡' },
-  { id: 'opencode', name: 'OpenCode', icon: '🌐' },
-  { id: 'codex', name: 'Codex', icon: '🔮' },
-  { id: 'cursor', name: 'Cursor', icon: '✨' },
-  { id: 'cangjie-magic', name: 'CangjieMagic', icon: '🧙' },
-];
+import { EngineIcon } from '@/components/EngineIcon';
+import { getConcreteEngines, getEngineMeta } from '@/lib/engine-metadata';
 
 interface Props {
   engine: string;
@@ -41,8 +29,8 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
   }, []);
 
   const effectiveEngine = engine || globalEngine;
-  const globalEngineInfo = CONCRETE_ENGINES.find(e => e.id === globalEngine);
-  const globalLabel = globalEngineInfo ? `${globalEngineInfo.icon} ${globalEngineInfo.name}` : globalEngine;
+  const globalEngineInfo = getEngineMeta(globalEngine);
+  const globalLabel = globalEngineInfo?.name || globalEngine;
 
   // Composite value: "engineId::modelValue" — empty engineId = follow system
   const compositeValue = `${engine}::${model}`;
@@ -56,27 +44,29 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
     );
     if (sysModels.length > 0) {
       result.push({
-        label: `🔄 跟随系统 (${globalLabel})`,
-        icon: undefined,
+        label: `跟随系统 (${globalLabel})`,
+        icon: <RefreshCw className="h-4 w-4 shrink-0 text-muted-foreground" />,
         items: sysModels.map(m => ({
           value: `::${m.value}`,
-          label: `🔄 ${m.label}`,
+          label: m.label,
+          icon: <RefreshCw className="h-4 w-4 shrink-0 text-muted-foreground" />,
         })),
       });
     }
 
     // Concrete engine groups
-    for (const eng of CONCRETE_ENGINES) {
+    for (const eng of getConcreteEngines()) {
       const engineModels = models.filter(
         m => !m.engines || m.engines.length === 0 || m.engines.includes(eng.id),
       );
       if (engineModels.length > 0) {
         result.push({
-          label: `${eng.icon} ${eng.name}`,
-          icon: undefined,
+          label: eng.name,
+          icon: <EngineIcon engineId={eng.id} className="h-4 w-4" />,
           items: engineModels.map(m => ({
             value: `${eng.id}::${m.value}`,
-            label: `${eng.icon} ${m.label}`,
+            label: m.label,
+            icon: <EngineIcon engineId={eng.id} className="h-4 w-4" />,
           })),
         });
       }
@@ -85,10 +75,10 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
     return result;
   }, [models, globalEngine, globalLabel]);
 
-  const engineInfo = CONCRETE_ENGINES.find(e => e.id === effectiveEngine);
+  const engineInfo = getEngineMeta(effectiveEngine);
   const modelLabel = models.find(m => m.value === model)?.label || model || '选择模型';
   const isFollowSystem = !engine;
-  const displayIcon = isFollowSystem ? '🔄' : (engineInfo?.icon || '🤖');
+  const placeholder = isFollowSystem ? `跟随系统 / ${modelLabel}` : `${engineInfo?.name || effectiveEngine} / ${modelLabel}`;
 
   const handleValueChange = (val: string) => {
     if (!val) return;
@@ -97,7 +87,7 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
     onEngineChange(engId);
     onModelChange(modelVal);
     const engName = engId
-      ? (CONCRETE_ENGINES.find(e => e.id === engId)?.name || engId)
+      ? (getEngineMeta(engId)?.name || engId)
       : `跟随系统 (${globalLabel})`;
     const modLabel = models.find(m => m.value === modelVal)?.label || modelVal;
     toast('info', `已切换: ${engName} / ${modLabel}`);
@@ -108,7 +98,7 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
       value={compositeValue}
       onValueChange={handleValueChange}
       groups={groups}
-      placeholder={`${displayIcon} ${modelLabel}`}
+      placeholder={placeholder}
       triggerClassName={`h-8 text-xs ${className}`}
     />
   );

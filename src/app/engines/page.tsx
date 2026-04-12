@@ -13,6 +13,8 @@ import { ArrowLeft, Check, Cpu, Zap, Search, Download } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { SingleCombobox } from '@/components/ui/combobox';
+import { EngineIcon } from '@/components/EngineIcon';
+import { getEngineMeta } from '@/lib/engine-metadata';
 
 interface ModelOption {
   value: string;
@@ -33,7 +35,6 @@ interface Engine {
   id: string;
   name: string;
   description: string;
-  icon: string;
   status: 'available' | 'coming-soon';
   features: string[];
   endpoints: string[];
@@ -44,7 +45,6 @@ const engines: Engine[] = [
     id: 'claude-code',
     name: 'Claude Code',
     description: 'Anthropic 官方 CLI 工具，功能强大，支持完整的代码编辑和执行能力',
-    icon: '🤖',
     status: 'available',
     features: ['完整的文件操作', '代码执行', 'Git 集成', 'MCP 工具支持'],
     endpoints: ['anthropic'],
@@ -53,7 +53,6 @@ const engines: Engine[] = [
     id: 'cangjie-magic',
     name: 'CangjieMagic',
     description: '仓颉语言 AI Agent 框架，通过 MCP 协议提供智能工具调用能力',
-    icon: '/images/cj_magic_logo.png',
     status: 'available',
     features: ['MCP 协议', 'JSON-RPC 2.0', '仓颉语言原生', 'Agent 工具调用'],
     endpoints: ['cangjie'],
@@ -62,7 +61,6 @@ const engines: Engine[] = [
     id: 'kiro-cli',
     name: 'Kiro CLI',
     description: '基于 ACP 协议的 AI 编程助手，支持自定义 Agent 配置',
-    icon: '⚡',
     status: 'available',
     features: ['ACP 协议', '自定义 Agent', 'JSON-RPC 2.0', '流式输出'],
     endpoints: ['anthropic', 'openai'],
@@ -71,7 +69,6 @@ const engines: Engine[] = [
     id: 'opencode',
     name: 'OpenCode',
     description: '开源 AI 编程 Agent，支持 ACP 协议，模型在 opencode 配置中设置',
-    icon: '/images/opencode_logo.svg',
     status: 'available',
     features: ['ACP 协议', 'JSON-RPC 2.0', '开源', '流式输出'],
     endpoints: ['anthropic', 'openai'],
@@ -80,7 +77,6 @@ const engines: Engine[] = [
     id: 'codex',
     name: 'Codex',
     description: 'OpenAI Codex 引擎，专注于代码生成和理解，基于 Codex SDK',
-    icon: '🔮',
     status: 'available',
     features: ['Codex SDK', '代码生成', '代码补全', '多语言支持', 'API 集成'],
     endpoints: ['openai'],
@@ -89,7 +85,6 @@ const engines: Engine[] = [
     id: 'cursor',
     name: 'Cursor CLI',
     description: 'Cursor 命令行工具，提供智能代码编辑和 AI 辅助能力，支持 ACP 协议',
-    icon: '✨',
     status: 'available',
     features: ['ACP 协议', '智能补全', '代码重构', '命令行集成', '上下文感知'],
     endpoints: ['anthropic', 'openai'],
@@ -380,11 +375,7 @@ export default function EnginesPage() {
               )}
 
               {/* Engine Icon */}
-              {engine.icon.startsWith('/') ? (
-                <img src={engine.icon} alt={engine.name} className="w-24 h-24 mb-4 object-contain" />
-              ) : (
-                <div className="text-5xl mb-4">{engine.icon}</div>
-              )}
+              <EngineIcon engineId={engine.id} className="w-24 h-24 mb-4" decorative={false} alt={engine.name} />
 
               {/* Engine Info */}
               <h3 className="text-xl font-bold mb-2">{engine.name}</h3>

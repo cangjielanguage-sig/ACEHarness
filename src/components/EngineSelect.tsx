@@ -1,22 +1,10 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { Globe } from 'lucide-react';
 import { SingleCombobox, type ComboboxOption } from '@/components/ui/combobox';
-
-interface EngineInfo {
-  id: string;
-  name: string;
-  icon: string;
-}
-
-const ALL_ENGINES: EngineInfo[] = [
-  { id: 'claude-code', name: 'Claude Code', icon: '🤖' },
-  { id: 'kiro-cli', name: 'Kiro CLI', icon: '⚡' },
-  { id: 'opencode', name: 'OpenCode', icon: '🌐' },
-  { id: 'codex', name: 'Codex', icon: '🔮' },
-  { id: 'cursor', name: 'Cursor', icon: '✨' },
-  { id: 'cangjie-magic', name: 'CangjieMagic', icon: '🧙' },
-];
+import { EngineIcon } from '@/components/EngineIcon';
+import { getConcreteEngines, getEngineMeta } from '@/lib/engine-metadata';
 
 interface EngineSelectProps {
   value: string;
@@ -37,14 +25,22 @@ export function EngineSelect({ value, onChange, className = '', allowGlobal = fa
     }
   }, [allowGlobal]);
 
-  const globalLabel = ALL_ENGINES.find(e => e.id === globalEngine)?.name || globalEngine;
+  const globalLabel = getEngineMeta(globalEngine)?.name || globalEngine;
 
   const options: ComboboxOption[] = useMemo(() => {
     const items: ComboboxOption[] = [];
     if (allowGlobal) {
-      items.push({ value: '__global__', label: `跟随全局 (${globalLabel})` });
+      items.push({
+        value: '__global__',
+        label: `跟随全局 (${globalLabel})`,
+        icon: <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />,
+      });
     }
-    items.push(...ALL_ENGINES.map(eng => ({ value: eng.id, label: `${eng.icon} ${eng.name}` })));
+    items.push(...getConcreteEngines().map((eng) => ({
+      value: eng.id,
+      label: eng.name,
+      icon: <EngineIcon engineId={eng.id} className="h-4 w-4" />,
+    })));
     return items;
   }, [allowGlobal, globalLabel]);
 

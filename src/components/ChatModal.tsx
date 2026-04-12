@@ -60,7 +60,7 @@ export default function ChatModal() {
   }, [isOpen]);
 
   const send = async (textToSend?: string) => {
-    const text = textToSend || editorRef.current?.getMarkdown().trim() || input.trim();
+    const text = textToSend?.trim() || editorRef.current?.getMarkdown().trim() || input.trim();
     if (!text || loading) return;
     autoScrollLockedRef.current = false;
     setInput('');
@@ -172,14 +172,15 @@ export default function ChatModal() {
               <RichTextEditor
                 ref={editorRef}
                 onEnter={handleEditorEnter}
-                onChange={(html, text) => setInput(text)}
+                onChange={(markdown) => setInput(markdown)}
                 placeholder="输入消息... (Enter 发送)"
                 minHeight={36}
                 maxHeight={120}
                 disabled={loading}
+                showToolbar={false}
               />
             </div>
-            <Button size="sm" onClick={() => send()} disabled={loading || (!input.trim() && !editorRef.current?.getText()?.trim())}>
+            <Button size="sm" onClick={() => send()} disabled={loading || !((editorRef.current?.getMarkdown().trim()) || input.trim())}>
               <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>send</span>
             </Button>
           </div>

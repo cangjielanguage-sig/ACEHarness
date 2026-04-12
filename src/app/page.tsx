@@ -1,14 +1,18 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
 import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { EngineModelSelect } from '@/components/EngineModelSelect';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '@/components/ui/dialog';
+import { workspaceApi } from '@/lib/api';
+import { buildNotebookFromConversation, buildNotebookFromAssistantMessage, createDefaultNotebookFileName } from '@/lib/chat-notebook';
+import { useToast } from '@/components/ui/toast';
 import ChatSidebar from '@/components/chat/ChatSidebar';
 import ChatMessage, { RobotLogo } from '@/components/chat/ChatMessage';
 import QuickActions, { QuickActionsBar } from '@/components/chat/QuickActions';
@@ -43,6 +47,8 @@ function useIsMobile() {
 
 function ChatPageContent() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const {
     activeSession, sessions, createSession, sendMessage, stopStreaming,
     deleteMessage, retryFromMessage, continueFromMessage,
@@ -51,7 +57,12 @@ function ChatPageContent() {
     confirmAction, rejectAction, undoActionById, retryAction,
     skillSettings,
   } = useChat();
+  const { toast } = useToast();
   const [input, setInput] = useState('');
+  const [notebookExporting, setNotebookExporting] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [pendingExport, setPendingExport] = useState<{ type: 'conversation' } | { type: 'assistant'; messageId: string } | null>(null);
+  const [exportFileName, setExportFileName] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
@@ -59,6 +70,7 @@ function ChatPageContent() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editContent, setEditContent] = useState('');
+  const editorLoadedRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<RichTextEditorHandle | null>(null);
   const editEditorRef = useRef<RichTextEditorHandle | null>(null);
@@ -144,6 +156,124 @@ function ChatPageContent() {
     editorRef.current?.focus();
   }, [activeSession?.id]);
 
+  useEffect(() => {
+    if (!editorLoaded && editorRef.current) {
+      setEditorLoaded(true);
+      editorLoadedRef.current = true;
+    }
+  }, [editorLoaded, activeSession?.id, input]);
+
+  useEffect(() => {
+    if (!editDialogOpen || !editEditorRef.current) return;
+    editEditorRef.current.setContent(editContent);
+  }, [editContent, editDialogOpen]);
+
+  const getInputMarkdown = useCallback(() => {
+    return editorRef.current?.getMarkdown().trim() || input.trim();
+  }, [input]);
+
+  const getEditMarkdown = useCallback(() => {
+    return editEditorRef.current?.getMarkdown().trim() || editContent.trim();
+  }, [editContent]);
+
+  const updateNotebookUrl = useCallback((filePath: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('notebook', '1');
+    params.set('notebookFile', filePath);
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [pathname, router, searchParams]);
+
+  const normalizeNotebookFileName = useCallback((value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    return trimmed.endsWith('.cj.md') ? trimmed : `${trimmed}.cj.md`;
+  }, []);
+
+  const openNotebookExportDialog = useCallback((target: { type: 'conversation' } | { type: 'assistant'; messageId: string }) => {
+    setPendingExport(target);
+    setExportFileName(createDefaultNotebookFileName());
+    setExportDialogOpen(true);
+  }, []);
+
+  const closeNotebookExportDialog = useCallback(() => {
+    if (notebookExporting) return;
+    setExportDialogOpen(false);
+    setPendingExport(null);
+    setExportFileName('');
+  }, [notebookExporting]);
+
+  const saveNotebookFile = useCallback(async (filePath: string, content: string) => {
+    await workspaceApi.manageNotebook('create-file', { path: filePath });
+    await workspaceApi.saveNotebookFile(filePath, content);
+    updateNotebookUrl(filePath);
+  }, [updateNotebookUrl]);
+
+  const handleConfirmNotebookExport = useCallback(async () => {
+    if (!pendingExport) return;
+
+    const normalizedFileName = normalizeNotebookFileName(exportFileName);
+    if (!normalizedFileName) {
+      toast('warning', '请输入 Notebook 文件名');
+      return;
+    }
+
+    const exportPayload = pendingExport.type === 'conversation'
+      ? (activeSession ? { filePath: normalizedFileName, content: buildNotebookFromConversation(activeSession) } : null)
+      : (() => {
+          const message = activeSession?.messages.find((item) => item.id === pendingExport.messageId && item.role === 'assistant');
+          if (!message) return null;
+          const contentText = (message.rawContent || message.content || '').trim();
+          if (!contentText) return null;
+          return { filePath: normalizedFileName, content: buildNotebookFromAssistantMessage(message) };
+        })();
+
+    if (!exportPayload) {
+      toast('warning', '没有可导出的内容');
+      return;
+    }
+
+    try {
+      setNotebookExporting(true);
+      await saveNotebookFile(exportPayload.filePath, exportPayload.content);
+      toast('success', `已保存为 Notebook：${exportPayload.filePath}`);
+      setExportDialogOpen(false);
+      setPendingExport(null);
+      setExportFileName('');
+    } catch (error: any) {
+      toast('error', error?.message || '保存 Notebook 失败');
+    } finally {
+      setNotebookExporting(false);
+    }
+  }, [pendingExport, normalizeNotebookFileName, exportFileName, toast, activeSession, saveNotebookFile]);
+
+  const handleSaveConversationAsNotebook = useCallback(async () => {
+    if (!activeSession) return;
+    const exportableMessages = activeSession.messages.filter((message) => {
+      if (message.role === 'error') return false;
+      return Boolean((message.rawContent || message.content || '').trim());
+    });
+    if (exportableMessages.length === 0) {
+      toast('warning', '当前会话没有可导出的内容');
+      return;
+    }
+
+    openNotebookExportDialog({ type: 'conversation' });
+  }, [activeSession, openNotebookExportDialog, toast]);
+
+  const handleSaveAssistantMessageAsNotebook = useCallback(async (messageId: string) => {
+    const message = activeSession?.messages.find((item) => item.id === messageId && item.role === 'assistant');
+    if (!message) return;
+
+    const contentText = (message.rawContent || message.content || '').trim();
+    if (!contentText) {
+      toast('warning', '这条消息暂无可导出的内容');
+      return;
+    }
+
+    openNotebookExportDialog({ type: 'assistant', messageId });
+  }, [activeSession, openNotebookExportDialog, toast]);
+
   const unlockAutoScroll = useCallback(() => {
     autoScrollLockedRef.current = false;
     setShowScrollBtn(false);
@@ -157,7 +287,7 @@ function ChatPageContent() {
   }, [unlockAutoScroll]);
 
   const handleSend = useCallback(async () => {
-    const text = editorRef.current?.getMarkdown().trim() || input.trim();
+    const text = getInputMarkdown();
     if (!text || loading) return;
 
     if (editingMessageId) {
@@ -170,10 +300,11 @@ function ChatPageContent() {
     editorRef.current?.clear();
     await sendMessage(text);
     editorRef.current?.focus();
-  }, [input, loading, sendMessage, editingMessageId, deleteMessage, unlockAutoScroll]);
+  }, [getInputMarkdown, loading, sendMessage, editingMessageId, deleteMessage, unlockAutoScroll]);
 
   const handleEditorEnter = useCallback(async (text: string) => {
-    if (!text || loading) return;
+    const markdown = text.trim() || getInputMarkdown();
+    if (!markdown || loading) return;
 
     if (editingMessageId) {
       deleteMessage(editingMessageId);
@@ -183,8 +314,8 @@ function ChatPageContent() {
     unlockAutoScroll();
     setInput('');
     editorRef.current?.clear();
-    await sendMessage(text);
-  }, [loading, sendMessage, editingMessageId, deleteMessage, unlockAutoScroll]);
+    await sendMessage(markdown);
+  }, [getInputMarkdown, loading, sendMessage, editingMessageId, deleteMessage, unlockAutoScroll]);
 
   const handleQuickAction = useCallback((prompt: string) => {
     if (prompt && !prompt.includes('\n')) {
@@ -194,6 +325,7 @@ function ChatPageContent() {
       sendMessage(prompt);
     } else {
       setInput(prompt);
+      editorRef.current?.setContent(prompt);
       editorRef.current?.focus();
     }
   }, [sendMessage, unlockAutoScroll]);
@@ -204,15 +336,12 @@ function ChatPageContent() {
     const msg = messages.find(m => m.id === messageId);
     if (!msg) return;
     setEditingMessageId(messageId);
+    setEditContent(msg.content);
     setEditDialogOpen(true);
-    // Set content after dialog opens
-    setTimeout(() => {
-      editEditorRef.current?.setContent(msg.content);
-    }, 0);
   }, [messages]);
 
   const handleConfirmEdit = useCallback(async () => {
-    const text = editEditorRef.current?.getMarkdown().trim() || editContent.trim();
+    const text = getEditMarkdown();
     if (!editingMessageId || !text) return;
 
     // Delete the original message and any subsequent messages
@@ -231,7 +360,7 @@ function ChatPageContent() {
     setEditContent('');
     editEditorRef.current?.clear();
     await sendMessage(text);
-  }, [editingMessageId, editContent, messages, deleteMessage, sendMessage]);
+  }, [getEditMarkdown, editingMessageId, messages, deleteMessage, sendMessage]);
 
   const handleCancelEdit = useCallback(() => {
     setEditDialogOpen(false);
@@ -273,8 +402,9 @@ function ChatPageContent() {
       onRetryFromMessage={msg.role === 'user' ? retryFromMessage : undefined}
       onEditMessage={msg.role === 'user' ? handleEditMessage : undefined}
       onContinue={msg.role === 'error' ? continueFromMessage : undefined}
+      onSaveAsNotebook={msg.role === 'assistant' ? handleSaveAssistantMessageAsNotebook : undefined}
     />
-  )), [messages, streamingMessageId, messageCallbacks, handleQuickAction, deleteMessage, retryFromMessage, handleEditMessage, continueFromMessage]);
+  )), [messages, streamingMessageId, messageCallbacks, handleQuickAction, deleteMessage, retryFromMessage, handleEditMessage, continueFromMessage, handleSaveAssistantMessageAsNotebook]);
 
   return (
     <div ref={containerRef} className="h-screen flex overflow-hidden bg-background">
@@ -318,6 +448,16 @@ function ChatPageContent() {
             <div className="w-52 hidden sm:block">
               <EngineModelSelect engine={engine} model={model} onEngineChange={setEngine} onModelChange={setModel} className="h-8 text-xs" />
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleSaveConversationAsNotebook}
+              disabled={!activeSession || notebookExporting || messages.length === 0}
+              title="保存当前会话为 Notebook"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '18px', marginRight: '4px' }}>note_add</span>
+              <span className="hidden sm:inline">保存为 Notebook</span>
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => createSession()} title="新建会话">
               <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>add</span>
             </Button>
@@ -386,12 +526,13 @@ function ChatPageContent() {
               <RichTextEditor
                 ref={editorRef}
                 onEnter={handleEditorEnter}
-                onChange={(html, text) => setInput(text)}
+                onChange={(markdown) => setInput(markdown)}
                 placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
                 minHeight={42}
                 disabled={loading}
                 autoFocus={false}
                 showFullscreenToggle={true}
+                showToolbar={false}
               />
             </div>
             {loading ? (
@@ -399,7 +540,7 @@ function ChatPageContent() {
                 <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>stop</span>
               </Button>
             ) : (
-              <Button className="rounded-xl h-[42px] px-4" onClick={handleSend} disabled={!input.trim() && !editorRef.current?.getText()?.trim()}>
+              <Button className="rounded-xl h-[42px] px-4" onClick={handleSend} disabled={!getInputMarkdown()}>
                 <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>send</span>
               </Button>
             )}
@@ -415,17 +556,45 @@ function ChatPageContent() {
             <div className="min-h-[200px]">
               <RichTextEditor
                 ref={editEditorRef}
-                onChange={(html, text) => setEditContent(text)}
+                onChange={(markdown) => setEditContent(markdown)}
                 placeholder="输入消息内容..."
                 minHeight={200}
                 maxHeight={400}
                 autoFocus
                 showFullscreenToggle={true}
+                showToolbar={false}
               />
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={handleCancelEdit}>取消</Button>
               <Button onClick={handleConfirmEdit}>发送</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={exportDialogOpen} onOpenChange={(open) => {
+          if (!open) {
+            closeNotebookExportDialog();
+            return;
+          }
+          setExportDialogOpen(true);
+        }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>保存为 Notebook</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input
+                value={exportFileName}
+                onChange={(e) => setExportFileName(e.target.value)}
+                placeholder="请输入文件名"
+                disabled={notebookExporting}
+              />
+              <p className="text-xs text-muted-foreground">默认文件名为当前日期时间，你可以在保存前修改。</p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={closeNotebookExportDialog} disabled={notebookExporting}>取消</Button>
+              <Button onClick={handleConfirmNotebookExport} disabled={notebookExporting}>创建</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

@@ -8,6 +8,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { Globe } from 'lucide-react';
+import { EngineIcon } from '@/components/EngineIcon';
+import { getConcreteEngines, getEngineMeta } from '@/lib/engine-metadata';
 import AgentEditModal from '@/components/AgentEditModal';
 import { ClipLoader } from 'react-spinners';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -195,13 +198,16 @@ export default function AgentsPage() {
   const allModels = Array.from(new Set(agents.flatMap(a => Object.values(a.engineModels || {})).filter(Boolean)));
 
   const ALL_ENGINES = [
-    { id: '', name: '跟随全局', icon: '🌐' },
-    { id: 'claude-code', name: 'Claude Code', icon: '🤖' },
-    { id: 'kiro-cli', name: 'Kiro CLI', icon: '⚡' },
-    { id: 'opencode', name: 'OpenCode', icon: '🌐' },
-    { id: 'codex', name: 'Codex', icon: '🔮' },
-    { id: 'cursor', name: 'Cursor', icon: '✨' },
-    { id: 'cangjie-magic', name: 'CangjieMagic', icon: '🧙' },
+    {
+      id: '',
+      name: '跟随全局',
+      icon: <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />,
+    },
+    ...getConcreteEngines().map((engine) => ({
+      id: engine.id,
+      name: engine.name,
+      icon: <EngineIcon engineId={engine.id} className="h-4 w-4" />,
+    })),
   ];
 
   // Source: only engine::model combos that actually exist in agents
@@ -218,10 +224,11 @@ export default function AgentsPage() {
     return ALL_ENGINES
       .filter(eng => existing.has(eng.id))
       .map(eng => ({
-        label: `${eng.icon} ${eng.name}`,
+        label: eng.name,
+        icon: eng.icon,
         items: Array.from(existing.get(eng.id)!).map(mod => {
           const label = availableModels.find(m => m.value === mod)?.label || mod;
-          return { value: `${eng.id}::${mod}`, label: `${eng.icon} ${label}` };
+          return { value: `${eng.id}::${mod}`, label, icon: eng.icon };
         }),
       }))
       .filter(g => g.items.length > 0);
@@ -238,10 +245,12 @@ export default function AgentsPage() {
     );
     if (engineModels.length === 0) return [];
     return [{
-      label: `${eng.icon} ${eng.name}`,
+      label: eng.name,
+      icon: eng.icon,
       items: engineModels.map(m => ({
         value: `${srcEng}::${m.value}`,
-        label: `${eng.icon} ${m.label}`,
+        label: m.label,
+        icon: eng.icon,
       })),
     }];
   })();
