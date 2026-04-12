@@ -246,3 +246,12 @@ models:
     endpoints: []
     engines:
       - cursor
+  - value: gpt-5.4
+    label: GPT 5.4
+    costMultiplier: 0.1
+    endpoints:
+      - openai
+    engines:
+      - claude-code
+      - codex
+      - opencode
