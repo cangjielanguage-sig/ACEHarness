@@ -1,14 +1,17 @@
 'use client';
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
+import { useToast } from '@/components/ui/toast';
+import { workspaceApi } from '@/lib/api';
+import { NOTEBOOK_OUTPUT_ATTR } from '@/lib/notebook-markdown';
 import styles from './Markdown.module.css';
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, className = 'absolute top-2 right-2' }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(text).then(() => {
@@ -19,7 +22,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="absolute top-2 right-2 p-1.5 rounded text-xs bg-white/10 hover:bg-white/20 text-gray-300 transition-colors"
+      className={`${className} p-1.5 rounded text-xs bg-white/10 hover:bg-white/20 text-gray-300 transition-colors`}
       title="复制代码"
     >
       {copied ? (
@@ -36,6 +39,10 @@ const verdictConfig: Record<string, { icon: string; label: string; color: string
   conditional_pass: { icon: 'warning', label: '有条件通过', color: 'text-yellow-500', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30' },
   fail: { icon: 'cancel', label: '未通过', color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/30' },
 };
+
+let basicHljsLanguagesRegistered = false;
+let cangjieLanguageRegistered = false;
+let highlightReady = false;
 
 function VerdictCard({ data }: { data: { verdict: string; remaining_issues?: number; summary?: string } }) {
   const cfg = verdictConfig[data.verdict] || verdictConfig.fail;
@@ -67,32 +74,171 @@ function tryParseVerdict(code: string): { verdict: string; remaining_issues?: nu
   return null;
 }
 
+function normalizeFenceLanguage(className?: string) {
+  const raw = (className || '').match(/language-([A-Za-z0-9_-]+)/)?.[1]?.toLowerCase() || '';
+  if (raw === 'cj' || raw === 'cangjie') return 'cangjie';
+  return raw;
+}
+
+function renderHighlightedCode(code: string, language: string) {
+  const normalizedLanguage = normalizeLanguage(language);
+
+  if (shouldUseSyntaxHighlighter(normalizedLanguage)) {
+    return (
+      <div className="overflow-x-auto rounded-md bg-[#282c34] text-slate-100">
+        <SyntaxHighlighter
+          language={normalizedLanguage}
+          style={atomOneDark}
+          customStyle={{
+            margin: 0,
+            background: 'transparent',
+            color: '#e2e8f0',
+            borderRadius: '0.375rem',
+            padding: '1rem',
+            fontSize: '13px',
+            lineHeight: '1.5rem',
+          }}
+          codeTagProps={{
+            style: {
+              fontFamily: 'inherit',
+              color: '#e2e8f0',
+            },
+          }}
+          useInlineStyles
+          wrapLongLines={false}
+          PreTag="div"
+        >
+          {code}
+        </SyntaxHighlighter>
+      </div>
+    );
+  }
+
+  return (
+    <pre className="!mt-0 overflow-x-auto rounded-md bg-[#282c34] p-4 text-[13px] leading-6 text-slate-100">
+      <code>{code}</code>
+    </pre>
+  );
+}
+
+function NotebookOutputDetails({ node, children, ...props }: any) {
+  const summary = node?.properties?.['data-summary'] || 'Output';
+  const output = node?.properties?.['data-output'] || '';
+  const isNotebookOutput = node?.properties?.[NOTEBOOK_OUTPUT_ATTR] === 'true';
+
+  if (!isNotebookOutput) {
+    return (
+      <details className="my-2 border border-border/50 rounded-md" {...props}>
+        {children}
+      </details>
+    );
+  }
+
+  return (
+    <div className="my-3 rounded-lg border bg-muted/30">
+      <div className="border-b px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{summary}</div>
+      <div className="px-3 py-3">
+        {renderHighlightedCode(String(output || ''), 'text')}
+      </div>
+    </div>
+  );
+}
+
+function normalizeLanguage(language: string) {
+  if (language === 'cangjie') return cangjieLanguageRegistered ? 'cangjie' : 'text';
+  if (language === 'shell') return 'bash';
+  if (language === 'plaintext') return 'text';
+  return language || 'text';
+}
+
+function shouldUseSyntaxHighlighter(language: string) {
+  if (!highlightReady) return false;
+  return ['cangjie', 'javascript', 'js', 'typescript', 'ts', 'json', 'html', 'xml', 'bash', 'shell', 'yaml', 'yml', 'markdown', 'md', 'python', 'py', 'java', 'cpp', 'c', 'sql'].includes(language);
+}
+
+function CodeBlock({ code, language }: { code: string; language: string }) {
+  return renderHighlightedCode(code, language);
+}
+
+function RunnableCodeBlock({ code, language }: { code: string; language: string }) {
+  const { toast } = useToast();
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const isCangjie = language === 'cangjie';
+
+  const runCode = useCallback(async () => {
+    setRunning(true);
+    try {
+      const data = await workspaceApi.runCangjie(code, 'snippet.cj', 'markdown');
+      setResult(data);
+    } catch (error: any) {
+      toast('error', error.message || '运行失败');
+    } finally {
+      setRunning(false);
+    }
+  }, [code, toast]);
+
+  return (
+    <div className="relative group my-2">
+      <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
+        {isCangjie && (
+          <button
+            onClick={runCode}
+            disabled={running}
+            className="p-1.5 rounded text-xs bg-primary/20 hover:bg-primary/30 text-primary transition-colors disabled:opacity-50"
+            title="运行仓颉代码"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{running ? 'progress_activity' : 'play_arrow'}</span>
+          </button>
+        )}
+        <CopyButton text={code} className="static" />
+      </div>
+      <CodeBlock code={code} language={language} />
+      {isCangjie && (running || result) && (
+        <div className="mt-2 rounded-md border bg-muted/30 p-3 text-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-medium text-foreground">运行结果</span>
+            {result?.exitCode != null && <span className="text-xs text-muted-foreground">exit code: {result.exitCode}</span>}
+          </div>
+          {running ? (
+            <div className="text-muted-foreground">运行中...</div>
+          ) : (
+            <div className="space-y-2">
+              {result?.stdout && (
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">stdout</div>
+                  <pre className="whitespace-pre-wrap break-words rounded bg-background p-2 border">{result.stdout}</pre>
+                </div>
+              )}
+              {result?.stderr && (
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">stderr</div>
+                  <pre className="whitespace-pre-wrap break-words rounded bg-background p-2 border text-red-400">{result.stderr}</pre>
+                </div>
+              )}
+              {!result?.stdout && !result?.stderr && <div className="text-muted-foreground">无输出</div>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const components = {
   code({ className, children, ...props }: any) {
-    const match = /language-(\w+)/.exec(className || '');
+    const language = normalizeFenceLanguage(className);
     const code = String(children).replace(/\n$/, '');
     const isMultiLine = code.includes('\n');
 
-    // Detect verdict JSON and render as card
-    if (match?.[1] === 'json') {
+    if (language === 'json') {
       const verdict = tryParseVerdict(code);
       if (verdict) return <VerdictCard data={verdict} />;
     }
 
-    if (match || isMultiLine) {
-      return (
-        <div className="relative group">
-          <CopyButton text={code} />
-          <SyntaxHighlighter
-            style={oneDark}
-            language={match?.[1] || 'text'}
-            PreTag="div"
-            customStyle={{ margin: 0, borderRadius: '6px', fontSize: '13px' }}
-          >
-            {code}
-          </SyntaxHighlighter>
-        </div>
-      );
+    if (language || isMultiLine) {
+      return <RunnableCodeBlock code={code} language={language || 'text'} />;
     }
     return (
       <code className={className} {...props}>
@@ -101,7 +247,6 @@ const components = {
     );
   },
   a({ href, children, ...props }: any) {
-    // Handle autolink URLs - make them clickable links
     const isGitCode = href && href.includes('gitcode.com');
     const linkStyle = { color: 'white', textDecoration: 'underline' };
 
@@ -123,12 +268,8 @@ const components = {
       </a>
     );
   },
-  details({ children, ...props }: any) {
-    return (
-      <details className="my-2 border border-border/50 rounded-md" {...props}>
-        {children}
-      </details>
-    );
+  details({ node, children, ...props }: any) {
+    return <NotebookOutputDetails node={node} {...props}>{children}</NotebookOutputDetails>;
   },
   summary({ children, ...props }: any) {
     return (
@@ -139,7 +280,6 @@ const components = {
   },
 };
 
-// Valid HTML5 tag names (lowercase). Used to filter out non-standard tags like <float64>.
 const HTML_TAGS = new Set([
   'a','abbr','address','area','article','aside','audio','b','base','bdi','bdo','blockquote',
   'body','br','button','canvas','caption','cite','code','col','colgroup','data','datalist',
@@ -153,12 +293,6 @@ const HTML_TAGS = new Set([
   'u','ul','var','video','wbr',
 ]);
 
-/**
- * Close any unclosed code fence (common during streaming).
- * Supports both backtick and tilde fences.
- * Uses strict CommonMark rules: a closing fence must have >= opening width
- * and no info string.
- */
 function closeUnterminatedFences(content: string): string {
   const lines = content.split('\n');
   let inCodeBlock = false;
@@ -189,20 +323,27 @@ function closeUnterminatedFences(content: string): string {
   return content;
 }
 
-// Preprocess: convert bare URLs to markdown links for GFM autolink,
-// and escape non-standard HTML-like tags (e.g. <float64>) so rehypeRaw doesn't choke.
-function preprocessMarkdown(content: string): string {
-  // 0. Close any unterminated code fence (streaming)
-  const closed = closeUnterminatedFences(content);
-  // 1. Escape angle brackets around non-standard tag names
-  const escaped = closed.replace(
-    /<\/?([a-zA-Z][a-zA-Z0-9._-]*)(\s[^>]*)?\/?>/g,
-    (match, tagName) => {
-      if (HTML_TAGS.has(tagName.toLowerCase())) return match;
-      return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function escapeUnknownHtmlTagsOutsideCodeBlocks(content: string): string {
+  const segments = content.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g);
+
+  return segments.map((segment) => {
+    if (/^(```|~~~)/.test(segment)) {
+      return segment;
     }
-  );
-  // 2. GFM autolink literals: wrap bare URLs in angle brackets
+
+    return segment.replace(
+      /<\/?([a-zA-Z][a-zA-Z0-9._-]*)(\s[^>]*)?\/?>/g,
+      (match, tagName) => {
+        if (HTML_TAGS.has(tagName.toLowerCase())) return match;
+        return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+    );
+  }).join('');
+}
+
+function preprocessMarkdown(content: string): string {
+  const closed = closeUnterminatedFences(content);
+  const escaped = escapeUnknownHtmlTagsOutsideCodeBlocks(closed);
   return escaped.replace(
     /(?<![<"\[])(https?:\/\/[^\s<>\]")]+)/g,
     '<$1>'
@@ -211,6 +352,90 @@ function preprocessMarkdown(content: string): string {
 
 export default function Markdown({ children }: { children: string }) {
   const processedContent = useMemo(() => preprocessMarkdown(children), [children]);
+  const [, forceRefresh] = useState(0);
+
+  useEffect(() => {
+    if (highlightReady) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [
+          { default: javascript },
+          { default: typescript },
+          { default: json },
+          { default: xml },
+          { default: bash },
+          { default: yaml },
+          { default: markdown },
+          { default: python },
+          { default: java },
+          { default: cpp },
+          { default: sql },
+        ] = await Promise.all([
+          import('react-syntax-highlighter/dist/esm/languages/hljs/javascript'),
+          import('react-syntax-highlighter/dist/esm/languages/hljs/typescript'),
+          import('react-syntax-highlighter/dist/esm/languages/hljs/json'),
+          import('react-syntax-highlighter/dist/esm/languages/hljs/xml'),
+          import('react-syntax-highlighter/dist/esm/languages/hljs/bash'),
+          import('react-syntax-highlighter/dist/esm/languages/hljs/yaml'),
+          import('react-syntax-highlighter/dist/esm/languages/hljs/markdown'),
+          import('react-syntax-highlighter/dist/esm/languages/hljs/python'),
+          import('react-syntax-highlighter/dist/esm/languages/hljs/java'),
+          import('react-syntax-highlighter/dist/esm/languages/hljs/cpp'),
+          import('react-syntax-highlighter/dist/esm/languages/hljs/sql'),
+        ]);
+
+        if (cancelled) return;
+
+        if (!basicHljsLanguagesRegistered) {
+          SyntaxHighlighter.registerLanguage('javascript', javascript);
+          SyntaxHighlighter.registerLanguage('js', javascript);
+          SyntaxHighlighter.registerLanguage('typescript', typescript);
+          SyntaxHighlighter.registerLanguage('ts', typescript);
+          SyntaxHighlighter.registerLanguage('json', json);
+          SyntaxHighlighter.registerLanguage('html', xml);
+          SyntaxHighlighter.registerLanguage('xml', xml);
+          SyntaxHighlighter.registerLanguage('bash', bash);
+          SyntaxHighlighter.registerLanguage('shell', bash);
+          SyntaxHighlighter.registerLanguage('yaml', yaml);
+          SyntaxHighlighter.registerLanguage('yml', yaml);
+          SyntaxHighlighter.registerLanguage('markdown', markdown);
+          SyntaxHighlighter.registerLanguage('md', markdown);
+          SyntaxHighlighter.registerLanguage('python', python);
+          SyntaxHighlighter.registerLanguage('py', python);
+          SyntaxHighlighter.registerLanguage('java', java);
+          SyntaxHighlighter.registerLanguage('cpp', cpp);
+          SyntaxHighlighter.registerLanguage('c', cpp);
+          SyntaxHighlighter.registerLanguage('sql', sql);
+          basicHljsLanguagesRegistered = true;
+        }
+
+        if (!cangjieLanguageRegistered) {
+          const mod = await import('@/lib/cangjie-highlight');
+          if (cancelled) return;
+          const cangjie = mod.default || mod;
+          if (typeof cangjie === 'function') {
+            SyntaxHighlighter.registerLanguage('cangjie', cangjie);
+            SyntaxHighlighter.registerLanguage('cj', cangjie);
+            cangjieLanguageRegistered = true;
+          }
+        }
+
+        highlightReady = basicHljsLanguagesRegistered && cangjieLanguageRegistered;
+        if (!cancelled && highlightReady) {
+          forceRefresh((value) => value + 1);
+        }
+      } catch {
+        // ignore and fall back to plain text rendering
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className={styles.markdownContent}>

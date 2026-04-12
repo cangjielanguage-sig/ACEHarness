@@ -1758,7 +1758,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
           if (this.currentRunId) {
             saveStreamContent(this.currentRunId, streamStepName, accumulatedStream).catch(() => {});
           }
-          return { output: accumulatedOutput || '(强制跳转，步骤未完成)', costUsd: accumulatedCost, durationMs: accumulatedDuration };
+          return {
+            output: accumulatedOutput || '(强制跳转，步骤未完成)',
+            lastRoundOutput: '',
+            costUsd: accumulatedCost,
+            durationMs: accumulatedDuration,
+          };
         }
         // If interrupted with feedback, resume with feedback
         console.log(`[SM-Feedback] catch 块: interruptFlag=${this.interruptFlag}, feedbackCount=${this.liveFeedback.length}, err=${(err as Error).message?.substring(0, 100)}`);

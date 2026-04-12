@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import AvatarPicker from '@/components/AvatarPicker';
 import AuthGuard from '@/components/AuthGuard';
 import { WorkspaceEditor } from '@/components/workspace/WorkspaceEditor';
-import { ArrowLeft, FolderOpen } from 'lucide-react';
+import { ArrowLeft, FolderOpen, NotebookTabs } from 'lucide-react';
 
 interface UserInfo {
   id: string;
@@ -53,6 +53,7 @@ function AccountContent() {
 
   // Workspace editor
   const [wsEditorOpen, setWsEditorOpen] = useState(false);
+  const [notebookOpen, setNotebookOpen] = useState(false);
   const getHeaders = () => {
     const t = typeof window !== 'undefined' ? localStorage.getItem('auth-token') : null;
     return { Authorization: `Bearer ${t}` } as Record<string, string>;
@@ -163,6 +164,40 @@ function AccountContent() {
           </div>
         </div>
 
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setNotebookOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setNotebookOpen(true);
+            }
+          }}
+          className="w-full rounded-xl border bg-card p-6 text-left transition-colors hover:bg-muted/40 cursor-pointer"
+        >
+          <div className="flex items-start gap-4">
+            <div className="rounded-lg bg-primary/10 p-3 text-primary">
+              <NotebookTabs className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold flex items-center gap-2">
+                    <span>Cangjie Notebook</span>
+                    <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400 border border-emerald-500/30">New</span>
+                  </h3>
+                  <p className="mt-1 text-sm text-muted-foreground">在个人目录下使用 .cj.md 管理和运行 Notebook</p>
+                </div>
+                <Button variant="outline" size="sm" className="shrink-0 pointer-events-none" tabIndex={-1}>
+                  <FolderOpen className="mr-1 h-4 w-4" />打开
+                </Button>
+              </div>
+              <p className="mt-3 font-mono text-xs text-muted-foreground">{user.personalDir || '未设置个人目录'}/.cangjie-notbook</p>
+            </div>
+          </div>
+        </div>
+
         {/* Actions */}
         <div className="rounded-xl border bg-card divide-y">
           <button onClick={() => { setPwdError(''); setPwdSuccess(''); setPwdOpen(true); }} className="w-full px-6 py-4 flex items-center justify-between hover:bg-muted/50 transition-colors">
@@ -264,11 +299,20 @@ function AccountContent() {
 
       {/* Workspace Editor */}
       {user.personalDir && (
-        <WorkspaceEditor
-          open={wsEditorOpen}
-          onOpenChange={setWsEditorOpen}
-          workspacePath={user.personalDir}
-        />
+        <>
+          <WorkspaceEditor
+            open={wsEditorOpen}
+            onOpenChange={setWsEditorOpen}
+            workspacePath={user.personalDir}
+          />
+          <WorkspaceEditor
+            open={notebookOpen}
+            onOpenChange={setNotebookOpen}
+            workspacePath={user.personalDir}
+            mode="notebook"
+            title="Cangjie Notebook"
+          />
+        </>
       )}
     </div>
   );

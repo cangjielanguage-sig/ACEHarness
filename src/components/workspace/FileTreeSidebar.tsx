@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { ChevronRight, Loader2, FilePlus, FolderPlus, Pencil, Copy, Scissors, Clipboard, Trash2 } from "lucide-react"
-import { workspaceApi, type TreeNode } from "@/lib/api"
+import { workspaceApi, type TreeNode, type WorkspaceMode } from "@/lib/api"
 import {
   Collapsible,
   CollapsibleContent,
@@ -32,6 +32,7 @@ interface FileTreeSidebarProps {
   clipboard: ClipboardItem | null
   setClipboard: (item: ClipboardItem | null) => void
   onRefresh: () => void
+  mode?: WorkspaceMode
 }
 
 // Inline rename input
@@ -67,6 +68,7 @@ function InlineRenameInput({
 // Shared context for file operations
 const TreeContext = React.createContext<{
   workspacePath: string
+  mode: WorkspaceMode
   clipboard: ClipboardItem | null
   setClipboard: (item: ClipboardItem | null) => void
   onRefresh: () => void
@@ -290,13 +292,17 @@ function TreeFileItem({
 }: {
   node: TreeNode; selectedFile: string | null; depth: number
 }) {
-  const { workspacePath, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, onSelectFile, contextTarget, setContextTarget } = useTreeCtx()
+  const { workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, onSelectFile, contextTarget, setContextTarget } = useTreeCtx()
 
   const handleRename = async (newName: string) => {
     const parent = getParentDir(node.path)
     const newPath = parent ? `${parent}/${newName}` : newName
     try {
-      await workspaceApi.manage(workspacePath, "rename", { oldPath: node.path, newPath })
+      if (mode === "notebook") {
+        await workspaceApi.manageNotebook("rename", { oldPath: node.path, newPath })
+      } else {
+        await workspaceApi.manage(workspacePath, "rename", { oldPath: node.path, newPath })
+      }
       onRefresh()
     } catch {}
     setRenamingPath(null)
@@ -304,7 +310,11 @@ function TreeFileItem({
 
   const handleDelete = async () => {
     try {
-      await workspaceApi.manage(workspacePath, "delete", { path: node.path })
+      if (mode === "notebook") {
+        await workspaceApi.manageNotebook("delete", { path: node.path })
+      } else {
+        await workspaceApi.manage(workspacePath, "delete", { path: node.path })
+      }
       onRefresh()
     } catch {}
   }
@@ -353,7 +363,7 @@ function TreeDirItem({
 }: {
   node: TreeNode; selectedFile: string | null; depth: number
 }) {
-  const { workspacePath, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, contextTarget, setContextTarget } = useTreeCtx()
+  const { workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, contextTarget, setContextTarget } = useTreeCtx()
   const [children, setChildren] = React.useState<TreeNode[] | undefined>(node.children)
   const [loadingChildren, setLoadingChildren] = React.useState(false)
 
@@ -363,22 +373,31 @@ function TreeDirItem({
     if (open && children === undefined && !loadingChildren) {
       setLoadingChildren(true)
       try {
-        const params = new URLSearchParams({ path: workspacePath, sub: node.path, depth: "2" })
-        const res = await fetch(`/api/workspace/tree?${params}`)
-        if (res.ok) {
-          const data = await res.json()
+        if (mode === "notebook") {
+          const data = await workspaceApi.getNotebookSubTree(node.path)
           setChildren(data.tree || [])
+        } else {
+          const params = new URLSearchParams({ path: workspacePath, sub: node.path, depth: "2" })
+          const res = await fetch(`/api/workspace/tree?${params}`)
+          if (res.ok) {
+            const data = await res.json()
+            setChildren(data.tree || [])
+          }
         }
       } catch {}
       setLoadingChildren(false)
     }
-  }, [children, loadingChildren, workspacePath, node.path])
+  }, [children, loadingChildren, workspacePath, node.path, mode])
 
   const handleRename = async (newName: string) => {
     const parent = getParentDir(node.path)
     const newPath = parent ? `${parent}/${newName}` : newName
     try {
-      await workspaceApi.manage(workspacePath, "rename", { oldPath: node.path, newPath })
+      if (mode === "notebook") {
+        await workspaceApi.manageNotebook("rename", { oldPath: node.path, newPath })
+      } else {
+        await workspaceApi.manage(workspacePath, "rename", { oldPath: node.path, newPath })
+      }
       onRefresh()
     } catch {}
     setRenamingPath(null)
@@ -386,7 +405,11 @@ function TreeDirItem({
 
   const handleDelete = async () => {
     try {
-      await workspaceApi.manage(workspacePath, "delete", { path: node.path })
+      if (mode === "notebook") {
+        await workspaceApi.manageNotebook("delete", { path: node.path })
+      } else {
+        await workspaceApi.manage(workspacePath, "delete", { path: node.path })
+      }
       onRefresh()
     } catch {}
   }
@@ -397,9 +420,17 @@ function TreeDirItem({
     const destPath = `${node.path}/${name}`
     try {
       if (clipboard.action === "copy") {
-        await workspaceApi.manage(workspacePath, "copy", { srcPath: clipboard.path, destPath })
+        if (mode === "notebook") {
+          await workspaceApi.manageNotebook("copy", { srcPath: clipboard.path, destPath })
+        } else {
+          await workspaceApi.manage(workspacePath, "copy", { srcPath: clipboard.path, destPath })
+        }
       } else {
-        await workspaceApi.manage(workspacePath, "move", { srcPath: clipboard.path, destPath })
+        if (mode === "notebook") {
+          await workspaceApi.manageNotebook("move", { srcPath: clipboard.path, destPath })
+        } else {
+          await workspaceApi.manage(workspacePath, "move", { srcPath: clipboard.path, destPath })
+        }
         setClipboard(null)
       }
       onRefresh()
@@ -408,9 +439,13 @@ function TreeDirItem({
 
   const handleCreateConfirm = async (name: string) => {
     if (!creatingIn) return
-    const newPath = `${creatingIn.dir}/${name}`
+    const newPath = `${creatingIn.dir}/${mode === "notebook" && creatingIn.type === "file" && !name.endsWith('.cj.md') ? `${name}.cj.md` : name}`
     try {
-      await workspaceApi.manage(workspacePath, creatingIn.type === "file" ? "create-file" : "create-folder", { path: newPath })
+      if (mode === "notebook") {
+        await workspaceApi.manageNotebook(creatingIn.type === "file" ? "create-file" : "create-folder", { path: newPath })
+      } else {
+        await workspaceApi.manage(workspacePath, creatingIn.type === "file" ? "create-file" : "create-folder", { path: newPath })
+      }
       onRefresh()
     } catch {}
     setCreatingIn(null)
@@ -485,9 +520,9 @@ function TreeDirItem({
 /* --- Main Sidebar --- */
 export function FileTreeSidebar({
   workspacePath, tree, selectedFile, onSelectFile, loading,
-  clipboard, setClipboard, onRefresh,
+  clipboard, setClipboard, onRefresh, mode = "default",
 }: FileTreeSidebarProps) {
-  const workspaceName = workspacePath.split("/").filter(Boolean).pop() || "Workspace"
+  const workspaceName = mode === "notebook" ? "Cangjie Notebook" : (workspacePath.split("/").filter(Boolean).pop() || "Workspace")
   const [renamingPath, setRenamingPath] = React.useState<string | null>(null)
   const [creatingIn, setCreatingIn] = React.useState<{ dir: string; type: "file" | "folder" } | null>(null)
   const [contextTarget, setContextTarget] = React.useState<string | null>(null)
@@ -497,9 +532,17 @@ export function FileTreeSidebar({
     const name = clipboard.path.split("/").pop() || "pasted"
     try {
       if (clipboard.action === "copy") {
-        await workspaceApi.manage(workspacePath, "copy", { srcPath: clipboard.path, destPath: name })
+        if (mode === "notebook") {
+          await workspaceApi.manageNotebook("copy", { srcPath: clipboard.path, destPath: name })
+        } else {
+          await workspaceApi.manage(workspacePath, "copy", { srcPath: clipboard.path, destPath: name })
+        }
       } else {
-        await workspaceApi.manage(workspacePath, "move", { srcPath: clipboard.path, destPath: name })
+        if (mode === "notebook") {
+          await workspaceApi.manageNotebook("move", { srcPath: clipboard.path, destPath: name })
+        } else {
+          await workspaceApi.manage(workspacePath, "move", { srcPath: clipboard.path, destPath: name })
+        }
         setClipboard(null)
       }
       onRefresh()
@@ -509,7 +552,12 @@ export function FileTreeSidebar({
   const handleRootCreateConfirm = async (name: string) => {
     if (!creatingIn) return
     try {
-      await workspaceApi.manage(workspacePath, creatingIn.type === "file" ? "create-file" : "create-folder", { path: name })
+      if (mode === "notebook") {
+        const normalizedName = creatingIn.type === "file" && !name.endsWith('.cj.md') ? `${name}.cj.md` : name
+        await workspaceApi.manageNotebook(creatingIn.type === "file" ? "create-file" : "create-folder", { path: normalizedName })
+      } else {
+        await workspaceApi.manage(workspacePath, creatingIn.type === "file" ? "create-file" : "create-folder", { path: name })
+      }
       onRefresh()
     } catch {}
     setCreatingIn(null)
@@ -518,11 +566,21 @@ export function FileTreeSidebar({
   const isCreatingAtRoot = creatingIn?.dir === ""
 
   return (
-    <TreeContext.Provider value={{ workspacePath, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, contextTarget, setContextTarget }}>
+    <TreeContext.Provider value={{ workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, contextTarget, setContextTarget }}>
       <div className="flex flex-col h-full bg-card">
         <div className="flex items-center gap-2 px-3 py-2 border-b shrink-0">
           <img src={`${FILE_TYPE_ICON_DIR}/folder.svg`} alt="" aria-hidden className="h-4 w-4 shrink-0" />
           <span className="text-sm font-semibold truncate flex-1">{workspaceName}</span>
+          {mode === "notebook" && (
+            <button
+              type="button"
+              className="inline-flex h-7 items-center rounded-md border px-2 text-xs hover:bg-accent"
+              onClick={() => setCreatingIn({ dir: "", type: "file" })}
+              title="新建 Notebook"
+            >
+              <FilePlus className="mr-1 h-3.5 w-3.5" />新建
+            </button>
+          )}
         </div>
         <ContextMenu>
           <ContextMenuTrigger asChild>

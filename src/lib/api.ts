@@ -2,6 +2,8 @@
  * API 客户端 - 与后端服务器通信
  */
 
+import type { RunRecord } from '@/lib/run-store';
+
 const API_BASE = '/api';
 
 function getAuthHeaders(): Record<string, string> {
@@ -104,16 +106,19 @@ interface WorkflowStatusResponse {
   } | null;
 }
 
-interface RunRecord {
-  id: string;
-  configFile: string;
-  configName: string;
-  startTime: string;
-  endTime: string | null;
-  status: 'preparing' | 'running' | 'completed' | 'failed' | 'stopped' | 'crashed';
-  currentPhase: string | null;
-  totalSteps: number;
-  completedSteps: number;
+interface RunCangjieResponse {
+  success: boolean;
+  stdout: string;
+  stderr: string;
+  combinedOutput: string;
+  exitCode: number | null;
+  commandSummary?: string;
+  env?: {
+    cangjieHome: string;
+    platform: string;
+    usedEnvsetup: boolean;
+  };
+  error?: string;
 }
 
 export const configApi = {
@@ -602,7 +607,78 @@ export interface TreeNode {
   children?: TreeNode[];
 }
 
+export type WorkspaceMode = 'default' | 'notebook';
+
 export const workspaceApi = {
+  async getNotebookTree(depth = 2): Promise<{ tree: TreeNode[]; rootPath: string }> {
+    const res = await authFetch(`${API_BASE}/notebook/tree?depth=${depth}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '获取 Notebook 文件树失败');
+    }
+    return res.json();
+  },
+  async getNotebookSubTree(subPath: string, depth = 2): Promise<{ tree: TreeNode[]; rootPath: string }> {
+    const res = await authFetch(`${API_BASE}/notebook/tree?sub=${encodeURIComponent(subPath)}&depth=${depth}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '获取 Notebook 子目录失败');
+    }
+    return res.json();
+  },
+  async getNotebookFile(file: string): Promise<{ content: string; size: number; path: string }> {
+    const res = await authFetch(`${API_BASE}/notebook/file?file=${encodeURIComponent(file)}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const err = new Error(data.error || '读取 Notebook 文件失败') as Error & { size?: number };
+      if (data.size != null) err.size = data.size;
+      throw err;
+    }
+    return res.json();
+  },
+  async saveNotebookFile(file: string, content: string): Promise<{ success: boolean }> {
+    const res = await authFetch(`${API_BASE}/notebook/file`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file, content }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '保存 Notebook 文件失败');
+    }
+    return res.json();
+  },
+  async getNotebookFileBlob(file: string): Promise<Blob> {
+    const res = await authFetch(`${API_BASE}/notebook/file?file=${encodeURIComponent(file)}&mode=blob`);
+    if (!res.ok) {
+      throw new Error('获取 Notebook 文件失败');
+    }
+    return res.blob();
+  },
+  async manageNotebook(action: string, params: Record<string, any>): Promise<{ success: boolean }> {
+    const res = await authFetch(`${API_BASE}/notebook/manage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...params }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Notebook 操作失败');
+    }
+    return res.json();
+  },
+  async runCangjie(code: string, sourceName?: string, origin: 'markdown' | 'workspace' = 'workspace'): Promise<RunCangjieResponse> {
+    const res = await authFetch(`${API_BASE}/cangjie/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, sourceName, origin }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || '运行仓颉代码失败');
+    }
+    return data;
+  },
   async getTree(workspacePath: string, depth = 2): Promise<{ tree: TreeNode[] }> {
     const res = await authFetch(`${API_BASE}/workspace/tree?path=${encodeURIComponent(workspacePath)}&depth=${depth}`);
     if (!res.ok) {

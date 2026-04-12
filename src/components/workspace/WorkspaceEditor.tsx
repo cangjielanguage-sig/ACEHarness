@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { workspaceApi, type TreeNode } from "@/lib/api"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { workspaceApi, type TreeNode, type WorkspaceMode } from "@/lib/api"
 import { X, ChevronLeft, ChevronRight } from "lucide-react"
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels"
 import { Button } from "@/components/ui/button"
@@ -24,6 +25,8 @@ interface WorkspaceEditorProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   workspacePath: string
+  mode?: WorkspaceMode
+  title?: string
 }
 
 const PREVIEW_EXTENSIONS = new Set([
@@ -45,6 +48,8 @@ export function WorkspaceEditor({
   open,
   onOpenChange,
   workspacePath,
+  mode = "default",
+  title,
 }: WorkspaceEditorProps) {
   const [tree, setTree] = React.useState<TreeNode[]>([])
   const [treeLoading, setTreeLoading] = React.useState(false)
@@ -58,6 +63,11 @@ export function WorkspaceEditor({
   const [treeCollapsed, setTreeCollapsed] = React.useState(false)
   const [clipboard, setClipboard] = React.useState<ClipboardItem | null>(null)
   const treePanelRef = usePanelRef()
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const fileParamKey = mode === "notebook" ? "notebookFile" : "workspaceFile"
+  const panelParamKey = mode === "notebook" ? "notebook" : "workspace"
 
   const toggleTree = React.useCallback(() => {
     const panel = treePanelRef.current
@@ -69,18 +79,39 @@ export function WorkspaceEditor({
     id: "workspace-editor",
   })
 
-  // Load file tree when drawer opens
+  const updateUrlFileState = React.useCallback((filePath: string | null) => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (filePath) {
+      params.set(fileParamKey, filePath)
+      params.set(panelParamKey, "1")
+    } else {
+      params.delete(fileParamKey)
+      params.delete(panelParamKey)
+    }
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }, [fileParamKey, panelParamKey, pathname, router, searchParams])
+
   React.useEffect(() => {
     if (!open || !workspacePath) return
     setTreeLoading(true)
-    workspaceApi
-      .getTree(workspacePath)
+    const loadTree = mode === "notebook"
+      ? workspaceApi.getNotebookTree()
+      : workspaceApi.getTree(workspacePath)
+    loadTree
       .then((data) => setTree(data.tree))
       .catch(() => setTree([]))
       .finally(() => setTreeLoading(false))
-  }, [open, workspacePath])
+  }, [open, workspacePath, mode])
 
-  // Load file content when a file is selected
+  React.useEffect(() => {
+    if (!open) return
+    const fileFromUrl = searchParams.get(fileParamKey)
+    if (fileFromUrl) {
+      setSelectedFile(fileFromUrl)
+    }
+  }, [fileParamKey, open, searchParams])
+
   React.useEffect(() => {
     if (!selectedFile || !workspacePath) return
     setFileLoading(true)
@@ -89,9 +120,10 @@ export function WorkspaceEditor({
     setFileContent(null)
 
     if (isPreviewFile(selectedFile)) {
-      // Binary preview files: fetch as blob
-      workspaceApi
-        .getFileBlob(workspacePath, selectedFile)
+      const loadBlob = mode === "notebook"
+        ? workspaceApi.getNotebookFileBlob(selectedFile)
+        : workspaceApi.getFileBlob(workspacePath, selectedFile)
+      loadBlob
         .then((blob) => {
           setFileBlob(blob)
         })
@@ -99,25 +131,26 @@ export function WorkspaceEditor({
           setFileBlob(null)
         })
         .finally(() => setFileLoading(false))
-    } else {
-      // Text files: fetch as text
-      workspaceApi
-        .getFile(workspacePath, selectedFile)
-        .then((data) => {
-          setFileContent(data.content)
-          setFileSize(data.size)
-        })
-        .catch((err: Error & { size?: number }) => {
-          if (err.message?.includes("KB 限制")) {
-            setOversize(true)
-            if (err.size != null) setFileSize(err.size)
-          }
-        })
-        .finally(() => setFileLoading(false))
+      return
     }
-  }, [selectedFile, workspacePath])
 
-  // Ctrl+P / Cmd+P to open file search
+    const loadFile = mode === "notebook"
+      ? workspaceApi.getNotebookFile(selectedFile)
+      : workspaceApi.getFile(workspacePath, selectedFile)
+    loadFile
+      .then((data) => {
+        setFileContent(data.content)
+        setFileSize(data.size)
+      })
+      .catch((err: Error & { size?: number }) => {
+        if (err.message?.includes("KB 限制")) {
+          setOversize(true)
+          if (err.size != null) setFileSize(err.size)
+        }
+      })
+      .finally(() => setFileLoading(false))
+  }, [selectedFile, workspacePath, mode])
+
   React.useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => {
@@ -133,26 +166,32 @@ export function WorkspaceEditor({
   const handleSave = React.useCallback(
     async (content: string) => {
       if (!selectedFile) return
+      if (mode === "notebook") {
+        await workspaceApi.saveNotebookFile(selectedFile, content)
+        return
+      }
       await workspaceApi.saveFile(workspacePath, selectedFile, content)
     },
-    [workspacePath, selectedFile]
+    [workspacePath, selectedFile, mode]
   )
 
   const handleSelectFile = React.useCallback((filePath: string) => {
     setSelectedFile(filePath)
-  }, [])
+    updateUrlFileState(filePath)
+  }, [updateUrlFileState])
 
   const handleTreeRefresh = React.useCallback(() => {
     if (!workspacePath) return
     setTreeLoading(true)
-    workspaceApi
-      .getTree(workspacePath)
+    const loadTree = mode === "notebook"
+      ? workspaceApi.getNotebookTree()
+      : workspaceApi.getTree(workspacePath)
+    loadTree
       .then((data) => setTree(data.tree))
       .catch(() => setTree([]))
       .finally(() => setTreeLoading(false))
-  }, [workspacePath])
+  }, [workspacePath, mode])
 
-  // Reset state when drawer closes
   const handleOpenChange = React.useCallback(
     (newOpen: boolean) => {
       if (!newOpen) {
@@ -162,10 +201,11 @@ export function WorkspaceEditor({
         setOversize(false)
         setFileBlob(null)
         setTree([])
+        updateUrlFileState(null)
       }
       onOpenChange(newOpen)
     },
-    [onOpenChange]
+    [onOpenChange, updateUrlFileState]
   )
 
   return (
@@ -178,7 +218,7 @@ export function WorkspaceEditor({
           <div className="flex flex-col h-full">
             <div className="flex items-center gap-1 px-2 py-1 border-b shrink-0">
               <span className="text-sm text-muted-foreground truncate flex-1 px-2">
-                {workspacePath.split("/").filter(Boolean).pop() || "Workspace"}
+                {title || (mode === "notebook" ? "Cangjie Notebook" : (workspacePath.split("/").filter(Boolean).pop() || "Workspace"))}
               </span>
               <Button
                 variant="ghost"
@@ -210,6 +250,7 @@ export function WorkspaceEditor({
                   clipboard={clipboard}
                   setClipboard={setClipboard}
                   onRefresh={handleTreeRefresh}
+                  mode={mode}
                 />
               </ResizablePanel>
               <ResizableHandle
@@ -231,6 +272,7 @@ export function WorkspaceEditor({
                   oversize={oversize}
                   fileBlob={fileBlob}
                   fileType={selectedFile ? getFileType(selectedFile) : undefined}
+                  mode={mode}
                 />
               </ResizablePanel>
             </ResizablePanelGroup>

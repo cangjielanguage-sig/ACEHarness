@@ -622,6 +622,7 @@ export default function WorkbenchPage() {
     try {
       const { config, agents: loadedAgents } = await configApi.getConfig(configFile);
       dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: config });
+      dispatch({ type: 'SET_EDITING_CONFIG', payload: config });
       dispatch({ type: 'SET_AGENTS_CONFIG', payload: loadedAgents || [] });
       dispatch({ type: 'SET_PROJECT_ROOT', payload: config.context?.projectRoot || '' });
       dispatch({ type: 'SET_REQUIREMENTS', payload: config.context?.requirements || '' });
@@ -890,11 +891,25 @@ export default function WorkbenchPage() {
   handleEventRef.current = handleEvent;
 
   const saveConfig = async () => {
+    if (!workflowConfig) return;
     setSaving(true);
     try {
-      const config = { ...workflowConfig, context: { ...(workflowConfig.context || {}), projectRoot, requirements, timeoutMinutes, engine: engine || undefined, skills } };
+      const config = {
+        ...workflowConfig,
+        workflow: editingConfig?.workflow || workflowConfig.workflow,
+        context: {
+          ...(workflowConfig.context || {}),
+          ...(editingConfig?.context || {}),
+          projectRoot,
+          requirements,
+          timeoutMinutes,
+          engine: engine || undefined,
+          skills,
+        },
+      };
       await configApi.saveConfig(configFile, config);
       dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: config });
+      dispatch({ type: 'SET_EDITING_CONFIG', payload: config });
       toast('success', '配置已保存');
     } catch (error: any) {
       toast('error', '保存失败: ' + error.message);
@@ -1920,9 +1935,21 @@ export default function WorkbenchPage() {
     if (!editingConfig) return;
     setSaving(true);
     try {
-      await configApi.saveConfig(configFile, editingConfig);
+      const config = {
+        ...editingConfig,
+        context: {
+          ...(editingConfig.context || {}),
+          projectRoot,
+          requirements,
+          timeoutMinutes,
+          engine: engine || undefined,
+          skills,
+        },
+      };
+      await configApi.saveConfig(configFile, config);
       toast('success', '配置已保存，下次运行时生效');
-      dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: editingConfig });
+      dispatch({ type: 'SET_WORKFLOW_CONFIG', payload: config });
+      dispatch({ type: 'SET_EDITING_CONFIG', payload: config });
     } catch (error: any) {
       toast('error', '保存失败: ' + error.message);
     } finally {
