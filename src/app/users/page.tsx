@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/table';
 import AvatarPicker from '@/components/AvatarPicker';
 import AuthGuard from '@/components/AuthGuard';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { ArrowLeft, Plus, Search, MoreHorizontal } from 'lucide-react';
 
 interface UserInfo {
@@ -31,6 +32,7 @@ interface UserInfo {
 
 function UsersContent() {
   const router = useRouter();
+  useDocumentTitle('用户管理');
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');

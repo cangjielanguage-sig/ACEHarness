@@ -20,6 +20,7 @@ import { FileTreeSidebar, type ClipboardItem } from "./FileTreeSidebar"
 import { EditorPanel } from "./EditorPanel"
 import { FileSearchCommand } from "./FileSearchCommand"
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden"
+import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 
 interface WorkspaceEditorProps {
   open: boolean
@@ -75,6 +76,21 @@ export function WorkspaceEditor({
   const fileParamKey = mode === "notebook" ? "notebookFile" : "workspaceFile"
   const panelParamKey = mode === "notebook" ? "notebook" : "workspace"
   const scopeParamKey = mode === "notebook" ? "notebookScope" : "workspaceScope"
+
+  const baseTitle = React.useMemo(() => {
+    if (title?.trim()) return title.trim()
+    if (mode === "notebook") return "Cangjie Notebook"
+    return workspacePath.split("/").filter(Boolean).pop() || "Workspace"
+  }, [mode, title, workspacePath])
+
+  const currentTitle = React.useMemo(() => {
+    if (!open) return null
+    if (!selectedFile) return baseTitle
+    const fileName = selectedFile.split("/").pop() || selectedFile
+    return `${fileName} · ${baseTitle}`
+  }, [baseTitle, open, selectedFile])
+
+  useDocumentTitle(currentTitle)
 
   const toggleTree = React.useCallback(() => {
     const panel = treePanelRef.current
@@ -242,7 +258,7 @@ export function WorkspaceEditor({
           <div className="flex flex-col h-full">
             <div className="flex items-center gap-1 px-2 py-1 border-b shrink-0">
               <span className="text-sm text-muted-foreground truncate flex-1 px-2">
-                {title || (mode === "notebook" ? "Cangjie Notebook" : (workspacePath.split("/").filter(Boolean).pop() || "Workspace"))}
+                {baseTitle}
               </span>
               <Button
                 variant="ghost"

@@ -18,6 +18,7 @@ import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { ModelOption } from '@/lib/models';
 import { SingleCombobox, type ComboboxOption, type ComboboxGroupDef } from '@/components/ui/combobox';
 import { useToast } from '@/components/ui/toast';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 interface AgentConfig {
   name: string;
@@ -44,6 +45,7 @@ const CATEGORIES = ['测试', '编码', '设计', '压力测试', '审查', '文
 export default function AgentsPage() {
   const router = useRouter();
   const { toast } = useToast();
+  useDocumentTitle('Agent 管理');
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');

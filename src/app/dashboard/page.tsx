@@ -15,6 +15,7 @@ import NewConfigModal from '@/components/NewConfigModal';
 import EnvVarsDialog from '@/components/EnvVarsDialog';
 import UserMenu from '@/components/UserMenu';
 import { RobotLogo } from '@/components/chat/ChatMessage';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 interface DashboardStats {
   totalRuns: number;
@@ -34,6 +35,7 @@ function formatStateName(name: string): string {
 export default function DashboardPage() {
   const router = useRouter();
   const { t } = useTranslations();
+  useDocumentTitle('控制台');
   const [stats, setStats] = useState<DashboardStats>({
     totalRuns: 0,
     successRate: 0,

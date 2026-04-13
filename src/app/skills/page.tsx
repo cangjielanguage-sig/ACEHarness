@@ -13,6 +13,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { Search, ArrowLeft, FileText, Tag, Calendar, User, Upload, Download, Puzzle, X } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import Markdown from '@/components/Markdown';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 interface Skill {
   name: string;
@@ -38,6 +39,7 @@ export default function SkillsPage() {
   const router = useRouter();
   const { t } = useTranslations();
   const { toast } = useToast();
+  useDocumentTitle('Skills 管理');
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

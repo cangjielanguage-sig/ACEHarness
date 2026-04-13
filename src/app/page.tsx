@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '
 import { workspaceApi, type NotebookScope } from '@/lib/api';
 import { buildNotebookFromConversation, buildNotebookFromAssistantMessage, createDefaultNotebookFileName } from '@/lib/chat-notebook';
 import { useToast } from '@/components/ui/toast';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import ChatSidebar from '@/components/chat/ChatSidebar';
 import ChatMessage, { RobotLogo } from '@/components/chat/ChatMessage';
 import QuickActions, { QuickActionsBar } from '@/components/chat/QuickActions';
@@ -82,6 +83,19 @@ function ChatPageContent() {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const isMobile = useIsMobile();
   const [currentUser, setCurrentUser] = useState<{ username: string; email: string; role: 'admin' | 'user'; avatar?: string } | null>(null);
+
+  const chatTitle = useMemo(() => {
+    const notebookFile = searchParams.get('notebookFile');
+    if (notebookFile) {
+      const fileName = notebookFile.split('/').pop() || notebookFile;
+      return `${fileName} · Notebook`;
+    }
+
+    const sessionTitle = activeSession?.title?.trim();
+    return sessionTitle || '首页';
+  }, [activeSession?.title, searchParams]);
+
+  useDocumentTitle(chatTitle);
 
   // Load current user info
   useEffect(() => {

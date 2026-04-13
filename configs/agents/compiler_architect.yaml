@@ -105,7 +105,7 @@ iterationPrompt: |
   - 包含所有模块设计、接口定义、数据流、关键实现细节、ADR 决策记录
   - 禁止出现"补丁"、"增量修改"、"相比上一轮"等措辞
   - 读者无需翻阅任何历史迭代记录即可理解全貌并直接用于编码
-_file: architect.yaml
+_file: compiler_architect.yaml
 engineModels:
   "": gpt-5.3-codex
 activeEngine: ""

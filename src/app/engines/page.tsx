@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { SingleCombobox } from '@/components/ui/combobox';
 import { EngineIcon } from '@/components/EngineIcon';
 import { getEngineMeta } from '@/lib/engine-metadata';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 interface ModelOption {
   value: string;
@@ -94,6 +95,7 @@ const engines: Engine[] = [
 export default function EnginesPage() {
   const router = useRouter();
   const { toast } = useToast();
+  useDocumentTitle('执行引擎');
   const [currentEngine, setCurrentEngine] = useState<string>('claude-code');
   const [defaultModel, setDefaultModel] = useState<string>('');
   const [models, setModels] = useState<ModelOption[]>([]);

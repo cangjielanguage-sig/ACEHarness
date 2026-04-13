@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { RobotLogo } from '@/components/chat/ChatMessage';
 import AvatarPicker from '@/components/AvatarPicker';
 
@@ -18,6 +19,7 @@ interface DiscoveredSkill {
 
 export default function SetupPage() {
   const router = useRouter();
+  useDocumentTitle('初始化设置');
   const [step, setStep] = useState<'check' | 'admin' | 'skills'>('check');
   const [loading, setLoading] = useState(true);
   const [cloning, setCloning] = useState(false);

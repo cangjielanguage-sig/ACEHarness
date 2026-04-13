@@ -37,6 +37,8 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useToast } from '@/components/ui/toast';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import { useAttentionSignal } from '@/hooks/useAttentionSignal';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { RobotLogo } from '@/components/chat/ChatMessage';
 import styles from './page.module.css';
@@ -241,6 +243,31 @@ export default function WorkbenchPage() {
       etaSec: etaMatch ? Number(etaMatch[1]) : null,
     };
   }, [workflowStatus, currentStep]);
+  const workflowBaseTitle = useMemo(() => {
+    const configuredName = workflowConfig?.workflow?.name?.trim();
+    return configuredName || configFile.split('/').pop() || configFile;
+  }, [workflowConfig?.workflow?.name, configFile]);
+  const workflowTitle = useMemo(() => {
+    if (humanApprovalData) return `待人工审查 · ${workflowBaseTitle}`;
+    if (viewingHistoryRun) return `查看运行 · ${workflowBaseTitle}`;
+    if (workflowStatus === 'running') return `运行中 · ${workflowBaseTitle}`;
+    if (workflowStatus === 'preparing') return `准备中 · ${workflowBaseTitle}`;
+    if (workflowStatus === 'completed') return `已完成 · ${workflowBaseTitle}`;
+    if (workflowStatus === 'failed' || workflowStatus === 'crashed') return `运行失败 · ${workflowBaseTitle}`;
+    if (workflowStatus === 'stopped') return `已停止 · ${workflowBaseTitle}`;
+    return `${workflowBaseTitle} · Workflow`;
+  }, [humanApprovalData, viewingHistoryRun, workflowStatus, workflowBaseTitle]);
+  const attentionSignal = useAttentionSignal({
+    active: Boolean(humanApprovalData),
+    title: `待人工审查 · ${workflowBaseTitle}`,
+    notificationTitle: 'ACEHarness - 待人工审查',
+    notificationBody: `${workflowBaseTitle} 进入人工审查点，请及时处理。`,
+    toast,
+    toastMessage: `${workflowBaseTitle} 已进入人工审查点`,
+  });
+
+  useDocumentTitle(attentionSignal.active ? attentionSignal.title || null : workflowTitle);
+
   const totalSteps = workflowConfig?.workflow?.mode === 'state-machine'
     ? (workflowConfig?.workflow?.states?.reduce(
         (sum: number, state: any) => sum + (state.steps?.length ?? 0), 0

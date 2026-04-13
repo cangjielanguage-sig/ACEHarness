@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useTranslations } from '@/hooks/useTranslations';
 
 interface ApiEndpoint {
@@ -201,6 +202,8 @@ export default function ApiDocsPage() {
   const [expandedCategory, setExpandedCategory] = useState<string | null>(API_DATA[0]?.name || null);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const { t } = useTranslations();
+
+  useDocumentTitle('API 文档');
 
   const filteredData = search.trim()
     ? API_DATA.map(cat => ({

@@ -11,6 +11,7 @@ import AvatarPicker from '@/components/AvatarPicker';
 import AuthGuard from '@/components/AuthGuard';
 import { WorkspaceEditor } from '@/components/workspace/WorkspaceEditor';
 import EnvVarsDialog from '@/components/EnvVarsDialog';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { ArrowLeft, FolderOpen, NotebookTabs } from 'lucide-react';
 import { workspaceApi, type NotebookScope } from '@/lib/api';
 
@@ -29,6 +30,8 @@ function AccountContent() {
   const searchParams = useSearchParams();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useDocumentTitle('账户设置');
 
   // Password change
   const [pwdOpen, setPwdOpen] = useState(false);

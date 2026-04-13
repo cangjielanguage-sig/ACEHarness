@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { RobotLogo } from '@/components/chat/ChatMessage';
 
 const CAROUSEL_ITEMS = [
@@ -27,6 +28,7 @@ const CAROUSEL_ITEMS = [
 
 export default function LoginPage() {
   const router = useRouter();
+  useDocumentTitle('登录');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');

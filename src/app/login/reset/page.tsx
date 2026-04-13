@@ -4,11 +4,13 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { RobotLogo } from '@/components/chat/ChatMessage';
 import { ArrowLeft } from 'lucide-react';
 
 export default function ResetPasswordPage() {
   const router = useRouter();
+  useDocumentTitle('找回密码');
   const [step, setStep] = useState<'email' | 'answer'>('email');
   const [email, setEmail] = useState('');
   const [question, setQuestion] = useState('');

@@ -16,6 +16,7 @@ import NewConfigModal from '@/components/NewConfigModal';
 import CopyConfigModal from '@/components/CopyConfigModal';
 import { useToast } from '@/components/ui/toast';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import ConfirmDialog from '@/components/ConfirmDialog';
 
 interface WorkflowConfig {
@@ -40,6 +41,8 @@ export default function WorkflowsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
   const [copyingFilename, setCopyingFilename] = useState<string | null>(null);
+
+  useDocumentTitle('工作流管理');
 
   useEffect(() => {
     loadWorkflows();

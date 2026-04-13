@@ -18,6 +18,7 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 interface ScheduleJob {
   id: string;
@@ -69,6 +70,7 @@ export default function SchedulesPage() {
   const router = useRouter();
   const { toast } = useToast();
   const { t } = useTranslations();
+  useDocumentTitle(t('schedules.title'));
   const { confirm, dialogProps } = useConfirmDialog();
   const WEEKDAYS = [0,1,2,3,4,5,6].map(i => t(`schedules.weekdays.${i}`));
   const [jobs, setJobs] = useState<ScheduleJob[]>([]);

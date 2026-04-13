@@ -15,6 +15,7 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useToast } from '@/components/ui/toast';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import {
   DndContext,
   closestCenter,
@@ -233,6 +234,7 @@ export default function ModelsPage() {
   const router = useRouter();
   const { t } = useTranslations();
   const { toast } = useToast();
+  useDocumentTitle('模型管理');
   const [models, setModels] = useState<ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
