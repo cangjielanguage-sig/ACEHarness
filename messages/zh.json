@@ -31,6 +31,9 @@
       "chatMode": "对话模式",
       "envVars": "环境变量",
       "envVarsDesc": "管理进程环境变量"
+      ,
+      "globalNotebook": "Notebook",
+      "globalNotebookDesc": "打开系统共享与协作空间"
     },
     "charts": {
       "agentUsage": "Agent 使用统计",

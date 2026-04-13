@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { EngineModelSelect } from '@/components/EngineModelSelect';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '@/components/ui/dialog';
-import { workspaceApi } from '@/lib/api';
+import { workspaceApi, type NotebookScope } from '@/lib/api';
 import { buildNotebookFromConversation, buildNotebookFromAssistantMessage, createDefaultNotebookFileName } from '@/lib/chat-notebook';
 import { useToast } from '@/components/ui/toast';
 import ChatSidebar from '@/components/chat/ChatSidebar';
@@ -63,6 +63,7 @@ function ChatPageContent() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [pendingExport, setPendingExport] = useState<{ type: 'conversation' } | { type: 'assistant'; messageId: string } | null>(null);
   const [exportFileName, setExportFileName] = useState('');
+  const [exportScope, setExportScope] = useState<NotebookScope>('personal');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
@@ -176,13 +177,13 @@ function ChatPageContent() {
     return editEditorRef.current?.getMarkdown().trim() || editContent.trim();
   }, [editContent]);
 
-  const updateNotebookUrl = useCallback((filePath: string) => {
-    const params = new URLSearchParams(searchParams.toString());
+  const updateNotebookUrl = useCallback((filePath: string, scope: NotebookScope = 'personal') => {
+    const params = new URLSearchParams();
     params.set('notebook', '1');
     params.set('notebookFile', filePath);
-    const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  }, [pathname, router, searchParams]);
+    params.set('notebookScope', scope);
+    router.push(`/notebook?${params.toString()}`);
+  }, [router]);
 
   const normalizeNotebookFileName = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -193,6 +194,7 @@ function ChatPageContent() {
   const openNotebookExportDialog = useCallback((target: { type: 'conversation' } | { type: 'assistant'; messageId: string }) => {
     setPendingExport(target);
     setExportFileName(createDefaultNotebookFileName());
+    setExportScope('personal');
     setExportDialogOpen(true);
   }, []);
 
@@ -201,12 +203,13 @@ function ChatPageContent() {
     setExportDialogOpen(false);
     setPendingExport(null);
     setExportFileName('');
+    setExportScope('personal');
   }, [notebookExporting]);
 
-  const saveNotebookFile = useCallback(async (filePath: string, content: string) => {
-    await workspaceApi.manageNotebook('create-file', { path: filePath });
-    await workspaceApi.saveNotebookFile(filePath, content);
-    updateNotebookUrl(filePath);
+  const saveNotebookFile = useCallback(async (filePath: string, content: string, scope: NotebookScope) => {
+    await workspaceApi.manageNotebook('create-file', { path: filePath }, { scope });
+    await workspaceApi.saveNotebookFile(filePath, content, { scope });
+    updateNotebookUrl(filePath, scope);
   }, [updateNotebookUrl]);
 
   const handleConfirmNotebookExport = useCallback(async () => {
@@ -235,7 +238,7 @@ function ChatPageContent() {
 
     try {
       setNotebookExporting(true);
-      await saveNotebookFile(exportPayload.filePath, exportPayload.content);
+      await saveNotebookFile(exportPayload.filePath, exportPayload.content, exportScope);
       toast('success', `已保存为 Notebook：${exportPayload.filePath}`);
       setExportDialogOpen(false);
       setPendingExport(null);
@@ -245,7 +248,7 @@ function ChatPageContent() {
     } finally {
       setNotebookExporting(false);
     }
-  }, [pendingExport, normalizeNotebookFileName, exportFileName, toast, activeSession, saveNotebookFile]);
+  }, [pendingExport, normalizeNotebookFileName, exportFileName, toast, activeSession, saveNotebookFile, exportScope]);
 
   const handleSaveConversationAsNotebook = useCallback(async () => {
     if (!activeSession) return;
@@ -590,6 +593,24 @@ function ChatPageContent() {
                 placeholder="请输入文件名"
                 disabled={notebookExporting}
               />
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={exportScope === 'personal' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setExportScope('personal')}
+                  disabled={notebookExporting}
+                >
+                  保存至 Notebook（个人）
+                </Button>
+                <Button
+                  variant={exportScope === 'global' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setExportScope('global')}
+                  disabled={notebookExporting}
+                >
+                  保存至 Notebook（团队）
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">默认文件名为当前日期时间，你可以在保存前修改。</p>
             </div>
             <DialogFooter>

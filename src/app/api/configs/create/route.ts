@@ -3,6 +3,7 @@ import { writeFile, access } from 'fs/promises';
 import { resolve } from 'path';
 import { stringify } from 'yaml';
 import { newConfigFormSchema } from '@/lib/schemas';
+import { ZodError } from 'zod';
 
 function createPhaseBasedConfig(workflowName: string, workingDirectory: string, description?: string) {
   return {
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: '表单验证失败',
-          details: validationResult.error,
+          details: validationResult.error.issues,
         },
         { status: 400 }
       );
@@ -191,6 +192,15 @@ export async function POST(request: NextRequest) {
       filename,
     });
   } catch (error: any) {
+    if (error instanceof ZodError) {
+      return NextResponse.json(
+        {
+          error: '表单验证失败',
+          details: error.issues,
+        },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       { error: '创建配置失败', message: error.message },
       { status: 500 }

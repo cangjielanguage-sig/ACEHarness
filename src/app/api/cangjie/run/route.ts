@@ -5,6 +5,7 @@ import { resolve, join } from 'path';
 import { spawn } from 'child_process';
 import { NextRequest, NextResponse } from 'next/server';
 import { detectCangjieHome, buildCangjieSpawnEnv, buildCjpmShellCommand } from '@/lib/cangjie-env';
+import { requireAuth } from '@/lib/auth-middleware';
 
 interface RunCangjieRequest {
   code: string;
@@ -61,13 +62,13 @@ function runProcess(command: string, args: string[], options: { cwd: string; env
   });
 }
 
-async function buildRunCommand(cangjieHome: string, tempDir: string, sourceName: string, outputPath: string) {
+async function buildRunCommand(cangjieHome: string, tempDir: string, sourceName: string, outputPath: string, options?: { userId?: string }) {
   const outputName = process.platform === 'win32' ? 'main_exec.exe' : 'main_exec';
   const compileCommand = `cjc ${JSON.stringify(sourceName)} -o ${JSON.stringify(outputName)}`;
   const executeCommand = process.platform === 'win32' ? `./${outputName}` : `./${outputName}`;
 
   if (process.platform === 'win32') {
-    const env = await buildCangjieSpawnEnv(cangjieHome, process.env as Record<string, string | undefined>);
+    const env = await buildCangjieSpawnEnv(cangjieHome, process.env as Record<string, string | undefined>, options);
     return {
       mode: 'direct' as const,
       command: process.platform === 'win32' ? 'cjc.exe' : 'cjc',
@@ -80,8 +81,8 @@ async function buildRunCommand(cangjieHome: string, tempDir: string, sourceName:
     };
   }
 
-  const shellCommand = await buildCjpmShellCommand(cangjieHome, `${compileCommand} && ${executeCommand}`, tempDir);
-  const env = await buildCangjieSpawnEnv(cangjieHome, process.env as Record<string, string | undefined>);
+  const shellCommand = await buildCjpmShellCommand(cangjieHome, `${compileCommand} && ${executeCommand}`, tempDir, options);
+  const env = await buildCangjieSpawnEnv(cangjieHome, process.env as Record<string, string | undefined>, options);
 
   return {
     mode: 'shell' as const,
@@ -96,6 +97,9 @@ async function buildRunCommand(cangjieHome: string, tempDir: string, sourceName:
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+
   let tempDir: string | null = null;
   let outputPath: string | null = null;
 
@@ -109,7 +113,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '代码过长，无法运行' }, { status: 400 });
     }
 
-    const cangjieHome = await detectCangjieHome();
+    const cangjieHome = await detectCangjieHome({ userId: auth.id });
     if (!cangjieHome) {
       return NextResponse.json({ error: '未检测到 CANGJIE_HOME，请先在环境变量中配置仓颉 SDK 根目录' }, { status: 400 });
     }
@@ -129,7 +133,7 @@ export async function POST(req: NextRequest) {
 
     await writeFile(sourcePath, code, 'utf-8');
 
-    const commandConfig = await buildRunCommand(cangjieHome, tempDir, sourceName, outputPath);
+    const commandConfig = await buildRunCommand(cangjieHome, tempDir, sourceName, outputPath, { userId: auth.id });
 
     const compileResult = await runProcess(commandConfig.command, commandConfig.args, {
       cwd: tempDir,

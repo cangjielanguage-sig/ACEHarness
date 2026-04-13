@@ -12,10 +12,10 @@ import { loadEnvVars, buildEnvObject } from './env-manager';
  * Detect CANGJIE_HOME from user-configured env vars (env-vars.yaml) or process.env.
  * Returns the path or null if not found.
  */
-export async function detectCangjieHome(): Promise<string | null> {
+export async function detectCangjieHome(options?: { userId?: string }): Promise<string | null> {
   // 1. Check user-configured env vars first (highest priority)
   try {
-    const vars = await loadEnvVars();
+    const vars = await loadEnvVars(options?.userId ? { scope: 'merged', userId: options.userId } : { scope: 'merged' });
     const envObj = buildEnvObject(vars);
     if (envObj.CANGJIE_HOME && existsSync(envObj.CANGJIE_HOME)) {
       return envObj.CANGJIE_HOME;
@@ -37,10 +37,11 @@ export async function detectCangjieHome(): Promise<string | null> {
 async function resolveEnvPath(
   envKey: string,
   fallbackPaths: string[] = [],
+  userId?: string,
 ): Promise<string | null> {
   // 1. User-configured env vars
   try {
-    const vars = await loadEnvVars();
+    const vars = await loadEnvVars(userId ? { scope: 'merged', userId } : { scope: 'merged' });
     const envObj = buildEnvObject(vars);
     if (envObj[envKey] && existsSync(envObj[envKey])) {
       return envObj[envKey];
@@ -69,6 +70,7 @@ async function resolveEnvPath(
 export async function buildCangjieSpawnEnv(
   cangjieHome: string,
   baseEnv: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
+  options?: { userId?: string },
 ): Promise<Record<string, string>> {
   const isWindows = process.platform === 'win32';
   const env: Record<string, string> = {};
@@ -90,9 +92,9 @@ export async function buildCangjieSpawnEnv(
     if (existsSync(runtimeDir)) pathParts.push(runtimeDir);
 
     // Add OpenSSL and stdx to PATH on Windows
-    const opensslPath = await resolveEnvPath('OPENSSL_PATH');
+    const opensslPath = await resolveEnvPath('OPENSSL_PATH', [], options?.userId);
     if (opensslPath) pathParts.push(opensslPath);
-    const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH');
+    const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH', [], options?.userId);
     if (stdxPath) pathParts.push(stdxPath);
 
     env.PATH = [...pathParts, env.PATH || ''].filter(Boolean).join(';');
@@ -111,10 +113,10 @@ export async function buildCangjieSpawnEnv(
       const opensslPath = await resolveEnvPath('OPENSSL_PATH', [
         '/usr/local/opt/openssl/lib',
         '/opt/homebrew/opt/openssl/lib',
-      ]);
+      ], options?.userId);
       if (opensslPath) extraPaths.push(opensslPath);
 
-      const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH');
+      const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH', [], options?.userId);
       if (stdxPath) extraPaths.push(stdxPath);
 
       if (extraPaths.length > 0) {
@@ -123,7 +125,7 @@ export async function buildCangjieSpawnEnv(
     } else if (process.platform === 'linux') {
       const extraPaths: string[] = [];
 
-      const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH');
+      const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH', [], options?.userId);
       if (stdxPath) extraPaths.push(stdxPath);
 
       if (extraPaths.length > 0) {
@@ -189,6 +191,7 @@ export async function buildCjpmShellCommand(
   cangjieHome: string,
   cjpmCommand: string,
   projectDir?: string,
+  options?: { userId?: string },
 ): Promise<{ command: string; args: string[] }> {
   const isWindows = process.platform === 'win32';
   const setupScript = resolve(cangjieHome, 'envsetup.sh');
@@ -198,8 +201,8 @@ export async function buildCjpmShellCommand(
       `$env:CANGJIE_HOME="${cangjieHome}"`,
     ];
     // Add OpenSSL and stdx to PATH on Windows
-    const opensslPath = await resolveEnvPath('OPENSSL_PATH');
-    const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH');
+    const opensslPath = await resolveEnvPath('OPENSSL_PATH', [], options?.userId);
+    const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH', [], options?.userId);
     const extraPaths = [opensslPath, stdxPath].filter(Boolean);
     if (extraPaths.length > 0) {
       parts.push(`$env:PATH="${extraPaths.join(';')};$env:PATH"`);
@@ -223,10 +226,10 @@ export async function buildCjpmShellCommand(
     const opensslPath = await resolveEnvPath('OPENSSL_PATH', [
       '/usr/local/opt/openssl/lib',
       '/opt/homebrew/opt/openssl/lib',
-    ]);
+    ], options?.userId);
     if (opensslPath) extraPaths.push(opensslPath);
 
-    const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH');
+    const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH', [], options?.userId);
     if (stdxPath) extraPaths.push(stdxPath);
 
     if (extraPaths.length > 0) {
@@ -234,7 +237,7 @@ export async function buildCjpmShellCommand(
     }
   } else {
     // Linux: stdx in LD_LIBRARY_PATH
-    const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH');
+    const stdxPath = await resolveEnvPath('CANGJIE_STDX_PATH', [], options?.userId);
     if (stdxPath) {
       parts.push(`export LD_LIBRARY_PATH="${stdxPath}:$LD_LIBRARY_PATH"`);
     }

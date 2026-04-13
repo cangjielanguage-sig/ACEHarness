@@ -2,22 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 import { requireAuth } from '@/lib/auth-middleware';
+import { ensureNotebookRoot, normalizeNotebookScope } from '@/lib/notebook-manager';
+import { getNotebookShare } from '@/lib/notebook-share-store';
 
 const MAX_FILE_SIZE = 200 * 1024;
-const NOTEBOOK_ROOT_DIRNAME = '.cangjie-notbook';
-
-function getNotebookRoot(personalDir: string) {
-  return path.resolve(personalDir, NOTEBOOK_ROOT_DIRNAME);
-}
 
 function isPathSafe(root: string, resolvedPath: string) {
   return resolvedPath.startsWith(root + path.sep) || resolvedPath === root;
 }
 
-async function ensureNotebookRoot(personalDir: string) {
-  const notebookRoot = getNotebookRoot(personalDir);
-  await fs.mkdir(notebookRoot, { recursive: true });
-  return notebookRoot;
+async function resolveSharePermission(shareToken: string): Promise<'read' | 'write' | null> {
+  if (!shareToken) return null;
+  const share = await getNotebookShare(shareToken);
+  return share?.permission || null;
 }
 
 export async function GET(request: NextRequest) {
@@ -32,12 +29,23 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const file = searchParams.get('file');
     const mode = searchParams.get('mode');
+    const scope = normalizeNotebookScope(searchParams.get('scope'));
+    const shareToken = searchParams.get('shareToken') || '';
 
     if (!file) {
       return NextResponse.json({ error: '缺少 file 参数' }, { status: 400 });
     }
 
-    const notebookRoot = await ensureNotebookRoot(auth.personalDir);
+    const notebookRoot = await ensureNotebookRoot(scope, auth.personalDir);
+    if (scope === 'global' && shareToken) {
+      const share = await getNotebookShare(shareToken);
+      if (!share || share.scope !== 'global') {
+        return NextResponse.json({ error: '分享链接无效' }, { status: 403 });
+      }
+      if (share.path !== file) {
+        return NextResponse.json({ error: '分享链接无权访问该文件' }, { status: 403 });
+      }
+    }
     const fullPath = path.join(notebookRoot, file);
     const realPath = await fs.realpath(fullPath);
 
@@ -74,7 +82,7 @@ export async function GET(request: NextRequest) {
     }
 
     const content = await fs.readFile(realPath, 'utf-8');
-    return NextResponse.json({ content, size: stat.size, path: file });
+    return NextResponse.json({ content, size: stat.size, path: file, scope });
   } catch (error: any) {
     if (error.code === 'ENOENT') {
       return NextResponse.json({ error: '文件不存在' }, { status: 404 });
@@ -93,7 +101,8 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { file, content } = body;
+    const { file, content, scope: rawScope, shareToken } = body;
+    const scope = normalizeNotebookScope(rawScope);
 
     if (!file || content === undefined) {
       return NextResponse.json({ error: '缺少 file 或 content 参数' }, { status: 400 });
@@ -103,7 +112,21 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: '内容超过 200KB 限制' }, { status: 413 });
     }
 
-    const notebookRoot = await ensureNotebookRoot(auth.personalDir);
+    if (scope === 'global' && shareToken) {
+      const share = await getNotebookShare(String(shareToken));
+      if (!share || share.scope !== 'global') {
+        return NextResponse.json({ error: '分享链接无效' }, { status: 403 });
+      }
+      if (share.path !== file) {
+        return NextResponse.json({ error: '分享链接无权修改该文件' }, { status: 403 });
+      }
+      const permission = share.permission;
+      if (permission === 'read') {
+        return NextResponse.json({ error: '当前分享链接为只读权限' }, { status: 403 });
+      }
+    }
+
+    const notebookRoot = await ensureNotebookRoot(scope, auth.personalDir);
     const fullPath = path.join(notebookRoot, file);
     const dir = path.dirname(fullPath);
     const resolvedDir = path.resolve(dir);
@@ -119,7 +142,7 @@ export async function PUT(request: NextRequest) {
     }
 
     await fs.writeFile(fullPath, content, 'utf-8');
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, scope });
   } catch (error: any) {
     return NextResponse.json({ error: '保存 Notebook 文件失败', message: error.message }, { status: 500 });
   }

@@ -8,6 +8,7 @@ import { resolve, dirname } from 'path';
 import { parse, stringify } from 'yaml';
 
 const ENV_VARS_PATH = resolve(process.cwd(), 'data', 'env-vars.yaml');
+const USER_ENV_DIR = resolve(process.cwd(), 'data', 'env-vars.users');
 
 export interface EnvVar {
   key: string;
@@ -15,9 +16,13 @@ export interface EnvVar {
   enabled: boolean;
 }
 
-export async function loadEnvVars(): Promise<EnvVar[]> {
+function getUserEnvPath(userId: string): string {
+  return resolve(USER_ENV_DIR, `${userId}.yaml`);
+}
+
+async function readVarsFromFile(filePath: string): Promise<EnvVar[]> {
   try {
-    const content = await readFile(ENV_VARS_PATH, 'utf-8');
+    const content = await readFile(filePath, 'utf-8');
     const parsed = parse(content);
     return Array.isArray(parsed?.vars) ? parsed.vars : [];
   } catch {
@@ -25,9 +30,35 @@ export async function loadEnvVars(): Promise<EnvVar[]> {
   }
 }
 
-export async function saveEnvVars(vars: EnvVar[]): Promise<void> {
-  await mkdir(dirname(ENV_VARS_PATH), { recursive: true });
-  await writeFile(ENV_VARS_PATH, stringify({ vars }), 'utf-8');
+export async function loadEnvVars(options?: { scope?: 'system' | 'user' | 'merged'; userId?: string }): Promise<EnvVar[]> {
+  const scope = options?.scope || 'system';
+  if (scope === 'system') return readVarsFromFile(ENV_VARS_PATH);
+  if (scope === 'user') {
+    if (!options?.userId) return [];
+    return readVarsFromFile(getUserEnvPath(options.userId));
+  }
+
+  const systemVars = await readVarsFromFile(ENV_VARS_PATH);
+  const userVars = options?.userId ? await readVarsFromFile(getUserEnvPath(options.userId)) : [];
+  const merged = new Map<string, EnvVar>();
+  for (const item of systemVars) {
+    if (!item?.key) continue;
+    merged.set(item.key, item);
+  }
+  for (const item of userVars) {
+    if (!item?.key) continue;
+    merged.set(item.key, item);
+  }
+  return Array.from(merged.values());
+}
+
+export async function saveEnvVars(vars: EnvVar[], options?: { scope?: 'system' | 'user'; userId?: string }): Promise<void> {
+  const scope = options?.scope || 'system';
+  const targetPath = scope === 'user' && options?.userId
+    ? getUserEnvPath(options.userId)
+    : ENV_VARS_PATH;
+  await mkdir(dirname(targetPath), { recursive: true });
+  await writeFile(targetPath, stringify({ vars }), 'utf-8');
 }
 
 /** Build a plain { KEY: VALUE } object from enabled vars only */

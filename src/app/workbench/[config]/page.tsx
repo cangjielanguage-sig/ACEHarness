@@ -224,6 +224,23 @@ export default function WorkbenchPage() {
   }, [projectRoot]);
 
   const isRunning = workflowStatus === 'running' || workflowStatus === 'preparing';
+  const preparingProgress = useMemo(() => {
+    if (workflowStatus !== 'preparing') return null;
+    const text = currentStep || '';
+    // e.g. "复制工作目录 (3.2 GB/10.5 GB，31%，文件 123/560，预计剩余42s)"
+    const percentMatch = text.match(/(\d+)\s*%/);
+    const filesMatch = text.match(/文件\s*(\d+)\s*\/\s*(\d+)/);
+    const etaMatch = text.match(/预计剩余\s*(\d+)\s*(?:秒|s)/i);
+    if (!percentMatch && !filesMatch && !etaMatch) {
+      return { percent: null as number | null, copied: null as number | null, total: null as number | null, etaSec: null as number | null };
+    }
+    return {
+      copied: filesMatch ? Number(filesMatch[1]) : null,
+      total: filesMatch ? Number(filesMatch[2]) : null,
+      percent: percentMatch ? Number(percentMatch[1]) : null,
+      etaSec: etaMatch ? Number(etaMatch[1]) : null,
+    };
+  }, [workflowStatus, currentStep]);
   const totalSteps = workflowConfig?.workflow?.mode === 'state-machine'
     ? (workflowConfig?.workflow?.states?.reduce(
         (sum: number, state: any) => sum + (state.steps?.length ?? 0), 0
@@ -235,129 +252,131 @@ export default function WorkbenchPage() {
   const fetchCurrentStatus = async () => {
     try {
       const status = await workflowApi.getStatus(configFile);
-      // Only apply status if it's for the current config file
-      if (status.status && status.status !== 'idle') {
-        // Check if the running workflow is for this config file
-        const isForCurrentConfig = !status.currentConfigFile || status.currentConfigFile === configFile;
-        if (!isForCurrentConfig) {
-          // Running workflow is for a different config, don't apply this status
-          return;
-        }
+      if (!status?.status) return;
 
-        dispatch({ type: 'SET_WORKFLOW_STATUS', payload: status.status });
-        if (status.status === 'failed' && status.statusReason) {
-          addLog('system', 'error', `工作流启动失败: ${status.statusReason}`);
-        }
-        if (status.runId) dispatch({ type: 'SET_RUN_ID', payload: status.runId });
-        if (status.currentPhase) dispatch({ type: 'SET_CURRENT_PHASE', payload: status.currentPhase });
-        if (status.currentStep) dispatch({ type: 'SET_CURRENT_STEP', payload: status.currentStep });
-        if (status.agents?.length) dispatch({ type: 'SET_AGENTS', payload: status.agents });
-        if (status.completedSteps) dispatch({ type: 'SET_COMPLETED_STEPS', payload: status.completedSteps });
-        dispatch({ type: 'SET_FAILED_STEPS', payload: status.failedSteps || [] });
+      // Check if the running workflow is for this config file
+      const isForCurrentConfig = !status.currentConfigFile || status.currentConfigFile === configFile;
+      if (!isForCurrentConfig) {
+        // Running workflow is for a different config, don't apply this status
+        return;
+      }
 
-        // Restore workingDirectory
-        if (status.workingDirectory) {
-          dispatch({ type: 'SET_WORKING_DIRECTORY', payload: status.workingDirectory });
-        }
+      dispatch({ type: 'SET_WORKFLOW_STATUS', payload: status.status });
+      const statusIsActive = status.status === 'running' || status.status === 'preparing';
+      if (status.status === 'failed' && status.statusReason) {
+        addLog('system', 'error', `工作流启动失败: ${status.statusReason}`);
+      }
+      if (status.runId) dispatch({ type: 'SET_RUN_ID', payload: status.runId });
+      if (typeof status.currentPhase === 'string') dispatch({ type: 'SET_CURRENT_PHASE', payload: status.currentPhase });
+      else if (!statusIsActive) dispatch({ type: 'SET_CURRENT_PHASE', payload: '' });
+      if (typeof status.currentStep === 'string') dispatch({ type: 'SET_CURRENT_STEP', payload: status.currentStep });
+      else if (!statusIsActive) dispatch({ type: 'SET_CURRENT_STEP', payload: '' });
+      if (status.agents?.length) dispatch({ type: 'SET_AGENTS', payload: status.agents });
+      if (status.completedSteps) dispatch({ type: 'SET_COMPLETED_STEPS', payload: status.completedSteps });
+      dispatch({ type: 'SET_FAILED_STEPS', payload: status.failedSteps || [] });
+
+      // Restore workingDirectory
+      if (status.workingDirectory) {
+        dispatch({ type: 'SET_WORKING_DIRECTORY', payload: status.workingDirectory });
+      }
 
         // Restore contexts
-        if (status.globalContext !== undefined) {
-          dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: status.globalContext });
-        }
-        if (status.phaseContexts) {
-          dispatch({ type: 'SET_PHASE_CONTEXTS', payload: status.phaseContexts });
-        }
-        if ((status as any).supervisorFlow) {
-          setSupervisorFlow((status as any).supervisorFlow);
-        }
-        if ((status as any).agentFlow) {
-          setAgentFlow((status as any).agentFlow);
-        }
+      if (status.globalContext !== undefined) {
+        dispatch({ type: 'SET_GLOBAL_CONTEXT', payload: status.globalContext });
+      }
+      if (status.phaseContexts) {
+        dispatch({ type: 'SET_PHASE_CONTEXTS', payload: status.phaseContexts });
+      }
+      if ((status as any).supervisorFlow) {
+        setSupervisorFlow((status as any).supervisorFlow);
+      }
+      if ((status as any).agentFlow) {
+        setAgentFlow((status as any).agentFlow);
+      }
 
-        if (status.pendingSdkPlanQuestion) {
-          setPendingSdkPlanQuestion(status.pendingSdkPlanQuestion as any);
-        } else {
-          setPendingSdkPlanQuestion(null);
-        }
+      if (status.pendingSdkPlanQuestion) {
+        setPendingSdkPlanQuestion(status.pendingSdkPlanQuestion as any);
+      } else {
+        setPendingSdkPlanQuestion(null);
+      }
 
-        if (status.pendingPlanReview) {
-          setPendingPlanReview(status.pendingPlanReview as any);
-          setPlanReviewMode('view');
-          setPlanReviewEditContent((status.pendingPlanReview as any).planContent || '');
-          setPlanReviewFeedback('');
-        } else {
-          setPendingPlanReview(null);
-        }
+      if (status.pendingPlanReview) {
+        setPendingPlanReview(status.pendingPlanReview as any);
+        setPlanReviewMode('view');
+        setPlanReviewEditContent((status.pendingPlanReview as any).planContent || '');
+        setPlanReviewFeedback('');
+      } else {
+        setPendingPlanReview(null);
+      }
 
-        const pst = (status as { pendingSdkPlanSubtask?: unknown }).pendingSdkPlanSubtask as
-          | {
-              phase: string;
-              taskId: string;
-              description: string;
-              elapsedSec: number;
-              detail?: string;
-              toolName?: string;
-              terminalStatus?: string;
-              summary?: string;
-            }
-          | undefined;
-        if (pst && pst.phase) {
-          const tid = pst.taskId || '';
-          const shortId = tid.length <= 10 ? tid : `${tid.slice(0, 8)}…`;
-          setSdkPlanSubtaskBanner({
-            phase: pst.phase,
-            taskId: tid,
-            title: pst.phase === 'tool' ? `工具：${pst.toolName || '?'}` : `子任务 #${shortId}`,
-            subtitle: [pst.description, pst.detail].filter(Boolean).join(' · ') || undefined,
-            elapsedSec: pst.elapsedSec ?? 0,
-            terminal: pst.terminalStatus,
-          });
-        } else {
-          setSdkPlanSubtaskBanner(null);
-        }
-
-        {
-          if (status.stepLogs?.length) {
-            const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
-            const restoredIdMap: Record<string, string> = {};
-            for (const log of status.stepLogs as any[]) {
-              const key = log.id || log.stepName;
-              restoredResults[key] = {
-                output: log.output || '',
-                error: log.error || undefined,
-                costUsd: log.costUsd || undefined,
-                durationMs: log.durationMs || undefined,
-              };
-              if (log.id) {
-                restoredIdMap[log.stepName] = log.id;
-              }
-            }
-            dispatch({ type: 'MERGE_STEP_RESULTS', payload: restoredResults });
-            dispatch({ type: 'MERGE_STEP_ID_MAP', payload: restoredIdMap });
+      const pst = (status as { pendingSdkPlanSubtask?: unknown }).pendingSdkPlanSubtask as
+        | {
+            phase: string;
+            taskId: string;
+            description: string;
+            elapsedSec: number;
+            detail?: string;
+            toolName?: string;
+            terminalStatus?: string;
+            summary?: string;
           }
-        }
-        if (status.iterationStates) {
-          Object.entries(status.iterationStates).forEach(([phase, iterState]) => {
-            dispatch({ type: 'SET_ITERATION_STATE', payload: { phase, state: iterState as any } });
-          });
-        }
+        | undefined;
+      if (pst && pst.phase) {
+        const tid = pst.taskId || '';
+        const shortId = tid.length <= 10 ? tid : `${tid.slice(0, 8)}…`;
+        setSdkPlanSubtaskBanner({
+          phase: pst.phase,
+          taskId: tid,
+          title: pst.phase === 'tool' ? `工具：${pst.toolName || '?'}` : `子任务 #${shortId}`,
+          subtitle: [pst.description, pst.detail].filter(Boolean).join(' · ') || undefined,
+          elapsedSec: pst.elapsedSec ?? 0,
+          terminal: pst.terminalStatus,
+        });
+      } else {
+        setSdkPlanSubtaskBanner(null);
+      }
 
-        // Restore state machine specific data
-        if (status.stateHistory) {
-          setSmStateHistory(status.stateHistory);
+      {
+        if (status.stepLogs?.length) {
+          const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
+          const restoredIdMap: Record<string, string> = {};
+          for (const log of status.stepLogs as any[]) {
+            const key = log.id || log.stepName;
+            restoredResults[key] = {
+              output: log.output || '',
+              error: log.error || undefined,
+              costUsd: log.costUsd || undefined,
+              durationMs: log.durationMs || undefined,
+            };
+            if (log.id) {
+              restoredIdMap[log.stepName] = log.id;
+            }
+          }
+          dispatch({ type: 'MERGE_STEP_RESULTS', payload: restoredResults });
+          dispatch({ type: 'MERGE_STEP_ID_MAP', payload: restoredIdMap });
         }
-        if (status.issueTracker) {
-          setSmIssueTracker(status.issueTracker);
-        }
-        if (status.transitionCount !== undefined) {
-          setSmTransitionCount(status.transitionCount);
-        }
-        if (status.startTime) {
-          setRunStartTime(status.startTime);
-        }
-        if (status.endTime) {
-          setRunEndTime(status.endTime);
-        }
+      }
+      if (status.iterationStates) {
+        Object.entries(status.iterationStates).forEach(([phase, iterState]) => {
+          dispatch({ type: 'SET_ITERATION_STATE', payload: { phase, state: iterState as any } });
+        });
+      }
+
+      // Restore state machine specific data
+      if (status.stateHistory) {
+        setSmStateHistory(status.stateHistory);
+      }
+      if (status.issueTracker) {
+        setSmIssueTracker(status.issueTracker);
+      }
+      if (status.transitionCount !== undefined) {
+        setSmTransitionCount(status.transitionCount);
+      }
+      if (status.startTime) {
+        setRunStartTime(status.startTime);
+      }
+      if (status.endTime) {
+        setRunEndTime(status.endTime);
       }
     } catch { /* server might not be ready */ }
   };
@@ -653,6 +672,12 @@ export default function WorkbenchPage() {
     switch (event.type) {
       case 'status':
         dispatch({ type: 'SET_WORKFLOW_STATUS', payload: event.data.status });
+        if (typeof event.data.currentPhase === 'string') {
+          dispatch({ type: 'SET_CURRENT_PHASE', payload: event.data.currentPhase });
+        }
+        if (typeof event.data.currentStep === 'string') {
+          dispatch({ type: 'SET_CURRENT_STEP', payload: event.data.currentStep });
+        }
         if (event.data.runId) dispatch({ type: 'SET_RUN_ID', payload: event.data.runId });
         if (event.data.startTime) setRunStartTime(event.data.startTime);
         if (event.data.endTime) setRunEndTime(event.data.endTime);
@@ -933,7 +958,7 @@ export default function WorkbenchPage() {
     try {
       setViewingHistoryRun(false);
       dispatch({ type: 'RESET_RUN' });
-      dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'running' });
+      dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'preparing' });
       setSmStateHistory([]);
       setSmIssueTracker([]);
       setSmTransitionCount(0);
@@ -1146,17 +1171,16 @@ export default function WorkbenchPage() {
     });
     if (!confirmed) return;
 
-    // Ask whether to also clean the working directory (only if it exists)
-    let cleanWorkDir = false;
-    if (workingDir) {
-      cleanWorkDir = await confirm({
-        title: '清理工作目录',
-        description: `是否删除当前运行记录的工作目录 ${workingDir} ？`,
-        confirmLabel: '删除工作目录',
-        cancelLabel: '仅删除记录',
-        variant: 'destructive',
-      });
-    }
+    // Always ask whether to also clean the working directory.
+    const cleanWorkDir = await confirm({
+      title: '清理工作目录',
+      description: workingDir
+        ? `是否删除当前运行记录的工作目录 ${workingDir} ？`
+        : '是否同时删除该运行关联的工作目录（若存在）？',
+      confirmLabel: '删除工作目录',
+      cancelLabel: '仅删除记录',
+      variant: 'destructive',
+    });
 
     try {
       await runsApi.deleteRun(runId, cleanWorkDir);
@@ -2587,8 +2611,39 @@ export default function WorkbenchPage() {
                   </div>
                 </div>
               )}
-              {/* Live stream button — always visible when running */}
-              {isRunning && (
+              {/* Preparing progress card */}
+              {workflowStatus === 'preparing' && (
+                <div className="bg-muted border-b p-3.5">
+                  <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">
+                    <span className="material-symbols-outlined text-xs">deployed_code_update</span> 准备阶段
+                  </div>
+                  <div className="text-xs mb-2">
+                    {currentStep || '初始化运行上下文'}
+                  </div>
+                  <div className="w-full h-2 rounded bg-background border overflow-hidden">
+                    {preparingProgress && preparingProgress.percent !== null ? (
+                      <div
+                        className="h-full bg-blue-500 transition-all duration-300"
+                        style={{ width: `${Math.max(0, Math.min(100, preparingProgress.percent ?? 0))}%` }}
+                      />
+                    ) : (
+                      <div className="h-full w-1/3 bg-blue-500/70 animate-pulse" />
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-1">
+                    {preparingProgress && preparingProgress.percent !== null
+                      ? `${preparingProgress.copied ?? 0}/${preparingProgress.total ?? 0} (${preparingProgress.percent}%)`
+                      : '正在准备中...'}
+                  </div>
+                  {preparingProgress && preparingProgress.etaSec !== null && (
+                    <div className="text-[11px] text-muted-foreground">
+                      预计剩余：{preparingProgress.etaSec} 秒
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* Live stream button — visible only during actual execution */}
+              {workflowStatus === 'running' && (
                 <div className="bg-muted border-b p-3.5">
                   <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider"><span className="material-symbols-outlined text-xs">sync</span> {currentStep ? `当前步骤: ${currentStep}` : '工作流运行中'}</div>
                   <div className="flex gap-2 mt-1.5">

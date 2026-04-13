@@ -7,7 +7,7 @@ import { Loader2, FileCode2, Play } from "lucide-react"
 import { NotebookEditor } from "@/components/notebook/NotebookEditor"
 import { registerCangjieLanguage } from "@/lib/cangjie-language"
 import { registerCMakeLanguage } from "@/lib/cmake-language"
-import { workspaceApi, type WorkspaceMode } from "@/lib/api"
+import { workspaceApi, type NotebookScope, type WorkspaceMode } from "@/lib/api"
 import { useToast } from "@/components/ui/toast"
 import {
   Dialog,
@@ -81,6 +81,9 @@ interface EditorPanelProps {
   fileBlob?: Blob | null
   fileType?: string
   mode?: WorkspaceMode
+  notebookScope?: NotebookScope
+  notebookShareToken?: string
+  notebookPermission?: 'read' | 'write'
 }
 
 interface RunCangjieResult {
@@ -132,6 +135,9 @@ export function EditorPanel({
   fileBlob,
   fileType,
   mode = 'default',
+  notebookScope = 'personal',
+  notebookShareToken,
+  notebookPermission = 'write',
 }: EditorPanelProps) {
   const { resolvedTheme } = useTheme()
   const { toast } = useToast()
@@ -142,6 +148,8 @@ export function EditorPanel({
   const [runDialogOpen, setRunDialogOpen] = React.useState(false)
   const [running, setRunning] = React.useState(false)
   const [runResult, setRunResult] = React.useState<RunCangjieResult | null>(null)
+  const [notebookTocOpen, setNotebookTocOpen] = React.useState(false)
+  const [notebookDependencyGraphOpen, setNotebookDependencyGraphOpen] = React.useState(false)
   const cangjieRegistered = React.useRef(false)
   const cmakeRegistered = React.useRef(false)
 
@@ -204,6 +212,13 @@ export function EditorPanel({
   const canRunCangjie = isRunnableCangjieFile(filePath) && !oversize && !loading && editorContent != null
   const isNotebook = mode === 'notebook' && isNotebookFile(filePath)
 
+  React.useEffect(() => {
+    if (!isNotebook) {
+      setNotebookTocOpen(false)
+      setNotebookDependencyGraphOpen(false)
+    }
+  }, [isNotebook])
+
   return (
     <>
       <div className="flex flex-col h-full w-full">
@@ -243,6 +258,23 @@ export function EditorPanel({
               >
                 自动换行
               </MenubarCheckboxItem>
+              {isNotebook && (
+                <>
+                  <MenubarSeparator />
+                  <MenubarCheckboxItem
+                    checked={notebookTocOpen}
+                    onCheckedChange={(checked) => setNotebookTocOpen(checked === true)}
+                  >
+                    目录
+                  </MenubarCheckboxItem>
+                  <MenubarCheckboxItem
+                    checked={notebookDependencyGraphOpen}
+                    onCheckedChange={(checked) => setNotebookDependencyGraphOpen(checked === true)}
+                  >
+                    依赖图
+                  </MenubarCheckboxItem>
+                </>
+              )}
             </MenubarContent>
           </MenubarMenu>
           {canRunCangjie && (
@@ -297,7 +329,18 @@ export function EditorPanel({
               <FileViewer file={fileBlob} fileType={fileType} />
             </div>
           ) : isNotebook && content != null ? (
-            <NotebookEditor filePath={filePath!} content={content} onSave={onSave} />
+            <NotebookEditor
+              filePath={filePath!}
+              content={content}
+              onSave={onSave}
+              scope={notebookScope}
+              shareToken={notebookShareToken}
+              permission={notebookPermission}
+              tocOpen={notebookTocOpen}
+              onTocOpenChange={setNotebookTocOpen}
+              dependencyGraphOpen={notebookDependencyGraphOpen}
+              onDependencyGraphOpenChange={setNotebookDependencyGraphOpen}
+            />
           ) : (
             <MonacoEditor
               height="100%"

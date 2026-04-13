@@ -7,6 +7,11 @@ import { workflowRegistry } from '@/lib/workflow-registry';
 
 const RUNS_DIR = resolve(process.cwd(), 'runs');
 
+function normalizeWorkDirPath(raw: string | null): string | null {
+  if (!raw) return null;
+  return raw.startsWith('/') ? raw : resolve(process.cwd(), raw);
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -41,7 +46,7 @@ export async function DELETE(
       if (existsSync(stateFile)) {
         const content = await readFile(stateFile, 'utf-8');
         const state = parse(content);
-        workingDirectory = state.workingDirectory || null;
+        workingDirectory = normalizeWorkDirPath(state.workingDirectory || null);
         configFile = state.configFile || null;
       }
     } catch { /* ignore */ }

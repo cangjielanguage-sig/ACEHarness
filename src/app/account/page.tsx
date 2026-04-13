@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import AvatarPicker from '@/components/AvatarPicker';
 import AuthGuard from '@/components/AuthGuard';
 import { WorkspaceEditor } from '@/components/workspace/WorkspaceEditor';
+import EnvVarsDialog from '@/components/EnvVarsDialog';
 import { ArrowLeft, FolderOpen, NotebookTabs } from 'lucide-react';
+import { workspaceApi, type NotebookScope } from '@/lib/api';
 
 interface UserInfo {
   id: string;
@@ -24,6 +26,7 @@ interface UserInfo {
 
 function AccountContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -54,6 +57,10 @@ function AccountContent() {
   // Workspace editor
   const [wsEditorOpen, setWsEditorOpen] = useState(false);
   const [notebookOpen, setNotebookOpen] = useState(false);
+  const [notebookScope, setNotebookScope] = useState<NotebookScope>('personal');
+  const [notebookShareToken, setNotebookShareToken] = useState<string | undefined>(undefined);
+  const [notebookPermission, setNotebookPermission] = useState<'read' | 'write'>('write');
+  const [showUserEnvVars, setShowUserEnvVars] = useState(false);
   const getHeaders = () => {
     const t = typeof window !== 'undefined' ? localStorage.getItem('auth-token') : null;
     return { Authorization: `Bearer ${t}` } as Record<string, string>;
@@ -65,6 +72,58 @@ function AccountContent() {
       .then(d => { setUser(d.user); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    const openWorkspace = searchParams.get('workspace') === '1';
+    if (openWorkspace) setWsEditorOpen(true);
+  }, [searchParams]);
+
+  useEffect(() => {
+    const openNotebook = searchParams.get('notebook') === '1';
+    if (!openNotebook) return;
+    const scopeParam = searchParams.get('notebookScope');
+    if (scopeParam === 'global') {
+      router.replace(`/notebook?${searchParams.toString()}`);
+      return;
+    }
+
+    const shareToken = searchParams.get('notebookShare') || '';
+    const fileParam = searchParams.get('notebookFile');
+
+    if (!shareToken) {
+      setNotebookScope(scopeParam === 'global' ? 'global' : 'personal');
+      setNotebookShareToken(undefined);
+      setNotebookPermission('write');
+      setNotebookOpen(true);
+      return;
+    }
+
+    let cancelled = false;
+    workspaceApi.resolveNotebookShare(shareToken)
+      .then((share) => {
+        if (cancelled) return;
+        setNotebookScope(share.scope);
+        setNotebookShareToken(shareToken);
+        setNotebookPermission(share.permission);
+        if (!fileParam) {
+          const params = new URLSearchParams(searchParams.toString());
+          params.set('notebook', '1');
+          params.set('notebookScope', share.scope);
+          params.set('notebookFile', share.path);
+          params.set('notebookShare', shareToken);
+          params.set('notebookPermission', share.permission);
+          router.replace(`/account?${params.toString()}`);
+        }
+        setNotebookOpen(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setNotebookScope('personal');
+        setNotebookShareToken(undefined);
+        setNotebookPermission('write');
+      });
+    return () => { cancelled = true; };
+  }, [router, searchParams]);
 
   const handleChangePassword = async () => {
     setPwdError(''); setPwdSuccess('');
@@ -134,7 +193,7 @@ function AccountContent() {
       <header className="border-b border-border/50 bg-card/30 backdrop-blur-xl sticky top-0 z-50">
         <div className="container mx-auto px-6 py-4 flex items-center gap-4">
           <Button variant="ghost" size="sm" asChild>
-            <Link href="/"><ArrowLeft className="w-4 h-4 mr-2" />返回首页</Link>
+            <Link href="/dashboard"><ArrowLeft className="w-4 h-4 mr-2" />返回 Dashboard</Link>
           </Button>
           <div className="h-6 w-px bg-border" />
           <h1 className="text-2xl font-bold">账户设置</h1>
@@ -231,6 +290,13 @@ function AccountContent() {
               </button>
             </div>
           </div>
+          <button onClick={() => setShowUserEnvVars(true)} className="w-full px-6 py-4 flex items-center justify-between hover:bg-muted/50 transition-colors">
+            <div className="flex items-center gap-3">
+              <span className="material-symbols-outlined text-muted-foreground">key</span>
+              <span>个人环境变量</span>
+            </div>
+            <span className="material-symbols-outlined text-muted-foreground text-sm">chevron_right</span>
+          </button>
         </div>
       </div>
 
@@ -311,8 +377,15 @@ function AccountContent() {
             workspacePath={user.personalDir}
             mode="notebook"
             title="Cangjie Notebook"
+            notebookScope={notebookScope}
+            notebookShareToken={notebookShareToken}
+            notebookPermission={notebookPermission}
           />
         </>
+      )}
+
+      {showUserEnvVars && (
+        <EnvVarsDialog scope="user" onClose={() => setShowUserEnvVars(false)} />
       )}
     </div>
   );

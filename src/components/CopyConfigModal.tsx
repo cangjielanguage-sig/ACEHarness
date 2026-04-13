@@ -32,11 +32,30 @@ export default function CopyConfigModal({
   const {
     register,
     handleSubmit,
+    setError,
+    setValue,
     formState: { errors, isSubmitting },
     reset,
+    getValues,
   } = useForm<CopyConfigForm>({
     resolver: zodResolver(copyConfigFormSchema),
   });
+
+  const normalizeFilenameField = () => {
+    const raw = (getValues('newFilename') || '').trim();
+    if (!raw) return;
+
+    let normalized = raw;
+    if (/\.yml$/i.test(normalized)) {
+      normalized = normalized.replace(/\.yml$/i, '.yaml');
+    } else if (!/\.yaml$/i.test(normalized)) {
+      normalized = `${normalized}.yaml`;
+    }
+
+    if (normalized !== getValues('newFilename')) {
+      setValue('newFilename', normalized, { shouldDirty: true, shouldValidate: true });
+    }
+  };
 
   const onSubmit = async (data: CopyConfigForm) => {
     try {
@@ -47,8 +66,19 @@ export default function CopyConfigModal({
       });
       const result = await response.json();
       if (!response.ok) {
-        if (result.details) {
-          toast('error', '表单验证失败:\n' + result.details.map((e: any) => e.message).join('\n'));
+        const details = Array.isArray(result.details)
+          ? result.details
+          : Array.isArray(result.details?.issues)
+            ? result.details.issues
+            : [];
+        if (details.length > 0) {
+          for (const issue of details) {
+            const field = issue?.path?.[0];
+            if (field === 'newFilename' || field === 'workflowName') {
+              setError(field, { type: 'server', message: issue.message });
+            }
+          }
+          toast('error', '表单验证失败:\n' + details.map((e: any) => e.message).join('\n'));
         } else {
           toast('error', result.message || result.error);
         }
@@ -97,7 +127,9 @@ export default function CopyConfigModal({
             <Input
               id="newFilename"
               placeholder="my-workflow-copy.yaml"
-              {...register('newFilename')}
+              {...register('newFilename', {
+                onBlur: normalizeFilenameField,
+              })}
               className={errors.newFilename ? 'border-destructive' : ''}
             />
             {errors.newFilename && (

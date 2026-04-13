@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Zap, Cpu, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, Play, Package, Cog, FileText, History, Key } from 'lucide-react';
+import { Activity, Zap, Cpu, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, Workflow, Bot, Settings, Play, Package, Cog, FileText, History, Key, NotebookTabs } from 'lucide-react';
 
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
@@ -323,6 +323,13 @@ export default function DashboardPage() {
                   desc={t('dashboard.quickActions.envVarsDesc')}
                   onClick={() => setShowEnvVars(true)}
                   color="from-amber-500 to-amber-600"
+                />
+                <QuickAction
+                  icon={NotebookTabs}
+                  label={t('dashboard.quickActions.globalNotebook')}
+                  desc={t('dashboard.quickActions.globalNotebookDesc')}
+                  onClick={() => router.push('/notebook?notebook=1&notebookScope=global')}
+                  color="from-emerald-500 to-emerald-600"
                 />
                 <QuickAction
                   icon={FileText}

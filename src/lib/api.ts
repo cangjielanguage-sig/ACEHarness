@@ -608,26 +608,41 @@ export interface TreeNode {
 }
 
 export type WorkspaceMode = 'default' | 'notebook';
+export type NotebookScope = 'personal' | 'global';
+export type NotebookSharePermission = 'read' | 'write';
 
 export const workspaceApi = {
-  async getNotebookTree(depth = 2): Promise<{ tree: TreeNode[]; rootPath: string }> {
-    const res = await authFetch(`${API_BASE}/notebook/tree?depth=${depth}`);
+  async getNotebookTree(depth = 2, options?: { scope?: NotebookScope; shareToken?: string }): Promise<{ tree: TreeNode[]; rootPath: string }> {
+    const params = new URLSearchParams();
+    params.set('depth', String(depth));
+    if (options?.scope) params.set('scope', options.scope);
+    if (options?.shareToken) params.set('shareToken', options.shareToken);
+    const res = await authFetch(`${API_BASE}/notebook/tree?${params.toString()}`);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || '获取 Notebook 文件树失败');
     }
     return res.json();
   },
-  async getNotebookSubTree(subPath: string, depth = 2): Promise<{ tree: TreeNode[]; rootPath: string }> {
-    const res = await authFetch(`${API_BASE}/notebook/tree?sub=${encodeURIComponent(subPath)}&depth=${depth}`);
+  async getNotebookSubTree(subPath: string, depth = 2, options?: { scope?: NotebookScope; shareToken?: string }): Promise<{ tree: TreeNode[]; rootPath: string }> {
+    const params = new URLSearchParams();
+    params.set('sub', subPath);
+    params.set('depth', String(depth));
+    if (options?.scope) params.set('scope', options.scope);
+    if (options?.shareToken) params.set('shareToken', options.shareToken);
+    const res = await authFetch(`${API_BASE}/notebook/tree?${params.toString()}`);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || '获取 Notebook 子目录失败');
     }
     return res.json();
   },
-  async getNotebookFile(file: string): Promise<{ content: string; size: number; path: string }> {
-    const res = await authFetch(`${API_BASE}/notebook/file?file=${encodeURIComponent(file)}`);
+  async getNotebookFile(file: string, options?: { scope?: NotebookScope; shareToken?: string }): Promise<{ content: string; size: number; path: string }> {
+    const params = new URLSearchParams();
+    params.set('file', file);
+    if (options?.scope) params.set('scope', options.scope);
+    if (options?.shareToken) params.set('shareToken', options.shareToken);
+    const res = await authFetch(`${API_BASE}/notebook/file?${params.toString()}`);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       const err = new Error(data.error || '读取 Notebook 文件失败') as Error & { size?: number };
@@ -636,11 +651,11 @@ export const workspaceApi = {
     }
     return res.json();
   },
-  async saveNotebookFile(file: string, content: string): Promise<{ success: boolean }> {
+  async saveNotebookFile(file: string, content: string, options?: { scope?: NotebookScope; shareToken?: string }): Promise<{ success: boolean }> {
     const res = await authFetch(`${API_BASE}/notebook/file`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file, content }),
+      body: JSON.stringify({ file, content, scope: options?.scope, shareToken: options?.shareToken }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -648,24 +663,49 @@ export const workspaceApi = {
     }
     return res.json();
   },
-  async getNotebookFileBlob(file: string): Promise<Blob> {
-    const res = await authFetch(`${API_BASE}/notebook/file?file=${encodeURIComponent(file)}&mode=blob`);
+  async getNotebookFileBlob(file: string, options?: { scope?: NotebookScope; shareToken?: string }): Promise<Blob> {
+    const params = new URLSearchParams();
+    params.set('file', file);
+    params.set('mode', 'blob');
+    if (options?.scope) params.set('scope', options.scope);
+    if (options?.shareToken) params.set('shareToken', options.shareToken);
+    const res = await authFetch(`${API_BASE}/notebook/file?${params.toString()}`);
     if (!res.ok) {
       throw new Error('获取 Notebook 文件失败');
     }
     return res.blob();
   },
-  async manageNotebook(action: string, params: Record<string, any>): Promise<{ success: boolean }> {
+  async manageNotebook(action: string, params: Record<string, any>, options?: { scope?: NotebookScope; shareToken?: string }): Promise<{ success: boolean }> {
     const res = await authFetch(`${API_BASE}/notebook/manage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...params }),
+      body: JSON.stringify({ action, scope: options?.scope, shareToken: options?.shareToken, ...params }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || 'Notebook 操作失败');
     }
     return res.json();
+  },
+  async createNotebookShare(filePath: string, permission: NotebookSharePermission, scope: NotebookScope = 'global') {
+    const res = await authFetch(`${API_BASE}/notebook/share`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filePath, permission, scope }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '创建分享链接失败');
+    }
+    return res.json() as Promise<{ token: string; scope: NotebookScope; path: string; permission: NotebookSharePermission }>;
+  },
+  async resolveNotebookShare(token: string) {
+    const res = await authFetch(`${API_BASE}/notebook/share?token=${encodeURIComponent(token)}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '解析分享链接失败');
+    }
+    return res.json() as Promise<{ scope: NotebookScope; path: string; permission: NotebookSharePermission }>;
   },
   async runCangjie(code: string, sourceName?: string, origin: 'markdown' | 'workspace' = 'workspace'): Promise<RunCangjieResponse> {
     const res = await authFetch(`${API_BASE}/cangjie/run`, {

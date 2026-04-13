@@ -8,6 +8,11 @@ import { workflowRegistry } from '@/lib/workflow-registry';
 
 const RUNS_DIR = resolve(process.cwd(), 'runs');
 
+function normalizeWorkDirPath(raw: string | null): string | null {
+  if (!raw) return null;
+  return raw.startsWith('/') ? raw : resolve(process.cwd(), raw);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -50,8 +55,9 @@ export async function POST(request: NextRequest) {
                 } catch { /* ignore */ }
               }
               // Clean working directory
-              if (state.workingDirectory && existsSync(state.workingDirectory)) {
-                await rm(state.workingDirectory, { recursive: true, force: true });
+              const workDir = normalizeWorkDirPath(state.workingDirectory || null);
+              if (workDir && existsSync(workDir)) {
+                await rm(workDir, { recursive: true, force: true });
               }
             }
           } catch { /* ignore */ }

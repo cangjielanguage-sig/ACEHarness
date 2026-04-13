@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, ReactNodeViewRenderer, useEditor, type Editor } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 import Placeholder from '@tiptap/extension-placeholder';
 import Typography from '@tiptap/extension-typography';
 import { ListKit } from '@tiptap/extension-list';
@@ -16,8 +18,11 @@ import { DragHandle } from '@tiptap/extension-drag-handle-react';
 import type { Node as PmNode } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 import { Markdown } from '@tiptap/markdown';
+import ReactFlow, { Background, Controls, MiniMap, MarkerType, Position, type Edge as RFEdge, type Node as RFNode } from 'reactflow';
+import 'reactflow/dist/style.css';
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
@@ -28,8 +33,11 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ImperativePanelHandle, ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useToast } from '@/components/ui/toast';
 import { createLowlight } from 'lowlight';
+import { WebsocketProvider } from 'y-websocket';
+import * as Y from 'yjs';
 import javascript from 'highlight.js/lib/languages/javascript';
 import typescript from 'highlight.js/lib/languages/typescript';
 import json from 'highlight.js/lib/languages/json';
@@ -44,7 +52,7 @@ import sql from 'highlight.js/lib/languages/sql';
 import cangjie from '@/lib/cangjie-highlight';
 import { NotebookCodeBlock, NotebookOutputBlock } from './NotebookBlocks';
 import { NotebookAskAISheet } from './NotebookAskAISheet';
-import { NotebookOutput, buildNotebookOutput, createNotebookCellId, createNotebookOutputId, normalizeNotebookLanguage } from '@/lib/notebook-markdown';
+import { NotebookOutput, buildNotebookOutput, createNotebookCellId, createNotebookOutputId, displayNotebookCellId, normalizeNotebookLanguage } from '@/lib/notebook-markdown';
 
 const lowlight = createLowlight();
 
@@ -70,6 +78,145 @@ lowlight.register('sql', sql);
 lowlight.register('cangjie', cangjie as any);
 lowlight.register('cj', cangjie as any);
 
+function parseNotebookCodeFenceInfo(rawInfo: string | null | undefined) {
+  const info = String(rawInfo || '').trim();
+  const idMatch = info.match(/(?:^|\s)id:([A-Za-z0-9_-]+)/);
+  const depsMatch = info.match(/(?:^|\s)deps:([A-Za-z0-9,_-]+)/);
+  const deps = depsMatch?.[1]
+    ? depsMatch[1].split(',').map((item) => item.trim()).filter(Boolean)
+    : [];
+  const lang = normalizeNotebookLanguage(
+    info
+      .replace(/\s*id:[^\s]+/g, '')
+      .replace(/\s*deps:[^\s]+/g, '')
+      .trim() || null
+  );
+  return { language: lang, cellId: idMatch?.[1] || '', dependsOn: deps };
+}
+
+function renderNotebookCodeFenceInfo(language: string, cellId: string, dependsOn: string[]) {
+  const normalizedLanguage = normalizeNotebookLanguage(language || null);
+  const idPart = cellId ? ` id:${cellId}` : '';
+  const depsPart = dependsOn.length > 0 ? ` deps:${dependsOn.join(',')}` : '';
+  return `${normalizedLanguage}${idPart}${depsPart}`.trim();
+}
+
+function buildOutputBackedStatus(editor: Editor): Record<string, boolean> {
+  const status: Record<string, boolean> = {};
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === 'notebookOutput') {
+      const cellId = String(node.attrs.cellId || '');
+      if (cellId) status[cellId] = true;
+    }
+    return true;
+  });
+  return status;
+}
+
+function findOrphanOutputRanges(editor: Editor): Array<{ from: number; to: number }> {
+  const codeCellIds = new Set<string>();
+  const outputs: Array<{ from: number; to: number; cellId: string }> = [];
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'notebookCodeBlock') {
+      const cellId = String(node.attrs.cellId || '');
+      if (cellId) codeCellIds.add(cellId);
+    } else if (node.type.name === 'notebookOutput') {
+      outputs.push({ from: pos, to: pos + node.nodeSize, cellId: String(node.attrs.cellId || '') });
+    }
+    return true;
+  });
+  return outputs.filter((item) => !item.cellId || !codeCellIds.has(item.cellId)).map((item) => ({ from: item.from, to: item.to }));
+}
+
+interface DependencyGraphCell {
+  cellId: string;
+  language: string;
+  preview: string;
+  dependsOn: string[];
+  pos: number;
+}
+
+function buildDependencyGraph(editor: Editor): { nodes: RFNode[]; edges: RFEdge[] } {
+  const cells: DependencyGraphCell[] = [];
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'notebookCodeBlock') {
+      const cellId = String(node.attrs.cellId || '');
+      if (!cellId) return true;
+      const dependsOn = Array.isArray(node.attrs.dependsOn) ? (node.attrs.dependsOn as string[]) : [];
+      const preview = (node.textContent || '').split('\n')[0]?.slice(0, 36) || '代码块';
+      const language = String(node.attrs.language || 'text');
+      cells.push({ cellId, language, preview, dependsOn, pos });
+    }
+    return true;
+  });
+  const byId = new Map(cells.map((item) => [item.cellId, item]));
+  const depthMemo = new Map<string, number>();
+  const visiting = new Set<string>();
+  const getDepth = (id: string): number => {
+    if (depthMemo.has(id)) return depthMemo.get(id)!;
+    if (visiting.has(id)) return 0;
+    visiting.add(id);
+    const current = byId.get(id);
+    if (!current) return 0;
+    const depth = current.dependsOn.length > 0
+      ? Math.max(...current.dependsOn.map((dep) => getDepth(dep))) + 1
+      : 0;
+    visiting.delete(id);
+    depthMemo.set(id, depth);
+    return depth;
+  };
+  const groups = new Map<number, DependencyGraphCell[]>();
+  cells.forEach((item) => {
+    const depth = getDepth(item.cellId);
+    const bucket = groups.get(depth) || [];
+    bucket.push(item);
+    groups.set(depth, bucket);
+  });
+
+  const nodeGapX = 300;
+  const nodeGapY = 140;
+  const maxColsPerRow = 4;
+  const nodes: RFNode[] = [];
+  const orderedGroups = [...groups.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([depth, items]) => [depth, [...items].sort((a, b) => a.pos - b.pos)] as const);
+  const maxRowCount = Math.max(1, ...orderedGroups.map(([, items]) => items.length));
+
+  orderedGroups.forEach(([depth, items]) => {
+      const columnInRow = depth % maxColsPerRow;
+      const rowIndex = Math.floor(depth / maxColsPerRow);
+      const startY = ((maxRowCount - items.length) * nodeGapY) / 2;
+      const rowYOffset = rowIndex * (maxRowCount * nodeGapY + 140);
+      items.forEach((item, index) => {
+        nodes.push({
+          id: item.cellId,
+          position: { x: columnInRow * nodeGapX, y: rowYOffset + startY + index * nodeGapY },
+          data: { label: `${displayNotebookCellId(item.cellId)} · ${item.preview}`, pos: item.pos, language: item.language },
+          sourcePosition: Position.Bottom,
+          targetPosition: Position.Top,
+          style: { borderRadius: 8, border: '1px solid hsl(var(--border))', background: 'hsl(var(--card))', color: 'hsl(var(--foreground))', fontSize: 12, minWidth: 220 },
+        });
+      });
+    });
+
+  const edges: RFEdge[] = [];
+  cells.forEach((item) => {
+    item.dependsOn.forEach((depId) => {
+      if (!byId.has(depId)) return;
+      edges.push({
+        id: `${depId}->${item.cellId}`,
+        source: depId,
+        target: item.cellId,
+        type: 'default',
+        style: { strokeWidth: 1.8 },
+        markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+      });
+    });
+  });
+
+  return { nodes, edges };
+}
+
 function updateOrInsertOutput(editor: Editor, pos: number, cellId: string, output: string) {
   const { state } = editor;
   const targetNode = state.doc.nodeAt(pos);
@@ -90,6 +237,14 @@ function updateOrInsertOutput(editor: Editor, pos: number, cellId: string, outpu
   editor.chain().focus().insertContentAt(pos + targetNode.nodeSize, outputNode).run();
 }
 
+const CARET_COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
+
+function pickCaretColor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return CARET_COLORS[hash % CARET_COLORS.length];
+}
+
 const NotebookCodeBlockExtension = CodeBlockLowlight.extend({
   name: 'notebookCodeBlock',
 
@@ -100,33 +255,41 @@ const NotebookCodeBlockExtension = CodeBlockLowlight.extend({
         default: null,
         rendered: false,
       },
+      dependsOn: {
+        default: [],
+        rendered: false,
+      },
     };
   },
 
   addNodeView() {
     return ReactNodeViewRenderer((props) => <NotebookCodeBlock {...props} onRunCell={async (payload) => {
-      const output = await (props.extension.options as any).onRunCell(payload);
-      if (output != null) {
-        updateOrInsertOutput(props.editor, payload.pos, payload.cellId, output);
+      const output = await (props.extension.options as any).onRunCell(payload, props.editor);
+      if (output?.output != null) {
+        updateOrInsertOutput(props.editor, payload.pos, payload.cellId, output.output);
       }
       return output;
-    }} />);
+    }} getCellRunStatus={(cellId: string) => (props.extension.options as any).getCellRunStatus?.(cellId, props.editor)} getAllCodeBlocks={() => (props.extension.options as any).getAllCodeBlocks?.(props.editor) || []} />);
   },
 
   parseMarkdown: (token, helpers) => {
     if (token.raw?.startsWith('```') === false && token.raw?.startsWith('~~~') === false && token.codeBlockStyle !== 'indented') {
       return [];
     }
+    const parsedInfo = parseNotebookCodeFenceInfo(token.lang || null);
     return helpers.createNode('notebookCodeBlock', {
-      language: normalizeNotebookLanguage(token.lang || null),
-      cellId: createNotebookCellId(),
+      language: parsedInfo.language,
+      cellId: parsedInfo.cellId || createNotebookCellId(),
+      dependsOn: parsedInfo.dependsOn,
     }, token.text ? [helpers.createTextNode(token.text)] : []);
   },
 
   renderMarkdown: (node, h) => {
-    const language = node.attrs?.language || '';
+    const language = node.attrs?.language || 'text';
+    const cellId = String(node.attrs?.cellId || '');
+    const dependsOn = Array.isArray(node.attrs?.dependsOn) ? node.attrs.dependsOn as string[] : [];
     const body = node.content ? h.renderChildren(node.content) : '';
-    return `\`\`\`${language}\n${body}\n\`\`\``;
+    return `\`\`\`${renderNotebookCodeFenceInfo(language, cellId, dependsOn)}\n${body}\n\`\`\``;
   },
 
   renderHTML({ node, HTMLAttributes }) {
@@ -142,7 +305,14 @@ interface RichNotebookEditorProps {
   content: string;
   filePath: string;
   onChange: (content: string) => void;
-  onRunCell: (payload: { pos: number; cellId: string; language: string; code: string }) => Promise<string | null>;
+  onRunCell: (payload: { pos: number; cellId: string; language: string; code: string }) => Promise<{ output: string | null; success: boolean }>;
+  scope?: 'personal' | 'global';
+  shareToken?: string;
+  permission?: 'read' | 'write';
+  tocOpen?: boolean;
+  onTocOpenChange?: (open: boolean) => void;
+  dependencyGraphOpen?: boolean;
+  onDependencyGraphOpenChange?: (open: boolean) => void;
 }
 
 interface SlashMenuItem {
@@ -201,64 +371,273 @@ function TableSizeMenuButton({ onInsert, dense = false }: { onInsert: (rows: num
   );
 }
 
-export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: RichNotebookEditorProps) {
+export function RichNotebookEditor({
+  content,
+  filePath,
+  onChange,
+  onRunCell,
+  scope = 'personal',
+  shareToken,
+  permission = 'write',
+  tocOpen = false,
+  onTocOpenChange = () => {},
+  dependencyGraphOpen = false,
+  onDependencyGraphOpenChange = () => {},
+}: RichNotebookEditorProps) {
   const { toast } = useToast();
   const changeSourceRef = useRef<'internal' | 'external'>('external');
-  const notebookExtensions = useMemo(() => [
-    StarterKit.configure({
-      codeBlock: false,
-      undoRedo: false,
-      bulletList: false,
-      orderedList: false,
-      listItem: false,
-    }),
-    Markdown,
-    UndoRedo.configure({ depth: 100, newGroupDelay: 500 }),
-    Placeholder.configure({ placeholder: '开始编写 Cangjie Notebook...' }),
-    Typography,
-    ListKit.configure({
-      taskItem: { nested: true },
-    }),
-    TableKit.configure({
-      table: {
-        resizable: false,
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [collabUser, setCollabUser] = useState<{ id: string; name: string; color: string }>({
+    id: '',
+    name: '',
+    color: pickCaretColor('current-user'),
+  });
+  const [collabSession, setCollabSession] = useState<{ doc: Y.Doc; provider: WebsocketProvider } | null>(null);
+  const [collabUsers, setCollabUsers] = useState<Array<{ clientId: number; name: string; color: string }>>([]);
+  const [cellRunState, setCellRunState] = useState<Record<string, 'idle' | 'running' | 'success' | 'failed'>>({});
+  const [outputBackedSuccess, setOutputBackedSuccess] = useState<Record<string, boolean>>({});
+  const cellRunStateRef = useRef<Record<string, 'idle' | 'running' | 'success' | 'failed'>>({});
+  const outputBackedSuccessRef = useRef<Record<string, boolean>>({});
+  // dependencyGraphOpen is controlled by parent menu
+  const [dependencyNodes, setDependencyNodes] = useState<RFNode[]>([]);
+  const [dependencyEdges, setDependencyEdges] = useState<RFEdge[]>([]);
+  const editorPanelRef = useRef<ImperativePanelHandle | null>(null);
+  const dependencyPanelRef = useRef<ImperativePanelHandle | null>(null);
+  const applyingPanelResizeRef = useRef(false);
+  const [dependencyPanelPercent, setDependencyPanelPercent] = useState(30);
+  const [tocItems, setTocItems] = useState<Array<{ id: string; text: string; level: number; pos: number }>>([]);
+  const [activeTocId, setActiveTocId] = useState<string | null>(null);
+  const setCellRunStateWithRef = useCallback((updater: (prev: Record<string, 'idle' | 'running' | 'success' | 'failed'>) => Record<string, 'idle' | 'running' | 'success' | 'failed'>) => {
+    setCellRunState((prev) => {
+      const next = updater(prev);
+      cellRunStateRef.current = next;
+      return next;
+    });
+  }, []);
+  const setOutputBackedSuccessWithRef = useCallback((next: Record<string, boolean>) => {
+    outputBackedSuccessRef.current = next;
+    setOutputBackedSuccess(next);
+  }, []);
+
+  useEffect(() => {
+    cellRunStateRef.current = cellRunState;
+  }, [cellRunState]);
+
+  useEffect(() => {
+    outputBackedSuccessRef.current = outputBackedSuccess;
+  }, [outputBackedSuccess]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const token = window.localStorage.getItem('auth-token') || null;
+    if (!token) {
+      setAuthToken(null);
+      return;
+    }
+    fetch('/api/auth/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data?.user?.id || !data?.user?.username) {
+          setAuthToken(null);
+          toast('error', '无法获取当前登录用户，协作已禁用');
+          return;
+        }
+        const id = String(data.user.id);
+        const name = String(data.user.username);
+        setCollabUser({ id, name, color: pickCaretColor(id) });
+        setAuthToken(token);
+      })
+      .catch(() => {
+        setAuthToken(null);
+        toast('error', '获取当前用户失败，协作已禁用');
+      });
+  }, [toast]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!authToken) {
+      setCollabSession(null);
+      return;
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const baseUrl = `${protocol}//${window.location.host}/api/notebook/collab`;
+    const doc = new Y.Doc();
+    const provider = new WebsocketProvider(baseUrl, 'room', doc, {
+      params: {
+        scope,
+        file: filePath,
+        shareToken: shareToken || '',
+        authToken,
       },
-    }),
-    TrailingNode.configure({ node: 'paragraph', notAfter: ['paragraph'] }),
-    NotebookCodeBlockExtension.configure({
+    });
+
+    setCollabSession({ doc, provider });
+    return () => {
+      provider.destroy();
+      doc.destroy();
+      setCollabSession((prev) => (prev?.provider === provider ? null : prev));
+      setCollabUsers([]);
+    };
+  }, [authToken, filePath, scope, shareToken]);
+
+  const resolveCellStatus = useCallback((cellId: string, currentEditor?: Editor): 'idle' | 'running' | 'success' | 'failed' => {
+    const state = cellRunStateRef.current[cellId];
+    if (state && state !== 'idle') return state;
+    if (outputBackedSuccessRef.current[cellId]) return 'success';
+    if (currentEditor) {
+      let found = false;
+      currentEditor.state.doc.descendants((node) => {
+        if (node.type.name === 'notebookOutput' && String(node.attrs.cellId || '') === cellId) {
+          found = true;
+          return false;
+        }
+        return true;
+      });
+      if (found) return 'success';
+    }
+    return 'idle';
+  }, []);
+
+  const refreshDependencyGraph = useCallback((targetEditor: Editor) => {
+    const { nodes, edges } = buildDependencyGraph(targetEditor);
+    setDependencyNodes(nodes);
+    setDependencyEdges(edges);
+  }, []);
+
+  const notebookExtensions = useMemo(() => {
+    const base: any[] = [
+      StarterKit.configure({
+        codeBlock: false,
+        undoRedo: false,
+        bulletList: false,
+        orderedList: false,
+        listItem: false,
+      }),
+      Markdown,
+      Placeholder.configure({ placeholder: '开始编写 Cangjie Notebook...' }),
+      Typography,
+      ListKit.configure({
+        taskItem: { nested: true },
+      }),
+      TableKit.configure({
+        table: {
+          resizable: false,
+        },
+      }),
+      TrailingNode.configure({ node: 'paragraph', notAfter: ['paragraph'] }),
+    ];
+    if (collabSession) {
+      base.push(
+        Collaboration.configure({
+          document: collabSession.doc,
+          field: 'default',
+          provider: collabSession.provider,
+        }),
+      );
+      if (collabUser.name) {
+        base.push(
+          CollaborationCaret.configure({
+            provider: collabSession.provider,
+            user: {
+              id: collabUser.id,
+              name: collabUser.name,
+              color: collabUser.color,
+            },
+            render: (user) => {
+              const caret = document.createElement('span');
+              caret.classList.add('notebook-collab-caret');
+              caret.style.borderColor = String(user.color || '#3b82f6');
+              const label = document.createElement('span');
+              label.classList.add('notebook-collab-caret-label');
+              label.style.background = String(user.color || '#3b82f6');
+              label.textContent = String(user.name || '用户');
+              caret.appendChild(label);
+              return caret;
+            },
+            selectionRender: (user) => ({
+              class: 'notebook-collab-selection',
+              style: `background-color: ${String(user.color || '#3b82f6')}33`,
+            }),
+          }),
+        );
+      }
+    } else {
+      base.push(UndoRedo.configure({ depth: 100, newGroupDelay: 500 }));
+    }
+    base.push(
+      NotebookCodeBlockExtension.configure({
       lowlight,
       enableTabIndentation: true,
       tabSize: 2,
       languageClassPrefix: 'language-',
       defaultLanguage: 'text',
       HTMLAttributes: { class: 'hljs' },
-      onRunCell,
+      onRunCell: async (payload: { pos: number; cellId: string; language: string; code: string; dependsOn?: string[] }, currentEditor?: Editor) => {
+        const dependsOn = payload.dependsOn || [];
+        const unmetDependencies = dependsOn.filter((id) => resolveCellStatus(id, currentEditor) !== 'success');
+        if (unmetDependencies.length > 0) {
+          toast('warning', `依赖未满足：${unmetDependencies.join(', ')}`);
+          return { output: null, success: false };
+        }
+        setCellRunStateWithRef((prev) => ({ ...prev, [payload.cellId]: 'running' }));
+        const result = await onRunCell({
+          pos: payload.pos,
+          cellId: payload.cellId,
+          language: payload.language,
+          code: payload.code,
+        });
+        setCellRunStateWithRef((prev) => ({ ...prev, [payload.cellId]: result.success ? 'success' : 'failed' }));
+        return result;
+      },
+      getCellRunStatus: (cellId: string) => {
+        return resolveCellStatus(cellId);
+      },
+      getAllCodeBlocks: (currentEditor: Editor) => {
+        const items: Array<{ cellId: string; language: string; preview: string }> = [];
+        currentEditor.state.doc.descendants((node) => {
+          if (node.type.name === 'notebookCodeBlock') {
+            const id = String(node.attrs.cellId || '');
+            if (!id) return true;
+            const language = String(node.attrs.language || 'text');
+            const preview = (node.textContent || '').split('\n')[0]?.slice(0, 36) || id.slice(0, 8);
+            items.push({ cellId: id, language, preview });
+          }
+          return true;
+        });
+        return items;
+      },
     } as any),
-    NotebookOutput.extend({
-      addNodeView() {
-        return ReactNodeViewRenderer(NotebookOutputBlock);
-      },
-    }),
-    Node.create({
-      name: 'notebookKeymap',
-      addKeyboardShortcuts() {
-        return {
-          Enter: ({ editor }) => {
-            const { $from } = editor.state.selection;
-            if ($from.parent.type.name === 'notebookOutput') {
+      NotebookOutput.extend({
+        addNodeView() {
+          return ReactNodeViewRenderer(NotebookOutputBlock);
+        },
+      }),
+      Node.create({
+        name: 'notebookKeymap',
+        addKeyboardShortcuts() {
+          return {
+            Enter: ({ editor }) => {
+              const { $from } = editor.state.selection;
+              if ($from.parent.type.name === 'notebookOutput') {
+                return false;
+              }
               return false;
-            }
-            return false;
-          },
-        };
-      },
-    }),
-  ], [filePath, onRunCell]);
+            },
+          };
+        },
+      }),
+    );
+    return base;
+  }, [cellRunState, collabSession, collabUser.color, collabUser.id, collabUser.name, filePath, onRunCell, outputBackedSuccess, resolveCellStatus, setCellRunStateWithRef, toast]);
 
   const editor = useEditor({
     immediatelyRender: false,
     extensions: notebookExtensions,
-    content,
+    editable: permission !== 'read',
+    content: collabSession ? undefined : content,
     contentType: 'markdown',
     editorProps: {
       attributes: {
@@ -266,37 +645,60 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
       },
     },
     onCreate: ({ editor }) => {
-      if (content) {
+      if (!collabSession && content) {
         editor.commands.setContent(content, { contentType: 'markdown', emitUpdate: false });
       }
+      setOutputBackedSuccessWithRef(buildOutputBackedStatus(editor));
+      refreshDependencyGraph(editor);
     },
     onUpdate: ({ editor }) => {
       changeSourceRef.current = 'internal';
-      onChange(editor.getMarkdown());
+      const orphanRanges = findOrphanOutputRanges(editor);
+      if (orphanRanges.length > 0) {
+        const tr = editor.state.tr;
+        [...orphanRanges].sort((a, b) => b.from - a.from).forEach((range) => tr.delete(range.from, range.to));
+        queueMicrotask(() => {
+          if (!editor.isDestroyed && tr.docChanged) editor.view.dispatch(tr);
+        });
+        return;
+      }
+      setOutputBackedSuccessWithRef(buildOutputBackedStatus(editor));
+      refreshDependencyGraph(editor);
+      const markdown = editor.getMarkdown();
+      onChange(markdown);
     },
-  });
+  }, [collabSession?.provider, collabSession?.doc, permission, filePath, scope, shareToken, collabUser.name, collabUser.color]);
 
   useEffect(() => {
     if (!editor) return;
+    if (collabSession) return;
     if (changeSourceRef.current === 'internal') {
       changeSourceRef.current = 'external';
       return;
     }
     if (content === editor.getMarkdown()) return;
     editor.commands.setContent(content, { contentType: 'markdown', emitUpdate: false });
-  }, [content, editor]);
+    setOutputBackedSuccessWithRef(buildOutputBackedStatus(editor));
+    refreshDependencyGraph(editor);
+  }, [collabSession, content, editor, refreshDependencyGraph, setOutputBackedSuccessWithRef]);
 
   useEffect(() => {
     if (!editor) return;
     const { tr, doc } = editor.state;
     let changed = false;
+    const seenCellIds = new Set<string>();
     doc.descendants((node, pos) => {
-      if (node.type.name === 'notebookCodeBlock' && !node.attrs.cellId) {
-        tr.setNodeMarkup(pos, undefined, {
-          ...node.attrs,
-          cellId: createNotebookCellId(),
-        });
-        changed = true;
+      if (node.type.name === 'notebookCodeBlock') {
+        const currentId = String(node.attrs.cellId || '');
+        if (!currentId || seenCellIds.has(currentId)) {
+          tr.setNodeMarkup(pos, undefined, {
+            ...node.attrs,
+            cellId: createNotebookCellId(),
+          });
+          changed = true;
+        } else {
+          seenCellIds.add(currentId);
+        }
       }
       return true;
     });
@@ -308,7 +710,162 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
         }
       });
     }
-  }, [editor, content]);
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor || !collabSession) return;
+    const { doc, provider } = collabSession;
+    const config = doc.getMap('config');
+    let seedTimer: ReturnType<typeof setTimeout> | null = null;
+    const trySeedInitialContent = () => {
+      if (!content) return;
+      if (seedTimer) clearTimeout(seedTimer);
+      seedTimer = setTimeout(() => {
+        if (editor.isDestroyed) return;
+        if (config.get('initialContentLoaded') === true) return;
+        if (doc.getXmlFragment('default').length > 0) {
+          doc.transact(() => {
+            config.set('initialContentLoaded', true);
+          }, 'seed-mark-loaded');
+          return;
+        }
+        const awarenessIds = Array.from(provider.awareness.getStates().keys());
+        const selfId = provider.awareness.clientID;
+        if (!awarenessIds.includes(selfId)) awarenessIds.push(selfId);
+        const leaderId = awarenessIds.length > 0 ? Math.min(...awarenessIds) : selfId;
+        if (selfId !== leaderId) return;
+        changeSourceRef.current = 'internal';
+        editor.commands.setContent(content, { contentType: 'markdown', emitUpdate: false });
+        doc.transact(() => {
+          config.set('initialContentLoaded', true);
+        }, 'seed-init');
+      }, 280);
+    };
+
+    const onProviderSync = (isSynced: boolean) => {
+      if (!isSynced) return;
+      trySeedInitialContent();
+      setOutputBackedSuccessWithRef(buildOutputBackedStatus(editor));
+      refreshDependencyGraph(editor);
+    };
+    const onAwarenessChange = () => {
+      trySeedInitialContent();
+    };
+    provider.on('sync', onProviderSync);
+    provider.awareness.on('change', onAwarenessChange);
+    return () => {
+      if (seedTimer) clearTimeout(seedTimer);
+      provider.off('sync', onProviderSync);
+      provider.awareness.off('change', onAwarenessChange);
+    };
+  }, [collabSession, content, editor, refreshDependencyGraph, setOutputBackedSuccessWithRef]);
+
+  useEffect(() => {
+    if (!collabSession || !collabUser.id || !collabUser.name) return;
+    const awareness = collabSession.provider.awareness;
+    awareness.setLocalStateField('user', {
+      id: collabUser.id,
+      name: collabUser.name,
+      color: collabUser.color,
+    });
+    const updateUsers = () => {
+      const users = Array.from(awareness.getStates().entries())
+        .map(([clientId, state]) => {
+          const user = (state as any)?.user;
+          if (!user?.name) return null;
+          return {
+            clientId,
+            name: String(user.name),
+            color: String(user.color || pickCaretColor(String(user.id || user.name))),
+          };
+        })
+        .filter((item): item is { clientId: number; name: string; color: string } => Boolean(item));
+      setCollabUsers(users);
+    };
+    awareness.on('change', updateUsers);
+    updateUsers();
+    return () => {
+      awareness.off('change', updateUsers);
+    };
+  }, [collabSession, collabUser.color, collabUser.id, collabUser.name]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = Number(window.localStorage.getItem('notebook-dependency-panel-percent') || '');
+    if (Number.isFinite(saved) && saved >= 18 && saved <= 75) {
+      setDependencyPanelPercent(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    let raf = 0;
+    let cancelled = false;
+    const applyLayout = () => {
+      if (cancelled) return;
+      const editorPanel = editorPanelRef.current;
+      const depPanel = dependencyPanelRef.current;
+      if (!editorPanel || !depPanel) {
+        raf = requestAnimationFrame(applyLayout);
+        return;
+      }
+      applyingPanelResizeRef.current = true;
+      if (dependencyGraphOpen) {
+        const dep = Math.max(18, Math.min(75, dependencyPanelPercent));
+        depPanel.expand();
+        editorPanel.resize(`${100 - dep}%`);
+        depPanel.resize(`${dep}%`);
+      } else {
+        editorPanel.resize('100%');
+        depPanel.collapse();
+      }
+      raf = requestAnimationFrame(() => {
+        applyingPanelResizeRef.current = false;
+      });
+    };
+    raf = requestAnimationFrame(applyLayout);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [dependencyGraphOpen, dependencyPanelPercent]);
+
+  // tocOpen is controlled by parent menu
+
+  useEffect(() => {
+    if (!editor) return;
+    const rebuildToc = () => {
+      const headings: Array<{ id: string; text: string; level: number; pos: number }> = [];
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === 'heading') {
+          const level = Number(node.attrs.level || 1);
+          const text = (node.textContent || '').trim() || `标题 ${headings.length + 1}`;
+          headings.push({
+            id: `heading-${pos}`,
+            text,
+            level,
+            pos,
+          });
+        }
+        return true;
+      });
+      setTocItems(headings);
+
+      const cursorPos = editor.state.selection.from;
+      let activeId: string | null = headings[0]?.id || null;
+      for (const heading of headings) {
+        if (cursorPos >= heading.pos) activeId = heading.id;
+      }
+      setActiveTocId(activeId);
+    };
+
+    editor.on('update', rebuildToc);
+    editor.on('selectionUpdate', rebuildToc);
+    rebuildToc();
+    return () => {
+      editor.off('update', rebuildToc);
+      editor.off('selectionUpdate', rebuildToc);
+    };
+  }, [editor]);
 
   const [currentNode, setCurrentNode] = useState<PmNode | null>(null);
   const [currentNodePos, setCurrentNodePos] = useState(-1);
@@ -340,12 +897,25 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
     return { from, to };
   }, [editor, currentNode, currentNodePos]);
 
+  const getRangeWithLinkedOutput = useCallback((range: { from: number; to: number }) => {
+    if (!editor) return range;
+    const node = editor.state.doc.nodeAt(range.from);
+    if (!node || node.type.name !== 'notebookCodeBlock') return range;
+    const cellId = String(node.attrs.cellId || '');
+    const nextNode = editor.state.doc.nodeAt(range.from + node.nodeSize);
+    if (cellId && nextNode?.type.name === 'notebookOutput' && String(nextNode.attrs.cellId || '') === cellId) {
+      return { from: range.from, to: range.from + node.nodeSize + nextNode.nodeSize };
+    }
+    return range;
+  }, [editor]);
+
   const handleDeleteNode = useCallback(() => {
     const range = getCurrentNodeRange();
     if (!range || !editor) return;
-    editor.chain().focus().deleteRange(range).run();
+    const deleteRange = getRangeWithLinkedOutput(range);
+    editor.chain().focus().deleteRange(deleteRange).run();
     setMenuOpen(false);
-  }, [editor, getCurrentNodeRange]);
+  }, [editor, getCurrentNodeRange, getRangeWithLinkedOutput]);
 
   const setBlockSelection = useCallback((from: number, to: number) => {
     if (!editor) return;
@@ -411,8 +981,18 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
   const handleDuplicateNode = useCallback(() => {
     const range = getCurrentNodeRange();
     if (!range || !editor) return;
-    const nodeJson = editor.state.doc.nodeAt(range.from)?.toJSON();
+    const node = editor.state.doc.nodeAt(range.from);
+    const nodeJson = node?.toJSON();
     if (!nodeJson) return;
+    if (node?.type.name === 'notebookCodeBlock') {
+      const oldId = String((nodeJson.attrs as any)?.cellId || '');
+      const oldDependsOn = Array.isArray((nodeJson.attrs as any)?.dependsOn) ? ((nodeJson.attrs as any).dependsOn as string[]) : [];
+      (nodeJson.attrs as any) = {
+        ...(nodeJson.attrs || {}),
+        cellId: createNotebookCellId(),
+        dependsOn: oldDependsOn.filter((id) => id && id !== oldId),
+      };
+    }
     editor.chain().focus().insertContentAt(range.to, nodeJson).run();
     setMenuOpen(false);
   }, [editor, getCurrentNodeRange]);
@@ -426,6 +1006,17 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
     setAskAIOpen(true);
     setMenuOpen(false);
   }, [editor, getCurrentNodeRange]);
+
+  const handleAskAIFromSelection = useCallback(() => {
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    const contextText = editor.state.doc.textBetween(from, to, '\n\n').trim()
+      || editor.state.doc.textBetween(Math.max(0, from - 200), Math.min(editor.state.doc.content.size, to + 200), '\n').trim();
+    setAskAIContext(contextText || '');
+    setAskAITask(null);
+    setAskAIInsertRange({ from, to });
+    setAskAIOpen(true);
+  }, [editor]);
 
   const getCurrentNodeText = useCallback(() => {
     const range = getCurrentNodeRange();
@@ -588,6 +1179,19 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
       </DropdownMenuContent>
     </DropdownMenu>
   );
+
+  const handleJumpToHeading = useCallback((pos: number, id: string) => {
+    if (!editor) return;
+    editor.chain().focus().setTextSelection(Math.max(1, pos + 1)).scrollIntoView().run();
+    setActiveTocId(id);
+  }, [editor]);
+
+  const handleJumpToCodeBlock = useCallback((pos: number) => {
+    if (!editor) return;
+    editor.chain().focus().setTextSelection(Math.max(1, pos + 1)).scrollIntoView().run();
+  }, [editor]);
+
+  const toolbarDisabled = !showContextToolbar;
 
   const slashMenuItems = useMemo<SlashMenuItem[]>(() => {
     const openAIFromSlash = (targetEditor: Editor) => {
@@ -961,6 +1565,7 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
   useEffect(() => {
     if (!editor) return;
     const handleKeydown = (event: KeyboardEvent) => {
+      if (!editor.isFocused) return;
       if (!slashMenuOpenRef.current) return;
       const availableItems = filteredSlashItems;
       if (availableItems.length === 0) return;
@@ -980,11 +1585,9 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
         closeSlashMenu();
       }
     };
-
-    const dom = editor.view.dom;
-    dom.addEventListener('keydown', handleKeydown, true);
+    window.addEventListener('keydown', handleKeydown, true);
     return () => {
-      dom.removeEventListener('keydown', handleKeydown, true);
+      window.removeEventListener('keydown', handleKeydown, true);
     };
   }, [applySlashItem, closeSlashMenu, editor, filteredSlashItems]);
 
@@ -993,9 +1596,11 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
   }
 
   return (
-    <div className="notebook-rich-editor h-full [&_.tiptap_p]:my-3 [&_.tiptap_code]:font-mono">
-      <div className={`sticky top-0 z-20 flex min-h-10 items-center gap-1 border-b bg-background/95 px-3 py-2 backdrop-blur ${showContextToolbar ? '' : 'pointer-events-none opacity-45'}`}>
-          {!isCodeContext && !isTableContext && !isImageContext && (
+    <div className="notebook-rich-editor h-full min-w-0 flex [&_.tiptap_p]:my-3 [&_.tiptap_code]:font-mono">
+      <div className="relative min-w-0 flex h-full flex-1 flex-col">
+      <div className="sticky top-0 z-20 flex min-h-10 items-center gap-1 border-b bg-background/95 px-3 py-2 backdrop-blur">
+          <div className={`flex items-center gap-1 ${toolbarDisabled ? 'pointer-events-none opacity-45' : ''}`}>
+          {!isCodeContext && !isImageContext && (
             <>
               <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('bold') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleBold().run()} title="加粗">
                 <span className="material-symbols-outlined text-base">format_bold</span>
@@ -1023,17 +1628,23 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
           )}
           {isTableContext && (
             <>
-              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addRowAfter().run()} title="新增行">
-                <span className="material-symbols-outlined text-base">table_rows</span>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addRowBefore().run()} title="上方插入">
+                <span className="material-symbols-outlined text-base">add_row_above</span>
               </button>
-              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addColumnAfter().run()} title="新增列">
-                <span className="material-symbols-outlined text-base">view_column</span>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addRowAfter().run()} title="下方插入">
+                <span className="material-symbols-outlined text-base">add_row_below</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addColumnBefore().run()} title="左侧插入">
+                <span className="material-symbols-outlined text-base">add_column_left</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addColumnAfter().run()} title="右侧插入">
+                <span className="material-symbols-outlined text-base">add_column_right</span>
               </button>
               <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteRow().run()} title="删除行">
-                <span className="material-symbols-outlined text-base">delete</span>
+                <span className="material-symbols-outlined text-base" style={{ color: '#ef4444' }}>table_rows</span>
               </button>
               <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteColumn().run()} title="删除列">
-                <span className="material-symbols-outlined text-base">delete_sweep</span>
+                <span className="material-symbols-outlined text-base" style={{ color: '#ef4444' }}>view_column_2</span>
               </button>
               <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteTable().run()} title="删除表格">
                 <span className="material-symbols-outlined text-base">table_view</span>
@@ -1045,8 +1656,40 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
               <span className="material-symbols-outlined text-base">delete</span>
             </button>
           )}
-          <TableSizeMenuButton dense onInsert={insertTableWithSize} />
+          {!isCodeContext && <TableSizeMenuButton dense onInsert={insertTableWithSize} />}
           {renderAiActionMenu(true)}
+          </div>
+          <div className="ml-auto flex items-center gap-1">
+            {collabUsers.length > 0 && (
+              <div className="mr-2 hidden items-center gap-1 md:flex">
+                {collabUsers.slice(0, 4).map((user) => (
+                  <span key={user.clientId} className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: user.color }} />
+                    {user.name}
+                  </span>
+                ))}
+                {collabUsers.length > 4 && (
+                  <span className="text-[11px] text-muted-foreground">+{collabUsers.length - 4}</span>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              className={`rounded px-2 py-1 text-xs hover:bg-accent ${dependencyGraphOpen ? 'bg-accent/60' : ''}`}
+              onClick={() => onDependencyGraphOpenChange(!dependencyGraphOpen)}
+              title={dependencyGraphOpen ? '隐藏依赖图' : '显示依赖图'}
+            >
+              <span className="material-symbols-outlined text-base">account_tree</span>
+            </button>
+            <button
+              type="button"
+              className={`rounded px-2 py-1 text-xs hover:bg-accent ${tocOpen ? 'bg-accent/60' : ''}`}
+              onClick={() => onTocOpenChange(!tocOpen)}
+              title={tocOpen ? '隐藏目录' : '显示目录'}
+            >
+              <span className="material-symbols-outlined text-base">toc</span>
+            </button>
+          </div>
       </div>
       <BubbleMenu
         editor={editor}
@@ -1061,7 +1704,7 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
         }}
       >
         <div className="flex items-center gap-1 rounded-md border bg-popover p-1 shadow-lg">
-          {!isCodeContext && !isTableContext && !isImageContext && (
+          {!isCodeContext && !isImageContext && (
             <>
               <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('bold') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleBold().run()} title="加粗">
                 <span className="material-symbols-outlined text-base">format_bold</span>
@@ -1081,11 +1724,23 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
           )}
           {isTableContext && (
             <>
-              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addRowAfter().run()} title="新增行">
-                <span className="material-symbols-outlined text-base">table_rows</span>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addRowBefore().run()} title="上方插入">
+                <span className="material-symbols-outlined text-base">add_row_above</span>
               </button>
-              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addColumnAfter().run()} title="新增列">
-                <span className="material-symbols-outlined text-base">view_column</span>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addRowAfter().run()} title="下方插入">
+                <span className="material-symbols-outlined text-base">add_row_below</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addColumnBefore().run()} title="左侧插入">
+                <span className="material-symbols-outlined text-base">add_column_left</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addColumnAfter().run()} title="右侧插入">
+                <span className="material-symbols-outlined text-base">add_column_right</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteRow().run()} title="删除行">
+                <span className="material-symbols-outlined text-base" style={{ color: '#ef4444' }}>table_rows</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteColumn().run()} title="删除列">
+                <span className="material-symbols-outlined text-base" style={{ color: '#ef4444' }}>view_column_2</span>
               </button>
               <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteTable().run()} title="删除表格">
                 <span className="material-symbols-outlined text-base">table_view</span>
@@ -1097,8 +1752,10 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
               <span className="material-symbols-outlined text-base">delete</span>
             </button>
           )}
-          <TableSizeMenuButton dense onInsert={insertTableWithSize} />
-          {renderAiActionMenu(true)}
+          {!isCodeContext && <TableSizeMenuButton dense onInsert={insertTableWithSize} />}
+          <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={handleAskAIFromSelection} title="问 AI">
+            <span className="material-symbols-outlined text-base">smart_toy</span>
+          </button>
         </div>
       </BubbleMenu>
       <DragHandle editor={editor} onNodeChange={handleNodeChange}>
@@ -1256,7 +1913,64 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
           </DropdownMenuContent>
         </DropdownMenu>
       </DragHandle>
-      <EditorContent editor={editor} className="h-full" />
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+          <ResizablePanel panelRef={editorPanelRef} defaultSize={dependencyGraphOpen ? '70%' : '100%'} minSize="25%">
+            <EditorContent editor={editor} className="h-full min-h-0 overflow-y-auto" />
+          </ResizablePanel>
+          <ResizableHandle className={`${dependencyGraphOpen ? '' : 'hidden'}`} />
+          <ResizablePanel
+            panelRef={dependencyPanelRef}
+            defaultSize={dependencyGraphOpen ? '30%' : '0%'}
+            minSize="18%"
+            collapsible
+            collapsedSize={0}
+            onResize={(size) => {
+              if (applyingPanelResizeRef.current) return;
+              const numeric = typeof size === 'number'
+                ? size
+                : typeof size === 'object' && size && 'asPercentage' in size
+                  ? Number((size as any).asPercentage)
+                  : Number(String(size).replace('%', ''));
+              if (Number.isFinite(numeric) && numeric >= 18 && Math.abs(numeric - dependencyPanelPercent) >= 0.5) {
+                setDependencyPanelPercent(numeric);
+                if (typeof window !== 'undefined') {
+                  window.localStorage.setItem('notebook-dependency-panel-percent', String(numeric));
+                }
+              }
+            }}
+          >
+            <div className={`h-full overflow-hidden border-t bg-background ${dependencyGraphOpen ? '' : 'hidden'}`}>
+              <div className="flex items-center justify-between border-b px-3 py-2">
+                <div className="text-xs font-medium text-muted-foreground">代码块依赖图</div>
+                <button type="button" className="rounded px-1.5 py-1 text-xs hover:bg-accent" onClick={() => onDependencyGraphOpenChange(false)} title="关闭依赖图">
+                  <span className="material-symbols-outlined text-base">close</span>
+                </button>
+              </div>
+              <div className="h-[calc(100%-2.25rem)] overflow-hidden">
+                {dependencyNodes.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">暂无代码块依赖关系</div>
+                ) : (
+                  <ReactFlow
+                    nodes={dependencyNodes}
+                    edges={dependencyEdges}
+                    fitView
+                    fitViewOptions={{ padding: 0.2 }}
+                    nodesDraggable={false}
+                    nodesConnectable={false}
+                    elementsSelectable
+                    onNodeClick={(_, node) => handleJumpToCodeBlock(Number((node.data as any)?.pos || 0))}
+                  >
+                    <MiniMap pannable zoomable />
+                    <Controls showInteractive={false} />
+                    <Background gap={20} color="hsl(var(--border))" />
+                  </ReactFlow>
+                )}
+              </div>
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
       {slashMenuOpen && slashPos && (
         <div
           className="fixed z-[85] w-[320px] max-h-[320px] overflow-auto rounded-md border bg-popover p-1 shadow-xl"
@@ -1302,6 +2016,35 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
         autoTask={askAITask}
         onInsertResult={insertAiResultBack}
       />
+      </div>
+      {tocOpen && (
+        <aside className="h-full w-64 shrink-0 border-l bg-muted/20">
+          <div className="flex h-10 items-center justify-between border-b px-3">
+            <span className="text-sm font-medium">目录</span>
+            <button type="button" className="rounded p-1 hover:bg-accent" onClick={() => onTocOpenChange(false)} title="关闭目录">
+              <span className="material-symbols-outlined text-base">close</span>
+            </button>
+          </div>
+          <div className="h-[calc(100%-2.5rem)] overflow-y-auto px-2 py-2">
+            {tocItems.length === 0 ? (
+              <div className="px-2 py-2 text-xs text-muted-foreground">暂无标题，使用 H1/H2/H3 可生成目录</div>
+            ) : (
+              tocItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`mb-1 block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-accent ${activeTocId === item.id ? 'bg-accent text-accent-foreground' : ''}`}
+                  style={{ paddingLeft: `${8 + (item.level - 1) * 12}px` }}
+                  onClick={() => handleJumpToHeading(item.pos, item.id)}
+                  title={item.text}
+                >
+                  {item.text}
+                </button>
+              ))
+            )}
+          </div>
+        </aside>
+      )}
       <style jsx global>{`
         .hljs { display: block; color: #e5e7eb; background: transparent; }
         .ProseMirror .hljs { white-space: pre; }
@@ -1333,6 +2076,26 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
         .hljs-subst { color: #56b6c2; }
         .hljs-function .hljs-title,
         .hljs-title.function_ { color: #61afef; }
+        .notebook-collab-selection { border-radius: 2px; }
+        .notebook-collab-caret {
+          position: relative;
+          border-left: 2px solid;
+          margin-left: -1px;
+          margin-right: -1px;
+        }
+        .notebook-collab-caret-label {
+          position: absolute;
+          top: -1.2em;
+          left: -1px;
+          padding: 1px 6px;
+          border-radius: 999px;
+          color: #fff;
+          font-size: 10px;
+          line-height: 1.2;
+          white-space: nowrap;
+          user-select: none;
+          pointer-events: none;
+        }
       `}</style>
     </div>
   );

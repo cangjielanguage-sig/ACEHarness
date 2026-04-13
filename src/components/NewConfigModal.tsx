@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm, type FieldErrors } from 'react-hook-form';
 import { newConfigFormSchema, type NewConfigForm } from '@/lib/schemas';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -63,18 +62,36 @@ export default function NewConfigModal({
   const {
     register,
     handleSubmit,
+    setError,
+    clearErrors,
+    setValue,
     formState: { errors, isSubmitting },
     reset,
     watch,
-    trigger,
     getValues,
   } = useForm<NewConfigForm>({
-    resolver: zodResolver(newConfigFormSchema),
     defaultValues: {
       mode: 'phase-based',
       workingDirectory: '',
     },
   });
+
+  const applySchemaIssues = useCallback((issues: Array<{ path?: (string | number)[]; message?: string }>) => {
+    const supported = ['filename', 'workflowName', 'workingDirectory', 'description', 'requirements', 'mode'];
+    clearErrors();
+    const messages: string[] = [];
+    for (const issue of issues) {
+      const field = issue?.path?.[0];
+      const message = issue?.message || '输入不合法';
+      if (typeof field === 'string' && supported.includes(field)) {
+        setError(field as keyof NewConfigForm, { type: 'validate', message });
+      }
+      messages.push(message);
+    }
+    if (messages.length > 0) {
+      toast('error', [...new Set(messages)].join('\n'));
+    }
+  }, [clearErrors, setError, toast]);
 
   // Auto-scroll streaming content
   useEffect(() => {
@@ -288,8 +305,19 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
 
   // Handle "下一步" for AI mode: validate step 1 fields, then go to step 2
   const handleNextStep = async () => {
-    const valid = await trigger(['filename', 'workflowName', 'workingDirectory']);
-    if (!valid) return;
+    const draft = getValues();
+    const validation = newConfigFormSchema.safeParse({
+      filename: draft.filename,
+      workflowName: draft.workflowName,
+      workingDirectory: draft.workingDirectory,
+      description: draft.description,
+      requirements: draft.requirements,
+      mode: workflowMode,
+    });
+    if (!validation.success) {
+      applySchemaIssues(validation.error.issues as any);
+      return;
+    }
 
     const reqs = getValues('requirements') || '';
     if (reqs.trim().length < 5) {
@@ -326,6 +354,11 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
   const onSubmit = async (data: NewConfigForm) => {
     // AI-guided mode uses the two-step flow, not direct submit
     if (workflowMode === 'ai-guided') return;
+    const validation = newConfigFormSchema.safeParse({ ...data, mode: workflowMode });
+    if (!validation.success) {
+      applySchemaIssues(validation.error.issues as any);
+      return;
+    }
 
     try {
       const response = await fetch('/api/configs/create', {
@@ -335,8 +368,19 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
       });
       const result = await response.json();
       if (!response.ok) {
-        if (result.details) {
-          toast('error', '表单验证失败:\n' + result.details.map((e: any) => e.message).join('\n'));
+        const details = Array.isArray(result.details)
+          ? result.details
+          : Array.isArray(result.details?.issues)
+            ? result.details.issues
+            : [];
+        if (details.length > 0) {
+          for (const issue of details) {
+            const field = issue?.path?.[0];
+            if (typeof field === 'string' && ['filename', 'workflowName', 'workingDirectory', 'description', 'requirements', 'mode'].includes(field)) {
+              setError(field as keyof NewConfigForm, { type: 'server', message: issue.message });
+            }
+          }
+          toast('error', '表单验证失败:\n' + details.map((e: any) => e.message).join('\n'));
         } else {
           toast('error', result.message || result.error);
         }
@@ -349,6 +393,21 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
     } catch (error: any) {
       toast('error', '创建失败: ' + error.message);
     }
+  };
+
+  const onInvalid = (formErrors: FieldErrors<NewConfigForm>) => {
+    const messages = [
+      formErrors.filename?.message,
+      formErrors.workflowName?.message,
+      formErrors.workingDirectory?.message,
+      formErrors.description?.message,
+      formErrors.requirements?.message,
+    ].filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+    if (messages.length > 0) {
+      toast('error', messages.join('\n'));
+      return;
+    }
+    toast('error', '请先修正表单中的错误项');
   };
 
   const handleClose = () => {
@@ -377,6 +436,22 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
     reset();
     onSuccess(filename);
     onClose();
+  };
+
+  const normalizeFilenameField = () => {
+    const raw = (getValues('filename') || '').trim();
+    if (!raw) return;
+
+    let normalized = raw;
+    if (/\.yml$/i.test(normalized)) {
+      normalized = normalized.replace(/\.yml$/i, '.yaml');
+    } else if (!/\.yaml$/i.test(normalized)) {
+      normalized = `${normalized}.yaml`;
+    }
+
+    if (normalized !== getValues('filename')) {
+      setValue('filename', normalized, { shouldDirty: true, shouldValidate: true });
+    }
   };
 
   // PLACEHOLDER_RENDER_AI_VIEW
@@ -571,7 +646,7 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
             <span className="material-symbols-outlined">close</span>
           </Button>
         </div>
-        <form id="new-config-form" onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-auto px-6 space-y-6">
+        <form id="new-config-form" onSubmit={handleSubmit(onSubmit, onInvalid)} className="flex-1 overflow-auto px-6 space-y-6">
           {/* 工作流模式选择 */}
           <div className="space-y-2">
             <Label className="text-base font-semibold">
@@ -645,7 +720,9 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
             <Input
               id="filename"
               placeholder="my-workflow.yaml"
-              {...register('filename')}
+              {...register('filename', {
+                onBlur: normalizeFilenameField,
+              })}
               className={errors.filename ? 'border-destructive' : ''}
             />
             {errors.filename && (

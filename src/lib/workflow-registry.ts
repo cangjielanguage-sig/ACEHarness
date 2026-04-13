@@ -22,6 +22,10 @@ interface ManagerEntry {
 class WorkflowRegistry extends EventEmitter {
   private managers = new Map<string, ManagerEntry>();
 
+  private isActiveStatus(status: string): boolean {
+    return status === 'running' || status === 'preparing';
+  }
+
   /** All event types that workflow managers emit */
   private static PHASE_EVENTS = [
     'status', 'phase', 'step', 'result', 'checkpoint', 'agents',
@@ -76,7 +80,7 @@ class WorkflowRegistry extends EventEmitter {
   getRunningManagers(): { configFile: string; manager: AnyWorkflowManager; isStateMachine: boolean }[] {
     const result: { configFile: string; manager: AnyWorkflowManager; isStateMachine: boolean }[] = [];
     for (const [cf, entry] of this.managers) {
-      if (entry.manager.getStatus().status === 'running') {
+      if (this.isActiveStatus(entry.manager.getStatus().status)) {
         result.push({ configFile: cf, manager: entry.manager, isStateMachine: entry.isStateMachine });
       }
     }
@@ -86,7 +90,7 @@ class WorkflowRegistry extends EventEmitter {
   getRunningManager(configFile?: string): AnyWorkflowManager | null {
     if (configFile) {
       const entry = this.managers.get(configFile);
-      if (entry && entry.manager.getStatus().status === 'running') return entry.manager;
+      if (entry && this.isActiveStatus(entry.manager.getStatus().status)) return entry.manager;
       return null;
     }
     const running = this.getRunningManagers();
@@ -100,7 +104,7 @@ class WorkflowRegistry extends EventEmitter {
   cleanup() {
     for (const [cf, entry] of this.managers) {
       const s = entry.manager.getStatus();
-      if (s.status !== 'running' && Date.now() - entry.createdAt > 3600_000) {
+      if (!this.isActiveStatus(s.status) && Date.now() - entry.createdAt > 3600_000) {
         entry.manager.removeAllListeners();
         this.managers.delete(cf);
       }

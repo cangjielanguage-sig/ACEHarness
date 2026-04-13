@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { workspaceApi, type TreeNode, type WorkspaceMode } from "@/lib/api"
+import { workspaceApi, type NotebookScope, type TreeNode, type WorkspaceMode } from "@/lib/api"
 import { X, ChevronLeft, ChevronRight } from "lucide-react"
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,9 @@ interface WorkspaceEditorProps {
   workspacePath: string
   mode?: WorkspaceMode
   title?: string
+  notebookScope?: NotebookScope
+  notebookShareToken?: string
+  notebookPermission?: 'read' | 'write'
 }
 
 const PREVIEW_EXTENSIONS = new Set([
@@ -50,6 +53,9 @@ export function WorkspaceEditor({
   workspacePath,
   mode = "default",
   title,
+  notebookScope = 'personal',
+  notebookShareToken,
+  notebookPermission = 'write',
 }: WorkspaceEditorProps) {
   const [tree, setTree] = React.useState<TreeNode[]>([])
   const [treeLoading, setTreeLoading] = React.useState(false)
@@ -68,6 +74,7 @@ export function WorkspaceEditor({
   const searchParams = useSearchParams()
   const fileParamKey = mode === "notebook" ? "notebookFile" : "workspaceFile"
   const panelParamKey = mode === "notebook" ? "notebook" : "workspace"
+  const scopeParamKey = mode === "notebook" ? "notebookScope" : "workspaceScope"
 
   const toggleTree = React.useCallback(() => {
     const panel = treePanelRef.current
@@ -84,25 +91,27 @@ export function WorkspaceEditor({
     if (filePath) {
       params.set(fileParamKey, filePath)
       params.set(panelParamKey, "1")
+      if (mode === 'notebook') params.set(scopeParamKey, notebookScope)
     } else {
       params.delete(fileParamKey)
       params.delete(panelParamKey)
+      if (mode === 'notebook') params.delete(scopeParamKey)
     }
     const query = params.toString()
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
-  }, [fileParamKey, panelParamKey, pathname, router, searchParams])
+  }, [fileParamKey, mode, notebookScope, panelParamKey, pathname, router, scopeParamKey, searchParams])
 
   React.useEffect(() => {
     if (!open || !workspacePath) return
     setTreeLoading(true)
     const loadTree = mode === "notebook"
-      ? workspaceApi.getNotebookTree()
+      ? workspaceApi.getNotebookTree(2, { scope: notebookScope, shareToken: notebookShareToken })
       : workspaceApi.getTree(workspacePath)
     loadTree
       .then((data) => setTree(data.tree))
       .catch(() => setTree([]))
       .finally(() => setTreeLoading(false))
-  }, [open, workspacePath, mode])
+  }, [mode, notebookScope, notebookShareToken, open, workspacePath])
 
   React.useEffect(() => {
     if (!open) return
@@ -121,7 +130,7 @@ export function WorkspaceEditor({
 
     if (isPreviewFile(selectedFile)) {
       const loadBlob = mode === "notebook"
-        ? workspaceApi.getNotebookFileBlob(selectedFile)
+        ? workspaceApi.getNotebookFileBlob(selectedFile, { scope: notebookScope, shareToken: notebookShareToken })
         : workspaceApi.getFileBlob(workspacePath, selectedFile)
       loadBlob
         .then((blob) => {
@@ -135,7 +144,7 @@ export function WorkspaceEditor({
     }
 
     const loadFile = mode === "notebook"
-      ? workspaceApi.getNotebookFile(selectedFile)
+      ? workspaceApi.getNotebookFile(selectedFile, { scope: notebookScope, shareToken: notebookShareToken })
       : workspaceApi.getFile(workspacePath, selectedFile)
     loadFile
       .then((data) => {
@@ -149,7 +158,7 @@ export function WorkspaceEditor({
         }
       })
       .finally(() => setFileLoading(false))
-  }, [selectedFile, workspacePath, mode])
+  }, [mode, notebookScope, notebookShareToken, selectedFile, workspacePath])
 
   React.useEffect(() => {
     if (!open) return
@@ -167,12 +176,15 @@ export function WorkspaceEditor({
     async (content: string) => {
       if (!selectedFile) return
       if (mode === "notebook") {
-        await workspaceApi.saveNotebookFile(selectedFile, content)
+        if (notebookPermission === 'read') {
+          throw new Error('当前分享链接为只读权限，无法保存')
+        }
+        await workspaceApi.saveNotebookFile(selectedFile, content, { scope: notebookScope, shareToken: notebookShareToken })
         return
       }
       await workspaceApi.saveFile(workspacePath, selectedFile, content)
     },
-    [workspacePath, selectedFile, mode]
+    [mode, notebookPermission, notebookScope, notebookShareToken, selectedFile, workspacePath]
   )
 
   const handleSelectFile = React.useCallback((filePath: string) => {
@@ -180,17 +192,29 @@ export function WorkspaceEditor({
     updateUrlFileState(filePath)
   }, [updateUrlFileState])
 
+  const handleDeletedPath = React.useCallback((deletedPath: string) => {
+    if (!selectedFile) return
+    const affected = selectedFile === deletedPath || selectedFile.startsWith(`${deletedPath}/`)
+    if (!affected) return
+    setSelectedFile(null)
+    setFileContent(null)
+    setFileSize(null)
+    setOversize(false)
+    setFileBlob(null)
+    updateUrlFileState(null)
+  }, [selectedFile, updateUrlFileState])
+
   const handleTreeRefresh = React.useCallback(() => {
     if (!workspacePath) return
     setTreeLoading(true)
     const loadTree = mode === "notebook"
-      ? workspaceApi.getNotebookTree()
+      ? workspaceApi.getNotebookTree(2, { scope: notebookScope, shareToken: notebookShareToken })
       : workspaceApi.getTree(workspacePath)
     loadTree
       .then((data) => setTree(data.tree))
       .catch(() => setTree([]))
       .finally(() => setTreeLoading(false))
-  }, [workspacePath, mode])
+  }, [mode, notebookScope, notebookShareToken, workspacePath])
 
   const handleOpenChange = React.useCallback(
     (newOpen: boolean) => {
@@ -246,11 +270,15 @@ export function WorkspaceEditor({
                   tree={tree}
                   selectedFile={selectedFile}
                   onSelectFile={handleSelectFile}
+                  onDeletedPath={handleDeletedPath}
                   loading={treeLoading}
                   clipboard={clipboard}
                   setClipboard={setClipboard}
                   onRefresh={handleTreeRefresh}
                   mode={mode}
+                  notebookScope={notebookScope}
+                  notebookShareToken={notebookShareToken}
+                  notebookPermission={notebookPermission}
                 />
               </ResizablePanel>
               <ResizableHandle
@@ -273,6 +301,9 @@ export function WorkspaceEditor({
                   fileBlob={fileBlob}
                   fileType={selectedFile ? getFileType(selectedFile) : undefined}
                   mode={mode}
+                  notebookScope={notebookScope}
+                  notebookShareToken={notebookShareToken}
+                  notebookPermission={notebookPermission}
                 />
               </ResizablePanel>
             </ResizablePanelGroup>

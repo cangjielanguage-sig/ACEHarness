@@ -2,30 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 import { requireAuth } from '@/lib/auth-middleware';
+import { normalizeNotebookScope, ensureNotebookRoot, safeResolve } from '@/lib/notebook-manager';
+import { getNotebookShare } from '@/lib/notebook-share-store';
 
 interface TreeNode {
   name: string;
   path: string;
   type: 'file' | 'directory';
   children?: TreeNode[];
-}
-
-const NOTEBOOK_ROOT_DIRNAME = '.cangjie-notbook';
-
-function getNotebookRoot(personalDir: string) {
-  return path.resolve(personalDir, NOTEBOOK_ROOT_DIRNAME);
-}
-
-function safeSubPath(root: string, subPath: string): string | null {
-  const resolved = path.resolve(root, subPath || '.');
-  if (!resolved.startsWith(root + path.sep) && resolved !== root) return null;
-  return resolved;
-}
-
-async function ensureNotebookRoot(personalDir: string) {
-  const notebookRoot = getNotebookRoot(personalDir);
-  await fs.mkdir(notebookRoot, { recursive: true });
-  return notebookRoot;
 }
 
 async function buildTree(dirPath: string, rootPath: string, depth: number, maxDepth: number, visited?: Set<string>): Promise<TreeNode[]> {
@@ -88,13 +72,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '用户未配置个人目录' }, { status: 400 });
     }
 
-    const maxDepth = Math.min(parseInt(new URL(request.url).searchParams.get('depth') || '2', 10), 10);
-    const subPath = new URL(request.url).searchParams.get('sub') || '';
-    const notebookRoot = await ensureNotebookRoot(auth.personalDir);
-    const targetPath = safeSubPath(notebookRoot, subPath);
+    const { searchParams } = new URL(request.url);
+    const scope = normalizeNotebookScope(searchParams.get('scope'));
+    const maxDepth = Math.min(parseInt(searchParams.get('depth') || '2', 10), 10);
+    const subPath = searchParams.get('sub') || '';
+    const shareToken = searchParams.get('shareToken') || '';
+    const notebookRoot = await ensureNotebookRoot(scope, auth.personalDir);
+    const targetPath = safeResolve(notebookRoot, subPath);
 
     if (!targetPath) {
       return NextResponse.json({ error: '路径不合法' }, { status: 403 });
+    }
+
+    if (scope === 'global' && shareToken) {
+      const share = await getNotebookShare(shareToken);
+      if (!share || share.scope !== 'global') {
+        return NextResponse.json({ error: '分享链接无效' }, { status: 403 });
+      }
+      const shareDir = path.dirname(share.path || '');
+      if (subPath && subPath !== shareDir) {
+        return NextResponse.json({ error: '分享链接无权访问该目录' }, { status: 403 });
+      }
+      const shareName = path.basename(share.path || '');
+      return NextResponse.json({
+        tree: [{
+          name: shareName,
+          path: share.path,
+          type: 'file',
+        }],
+        rootPath: notebookRoot,
+        scope,
+      });
     }
 
     const stat = await fs.stat(targetPath);
@@ -103,7 +111,7 @@ export async function GET(request: NextRequest) {
     }
 
     const tree = await buildTree(targetPath, notebookRoot, 0, maxDepth);
-    return NextResponse.json({ tree, rootPath: notebookRoot });
+    return NextResponse.json({ tree, rootPath: notebookRoot, scope });
   } catch (error: any) {
     if (error.code === 'ENOENT') {
       return NextResponse.json({ error: '目录不存在' }, { status: 404 });

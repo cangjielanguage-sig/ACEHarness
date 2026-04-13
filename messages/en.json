@@ -30,7 +30,9 @@
       "apiDocsDesc": "View REST API documentation",
       "chatMode": "Chat Mode",
       "envVars": "Env Vars",
-      "envVarsDesc": "Manage process environment variables"
+      "envVarsDesc": "Manage process environment variables",
+      "globalNotebook": "Notebook",
+      "globalNotebookDesc": "Open the shared collaboration space"
     },
     "charts": {
       "agentUsage": "Agent Usage",

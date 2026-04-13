@@ -136,8 +136,8 @@ export function NotebookAskAISheet({ open, onOpenChange, context, autoTask, onIn
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="z-[90] w-[94vw] sm:max-w-[720px] h-full p-0 overflow-hidden gap-0">
-        <SheetHeader className="border-b px-5 py-4 pr-12">
+      <SheetContent side="right" className="z-[90] w-[94vw] sm:max-w-[720px] h-[100dvh] max-h-[100dvh] p-0 overflow-hidden gap-0 flex flex-col">
+        <SheetHeader className="shrink-0 border-b px-5 py-4 pr-12">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <SheetTitle className="text-base">Notebook AI 助手</SheetTitle>
@@ -157,7 +157,7 @@ export function NotebookAskAISheet({ open, onOpenChange, context, autoTask, onIn
           </div>
         </SheetHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col bg-muted/20">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/20">
           {hasContext && (
             <div className="mx-4 mt-4 rounded-md border bg-background p-3">
               <div className="mb-2 text-xs font-medium text-muted-foreground">当前块上下文</div>

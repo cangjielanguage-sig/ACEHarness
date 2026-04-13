@@ -71,7 +71,9 @@ const ResizableHandle = ({
   <Separator
     className={cn(
       "relative flex items-center justify-center bg-border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1",
-      collapsed ? "w-3" : "w-px after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2",
+      "data-[panel-group-direction=horizontal]:w-px data-[panel-group-direction=horizontal]:after:absolute data-[panel-group-direction=horizontal]:after:inset-y-0 data-[panel-group-direction=horizontal]:after:left-1/2 data-[panel-group-direction=horizontal]:after:w-1 data-[panel-group-direction=horizontal]:after:-translate-x-1/2",
+      "data-[panel-group-direction=vertical]:h-px data-[panel-group-direction=vertical]:w-full data-[panel-group-direction=vertical]:after:absolute data-[panel-group-direction=vertical]:after:inset-x-0 data-[panel-group-direction=vertical]:after:top-1/2 data-[panel-group-direction=vertical]:after:h-1 data-[panel-group-direction=vertical]:after:-translate-y-1/2",
+      collapsed ? "data-[panel-group-direction=horizontal]:w-3 data-[panel-group-direction=vertical]:h-3" : "",
       className
     )}
     {...props}

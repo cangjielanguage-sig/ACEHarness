@@ -26,8 +26,27 @@ export function isRunnableNotebookLanguage(language: string | null | undefined) 
   return normalized === 'cj' || normalized === 'cangjie';
 }
 
+const CELL_ID_FRUITS = [
+  'apple', 'banana', 'cherry', 'grape', 'mango', 'orange', 'peach', 'pear', 'plum', 'kiwi',
+];
+
+const CELL_ID_SNACKS = [
+  'mochi', 'cookie', 'pudding', 'tart', 'donut', 'waffle', 'brownie', 'pie', 'muffin', 'macaron',
+];
+
+function pickOne(items: string[]): string {
+  return items[Math.floor(Math.random() * items.length)] || 'snack';
+}
+
 export function createNotebookCellId() {
-  return `cell-${Math.random().toString(36).slice(2, 10)}`;
+  const suffix = Math.random().toString(36).slice(2, 6);
+  return `${pickOne(CELL_ID_FRUITS)}-${pickOne(CELL_ID_SNACKS)}-${suffix}`;
+}
+
+export function displayNotebookCellId(cellId: string) {
+  if (!cellId) return '';
+  if (cellId.startsWith('cell-')) return cellId.slice(0, 10);
+  return cellId;
 }
 
 export function createNotebookOutputId() {

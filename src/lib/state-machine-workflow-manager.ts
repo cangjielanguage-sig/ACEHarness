@@ -5,9 +5,10 @@
 
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
-import { readFile, readdir, stat, mkdir, cp, rm, writeFile } from 'fs/promises';
-import { resolve, join } from 'path';
+import { readFile, readdir, stat, mkdir, cp, rm, writeFile, copyFile } from 'fs/promises';
+import { resolve, join, dirname } from 'path';
 import { existsSync } from 'fs';
+import { cpus } from 'os';
 
 // Skills directory path segments - constructed at runtime to prevent
 // webpack/Next.js file tracing from over-matching the skills directory
@@ -375,13 +376,162 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.copiedSkills = null;
   }
 
+  /**
+   * Copy a directory with progress updates so frontend can show preparation details.
+   */
+  private async copyDirectoryWithProgress(
+    srcDir: string,
+    destDir: string,
+    runId: string,
+    reportStatus: (message: string, step: string) => Promise<void>
+  ): Promise<void> {
+    const files: Array<{ src: string; dst: string; size: number }> = [];
+    const formatBytes = (bytes: number): string => {
+      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let v = bytes;
+      let i = 0;
+      while (v >= 1024 && i < units.length - 1) {
+        v /= 1024;
+        i += 1;
+      }
+      return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+    };
+
+    await reportStatus('准备中：扫描目录并计算总体积...', '复制工作目录（建立清单）');
+
+    const stack = [{ src: srcDir, dst: destDir }];
+    let scannedFiles = 0;
+    let lastScanReport = 0;
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      const entries = await readdir(cur.src, { withFileTypes: true });
+      for (const entry of entries) {
+        const srcPath = join(cur.src, entry.name);
+        const dstPath = join(cur.dst, entry.name);
+        if (entry.isDirectory()) {
+          stack.push({ src: srcPath, dst: dstPath });
+          continue;
+        }
+        let size = 0;
+        try { size = (await stat(srcPath)).size; } catch { /* keep zero */ }
+        files.push({ src: srcPath, dst: dstPath, size });
+        scannedFiles += 1;
+        const now = Date.now();
+        if (now - lastScanReport > 1000) {
+          lastScanReport = now;
+          this.currentStep = `复制工作目录（建立清单：已扫描 ${scannedFiles} 文件）`;
+          this.emit('status', {
+            status: 'preparing',
+            message: `准备中：建立清单，已扫描 ${scannedFiles} 文件`,
+            runId,
+            startTime: this.runStartTime,
+            currentPhase: '准备阶段',
+            currentStep: this.currentStep,
+            currentConfigFile: this.currentConfigFile,
+          });
+        }
+      }
+    }
+
+    const totalFiles = files.length;
+    const totalBytes = files.reduce((s, f) => s + f.size, 0);
+    if (totalFiles === 0) {
+      await reportStatus('准备中：工作目录为空，无需复制', '复制工作目录 (完成)');
+      return;
+    }
+
+    let copiedFiles = 0;
+    let copiedBytes = 0;
+    const copyStartAt = Date.now();
+    let displayedEtaSec: number | null = null;
+    let speedEma = 0;
+    const speedSamples: Array<{ t: number; bytes: number }> = [];
+
+    const buildStepText = (etaSec: number | null): string => {
+      const percent = Math.min(100, Math.round((copiedBytes / Math.max(totalBytes, 1)) * 100));
+      const etaText = etaSec === null ? '计算中' : `${etaSec}s`;
+      return `复制工作目录 (${formatBytes(copiedBytes)}/${formatBytes(totalBytes)}，${percent}%，文件 ${copiedFiles}/${totalFiles}，预计剩余${etaText})`;
+    };
+
+    const emitProgress = async (force = false) => {
+      const now = Date.now();
+      speedSamples.push({ t: now, bytes: copiedBytes });
+      while (speedSamples.length > 1 && now - speedSamples[0].t > 20000) speedSamples.shift();
+
+      let etaSec: number | null = null;
+      if (speedSamples.length >= 2) {
+        const first = speedSamples[0];
+        const last = speedSamples[speedSamples.length - 1];
+        const dt = Math.max(1, (last.t - first.t) / 1000);
+        const instSpeed = Math.max(0, (last.bytes - first.bytes) / dt);
+        if (instSpeed > 0) {
+          speedEma = speedEma === 0 ? instSpeed : (speedEma * 0.75 + instSpeed * 0.25);
+        }
+      }
+      if (speedEma > 0 && copiedBytes < totalBytes) {
+        etaSec = Math.max(1, Math.ceil((totalBytes - copiedBytes) / speedEma));
+        if (displayedEtaSec !== null) etaSec = Math.min(displayedEtaSec, etaSec);
+        displayedEtaSec = etaSec;
+      } else if (copiedBytes >= totalBytes) {
+        etaSec = 0;
+        displayedEtaSec = 0;
+      }
+
+      const stepText = buildStepText(etaSec);
+      this.currentStep = stepText;
+      this.emit('status', {
+        status: 'preparing',
+        message: `准备中：${stepText}`,
+        runId,
+        startTime: this.runStartTime,
+        currentPhase: '准备阶段',
+        currentStep: this.currentStep,
+        currentConfigFile: this.currentConfigFile,
+      });
+      if (force) {
+        await reportStatus(`准备中：${stepText}`, this.currentStep);
+      }
+    };
+
+    await emitProgress(true);
+
+    const maxWorkers = Math.min(32, Math.max(8, cpus().length * 2));
+    const workerCount = Math.min(maxWorkers, totalFiles);
+    let cursor = 0;
+
+    const worker = async () => {
+      while (!this.shouldStop) {
+        const idx = cursor++;
+        if (idx >= totalFiles) break;
+        const file = files[idx];
+        await mkdir(dirname(file.dst), { recursive: true });
+        await copyFile(file.src, file.dst);
+        copiedFiles += 1;
+        copiedBytes += file.size;
+      }
+    };
+
+    const ticker = setInterval(() => {
+      void emitProgress(false);
+    }, 1000);
+
+    try {
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    } finally {
+      clearInterval(ticker);
+    }
+
+    await emitProgress(true);
+  }
+
   getStatus() {
+    const preparingPhase = this.status === 'preparing' ? '准备阶段' : null;
     return {
       status: this.status,
       statusReason: this.statusReason,
       runId: this.currentRunId,
       currentState: this.currentState,
-      currentPhase: this.currentState, // alias for frontend compatibility
+      currentPhase: this.currentState || preparingPhase, // alias for frontend compatibility
       currentStep: this.currentStep,
       completedSteps: this.completedSteps,
       currentConfigFile: this.currentConfigFile,
@@ -477,12 +627,30 @@ export class StateMachineWorkflowManager extends EventEmitter {
         message: '准备中...',
         runId,
         startTime: this.runStartTime,
+        currentPhase: '准备阶段',
+        currentStep: '初始化运行上下文',
         currentConfigFile: this.currentConfigFile,
       });
+      this.currentStep = '初始化运行上下文';
       await this.persistState();
+
+      const reportPreparingProgress = async (message: string, step: string) => {
+        this.currentStep = step;
+        this.emit('status', {
+          status: 'preparing',
+          message,
+          runId,
+          startTime: this.runStartTime,
+          currentPhase: '准备阶段',
+          currentStep: this.currentStep,
+          currentConfigFile: this.currentConfigFile,
+        });
+        await this.persistState();
+      };
 
       // === Preparing phase: directory isolation (cp for independence) ===
       if (this._userPersonalDir && workflowConfig.context?.projectRoot) {
+        await reportPreparingProgress('准备中：复制工作目录...', '复制工作目录');
         // Resolve projectRoot relative to user's personal dir (not server cwd)
         const srcDir = resolve(this._userPersonalDir, workflowConfig.context.projectRoot);
         if (this.shouldStop) return;
@@ -493,16 +661,19 @@ export class StateMachineWorkflowManager extends EventEmitter {
           const isoDir = resolve(this._userPersonalDir, isoRunId);
           try {
             await mkdir(isoDir, { recursive: true });
-            await cp(srcDir, isoDir, { recursive: true });
+            // Persist target working directory early so cleanup can find it
+            this.isolatedDir = isoDir;
+            await this.persistState();
+            await this.copyDirectoryWithProgress(srcDir, isoDir, runId, reportPreparingProgress);
             if (this.shouldStop) {
               // Stopped during copy — clean up incomplete dir
               await rm(isoDir, { recursive: true, force: true }).catch(() => {});
               return;
             }
             workflowConfig.context.projectRoot = isoDir;
-            this.isolatedDir = isoDir;
           } catch (e: any) {
             if (this.shouldStop) return;
+            this.isolatedDir = null;
             this.emit('log', { message: `目录隔离复制失败: ${e.message}，使用原目录` });
           }
         }
@@ -511,11 +682,15 @@ export class StateMachineWorkflowManager extends EventEmitter {
       if (this.shouldStop) return;
 
       // === Preparing phase: load agents, init engine, sync skills ===
+      await reportPreparingProgress('准备中：加载 Agent 配置...', '加载 Agent 配置');
       await this.loadAgentConfigs();
       if (this.shouldStop) return;
+      await reportPreparingProgress('准备中：构建 Agent 视图...', '构建 Agent 视图');
       this.initializeAgents(workflowConfig);
+      await reportPreparingProgress('准备中：初始化执行引擎...', '初始化执行引擎');
       await this.initializeEngine();
       if (this.shouldStop) return;
+      await reportPreparingProgress('准备中：同步 Skills...', '同步 Skills');
       await this.syncSkillsToWorkspace(workflowConfig);
 
       // Try to load existing state (for continuing previous runs)
@@ -525,12 +700,15 @@ export class StateMachineWorkflowManager extends EventEmitter {
         this.issueTracker = (existingState.issueTracker || []) as Issue[];
         this.transitionCount = existingState.transitionCount || 0;
         this.completedSteps = existingState.completedSteps || [];
-        this.currentState = existingState.currentState || existingState.currentPhase;
+        const validStates = new Set((workflowConfig.workflow.states || []).map((s) => s.name));
+        const restoredState = existingState.currentState;
+        this.currentState = restoredState && validStates.has(restoredState) ? restoredState : null;
         this.runStartTime = existingState.startTime;
       }
 
       // === Switch to running ===
       this.status = 'running';
+      this.currentStep = null;
       this.emit('status', {
         status: 'running',
         message: '状态机工作流已启动',
@@ -690,14 +868,18 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private async persistState(finalStatus?: 'completed' | 'failed' | 'stopped'): Promise<void> {
     if (!this.currentRunId) return;
     try {
+      const statusToPersist = finalStatus || (
+        this.shouldStop ? 'stopped' : (this.status === 'idle' ? 'completed' : this.status)
+      );
+      const preparingPhase = statusToPersist === 'preparing' ? '准备阶段' : null;
       await saveRunState({
         runId: this.currentRunId,
         configFile: this.currentConfigFile,
-        status: finalStatus || (this.shouldStop ? 'stopped' : this.status === 'idle' ? 'running' : this.status) as any,
+        status: statusToPersist as any,
         statusReason: this.statusReason || undefined,
         startTime: this.runStartTime || new Date().toISOString(),
         endTime: finalStatus ? this.runEndTime : null,
-        currentPhase: this.currentState,
+        currentPhase: this.currentState || preparingPhase,
         currentStep: this.currentStep,
         completedSteps: this.completedSteps,
         failedSteps: [],
