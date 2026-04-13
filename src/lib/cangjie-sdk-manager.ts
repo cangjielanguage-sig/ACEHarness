@@ -13,7 +13,7 @@ import { loadSystemSettings } from '@/lib/system-settings';
 
 const streamPipeline = promisify(pipeline);
 
-const CONFIG_PATH = resolve(process.cwd(), 'configs', 'cangjie-sdks.yaml');
+const CONFIG_PATH = resolve(process.cwd(), 'configs', 'settings', 'cangjie-sdks.yaml');
 const STATE_PATH = resolve(process.cwd(), 'data', 'cangjie-sdk-state.yaml');
 const DATA_ROOT = resolve(process.cwd(), 'data', 'cangjie');
 const CACHE_ROOT = resolve(DATA_ROOT, 'cache');
