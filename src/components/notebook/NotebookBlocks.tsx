@@ -7,11 +7,25 @@ import { Button } from '@/components/ui/button';
 import { isRunnableNotebookLanguage, normalizeNotebookLanguage } from '@/lib/notebook-markdown';
 
 interface NotebookCodeBlockProps extends ReactNodeViewProps {
-  filePath: string;
-  onRunCell: (payload: { pos: number; cellId: string; language: string; code: string }) => Promise<void>;
+  onRunCell: (payload: { pos: number; cellId: string; language: string; code: string }) => Promise<string | null>;
 }
 
-export function NotebookCodeBlock({ node, selected, getPos, filePath, onRunCell }: NotebookCodeBlockProps) {
+const CODE_LANG_OPTIONS = [
+  'cangjie',
+  'typescript',
+  'javascript',
+  'python',
+  'java',
+  'cpp',
+  'sql',
+  'json',
+  'yaml',
+  'markdown',
+  'bash',
+  'text',
+];
+
+export function NotebookCodeBlock({ node, selected, getPos, updateAttributes, onRunCell }: NotebookCodeBlockProps) {
   const [copying, setCopying] = useState(false);
   const [running, setRunning] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
@@ -56,12 +70,30 @@ export function NotebookCodeBlock({ node, selected, getPos, filePath, onRunCell 
     }
   };
 
+  const handleLanguageChange = (nextLanguage: string) => {
+    const normalized = normalizeNotebookLanguage(nextLanguage);
+    updateAttributes({ language: normalized });
+  };
+
   return (
     <NodeViewWrapper className={`my-4 overflow-hidden rounded-lg border bg-[#1f2430] text-slate-100 ${selected ? 'ring-1 ring-primary' : ''}`}>
       <div contentEditable={false} className="flex items-center justify-between gap-2 border-b border-white/10 bg-black/20 px-3 py-2">
         <div className="flex items-center gap-2 text-xs text-slate-300">
-          <span className="rounded bg-white/10 px-2 py-0.5 font-mono uppercase tracking-wide">{language}</span>
-          <span className="truncate text-slate-400">{filePath.split('/').pop()}</span>
+          <label className="flex items-center gap-1 rounded bg-white/10 px-1.5 py-0.5">
+            <span className="material-symbols-outlined text-[13px] text-slate-300">code</span>
+            <select
+              value={language}
+              onChange={(event) => handleLanguageChange(event.target.value)}
+              className="bg-transparent text-xs font-mono uppercase tracking-wide text-slate-100 outline-none"
+              title="切换代码语言"
+            >
+              {CODE_LANG_OPTIONS.map((lang) => (
+                <option key={lang} value={lang} className="bg-[#1f2430] text-slate-100">
+                  {lang}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" className="flex items-center gap-1 rounded bg-white/10 px-2 py-1 text-xs text-gray-300 hover:bg-white/20" onClick={handleCopy} title="复制代码">

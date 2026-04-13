@@ -1,18 +1,34 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, ReactNodeViewRenderer, useEditor, type Editor } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Typography from '@tiptap/extension-typography';
-import TaskList from '@tiptap/extension-task-list';
-import TaskItem from '@tiptap/extension-task-item';
+import { ListKit } from '@tiptap/extension-list';
+import { TableKit } from '@tiptap/extension-table';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { TrailingNode } from '@tiptap/extensions/trailing-node';
 import { UndoRedo } from '@tiptap/extensions/undo-redo';
 import { Node, mergeAttributes } from '@tiptap/core';
+import { DragHandle } from '@tiptap/extension-drag-handle-react';
+import type { Node as PmNode } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 import { Markdown } from '@tiptap/markdown';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { useToast } from '@/components/ui/toast';
 import { createLowlight } from 'lowlight';
 import javascript from 'highlight.js/lib/languages/javascript';
 import typescript from 'highlight.js/lib/languages/typescript';
@@ -27,6 +43,7 @@ import cpp from 'highlight.js/lib/languages/cpp';
 import sql from 'highlight.js/lib/languages/sql';
 import cangjie from '@/lib/cangjie-highlight';
 import { NotebookCodeBlock, NotebookOutputBlock } from './NotebookBlocks';
+import { NotebookAskAISheet } from './NotebookAskAISheet';
 import { NotebookOutput, buildNotebookOutput, createNotebookCellId, createNotebookOutputId, normalizeNotebookLanguage } from '@/lib/notebook-markdown';
 
 const lowlight = createLowlight();
@@ -87,11 +104,12 @@ const NotebookCodeBlockExtension = CodeBlockLowlight.extend({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer((props) => <NotebookCodeBlock {...props} filePath={(props.extension.options as any).filePath} onRunCell={async (payload) => {
+    return ReactNodeViewRenderer((props) => <NotebookCodeBlock {...props} onRunCell={async (payload) => {
       const output = await (props.extension.options as any).onRunCell(payload);
       if (output != null) {
         updateOrInsertOutput(props.editor, payload.pos, payload.cellId, output);
       }
+      return output;
     }} />);
   },
 
@@ -127,19 +145,85 @@ interface RichNotebookEditorProps {
   onRunCell: (payload: { pos: number; cellId: string; language: string; code: string }) => Promise<string | null>;
 }
 
+interface SlashMenuItem {
+  id: string;
+  title: string;
+  subtext: string;
+  aliases: string[];
+  icon: string;
+  group: string;
+  onSelect: (editor: Editor) => void;
+}
+
+function TableSizeMenuButton({ onInsert, dense = false }: { onInsert: (rows: number, cols: number) => void; dense?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [hoverRows, setHoverRows] = useState(3);
+  const [hoverCols, setHoverCols] = useState(3);
+  const maxRows = 8;
+  const maxCols = 8;
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className={`rounded px-2 py-1 hover:bg-accent ${dense ? 'text-xs' : 'text-sm'}`} title="插入表格">
+          <span className="material-symbols-outlined text-base">table_chart</span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="bottom" align="start" className="w-[220px] z-[87]">
+        <div className="px-2 pb-2">
+          <div className="mb-2 text-xs text-muted-foreground">选择表格大小（{hoverRows} x {hoverCols}）</div>
+          <div className="grid grid-cols-8 gap-1">
+            {Array.from({ length: maxRows }).map((_, r) =>
+              Array.from({ length: maxCols }).map((__, c) => {
+                const active = r < hoverRows && c < hoverCols;
+                return (
+                  <button
+                    key={`${r}-${c}`}
+                    type="button"
+                    className={`h-4 w-4 rounded-sm border ${active ? 'border-primary bg-primary/70' : 'border-border bg-muted/30 hover:bg-muted/60'}`}
+                    onMouseEnter={() => {
+                      setHoverRows(r + 1);
+                      setHoverCols(c + 1);
+                    }}
+                    onClick={() => {
+                      onInsert(r + 1, c + 1);
+                      setOpen(false);
+                    }}
+                    title={`${r + 1} x ${c + 1}`}
+                  />
+                );
+              })
+            )}
+          </div>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: RichNotebookEditorProps) {
+  const { toast } = useToast();
   const changeSourceRef = useRef<'internal' | 'external'>('external');
   const notebookExtensions = useMemo(() => [
     StarterKit.configure({
       codeBlock: false,
       undoRedo: false,
+      bulletList: false,
+      orderedList: false,
+      listItem: false,
     }),
     Markdown,
     UndoRedo.configure({ depth: 100, newGroupDelay: 500 }),
     Placeholder.configure({ placeholder: '开始编写 Cangjie Notebook...' }),
     Typography,
-    TaskList,
-    TaskItem.configure({ nested: true }),
+    ListKit.configure({
+      taskItem: { nested: true },
+    }),
+    TableKit.configure({
+      table: {
+        resizable: false,
+      },
+    }),
     TrailingNode.configure({ node: 'paragraph', notAfter: ['paragraph'] }),
     NotebookCodeBlockExtension.configure({
       lowlight,
@@ -148,7 +232,6 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
       languageClassPrefix: 'language-',
       defaultLanguage: 'text',
       HTMLAttributes: { class: 'hljs' },
-      filePath,
       onRunCell,
     } as any),
     NotebookOutput.extend({
@@ -179,7 +262,7 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
     contentType: 'markdown',
     editorProps: {
       attributes: {
-        class: 'tiptap prose prose-invert max-w-none min-h-full px-6 py-5 focus:outline-none [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-3 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/50 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_hr]:my-4 [&_hr]:border-border',
+        class: 'tiptap prose prose-invert max-w-none min-h-full px-10 md:px-12 py-5 focus:outline-none [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-3 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/50 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_hr]:my-4 [&_hr]:border-border [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:rounded-md [&_table]:overflow-hidden [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5',
       },
     },
     onCreate: ({ editor }) => {
@@ -218,17 +301,1007 @@ export function RichNotebookEditor({ content, filePath, onChange, onRunCell }: R
       return true;
     });
     if (changed) {
-      editor.view.dispatch(tr.setSelection(TextSelection.create(tr.doc, Math.min(tr.doc.content.size, editor.state.selection.from))));
+      const nextTr = tr.setSelection(TextSelection.create(tr.doc, Math.min(tr.doc.content.size, editor.state.selection.from)));
+      queueMicrotask(() => {
+        if (!editor.isDestroyed) {
+          editor.view.dispatch(nextTr);
+        }
+      });
     }
   }, [editor, content]);
+
+  const [currentNode, setCurrentNode] = useState<PmNode | null>(null);
+  const [currentNodePos, setCurrentNodePos] = useState(-1);
+
+  const handleNodeChange = useCallback(({ node, pos }: { node: PmNode | null; editor: Editor; pos: number }) => {
+    setCurrentNode(node);
+    setCurrentNodePos(pos);
+  }, []);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [askAIOpen, setAskAIOpen] = useState(false);
+  const [askAIContext, setAskAIContext] = useState('');
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [slashPos, setSlashPos] = useState<{ top: number; left: number } | null>(null);
+  const [slashRange, setSlashRange] = useState<{ from: number; to: number } | null>(null);
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [askAITask, setAskAITask] = useState<{ id: string; displayText: string; prompt: string } | null>(null);
+  const [askAIInsertRange, setAskAIInsertRange] = useState<{ from: number; to: number } | null>(null);
+  const [translateTarget, setTranslateTarget] = useState<'en' | 'zh' | 'ja' | 'ko'>('en');
+  const slashMenuOpenRef = useRef(false);
+  const slashRangeRef = useRef<{ from: number; to: number } | null>(null);
+  const slashActiveIndexRef = useRef(0);
+
+  const getCurrentNodeRange = useCallback(() => {
+    if (!editor || currentNodePos < 0 || !currentNode) return;
+    const from = currentNodePos;
+    const to = from + currentNode.nodeSize;
+    return { from, to };
+  }, [editor, currentNode, currentNodePos]);
+
+  const handleDeleteNode = useCallback(() => {
+    const range = getCurrentNodeRange();
+    if (!range || !editor) return;
+    editor.chain().focus().deleteRange(range).run();
+    setMenuOpen(false);
+  }, [editor, getCurrentNodeRange]);
+
+  const setBlockSelection = useCallback((from: number, to: number) => {
+    if (!editor) return;
+    const docSize = editor.state.doc.content.size;
+    const safeFrom = Math.max(1, Math.min(from + 1, docSize));
+    const safeTo = Math.max(safeFrom, Math.min(Math.max(from + 1, to - 1), docSize));
+    editor.chain().focus().setTextSelection({ from: safeFrom, to: safeTo }).run();
+  }, [editor]);
+
+  const insertTableWithSize = useCallback((rows: number, cols: number) => {
+    if (!editor) return;
+    const safeRows = Math.max(1, Math.min(12, rows));
+    const safeCols = Math.max(1, Math.min(12, cols));
+    (editor.chain().focus() as any).insertTable({ rows: safeRows, cols: safeCols, withHeaderRow: true }).run();
+  }, [editor]);
+
+  const transformBlock = useCallback((type: 'paragraph' | 'h1' | 'h2' | 'h3' | 'bulletList' | 'orderedList' | 'taskList' | 'blockquote' | 'codeBlock' | 'table') => {
+    const range = getCurrentNodeRange();
+    if (!range || !editor) return;
+
+    if (type === 'table') {
+      insertTableWithSize(3, 3);
+      setMenuOpen(false);
+      return;
+    }
+
+    if (type === 'codeBlock') {
+      const blockText = editor.state.doc.textBetween(range.from, range.to, '\n').trim();
+      editor.chain().focus().deleteRange(range).insertContentAt(range.from, {
+        type: 'notebookCodeBlock',
+        attrs: {
+          language: 'cangjie',
+          cellId: createNotebookCellId(),
+        },
+        content: blockText ? [{ type: 'text', text: blockText }] : [],
+      }).run();
+      setMenuOpen(false);
+      return;
+    }
+
+    setBlockSelection(range.from, range.to);
+    const chain = editor.chain().focus();
+    if (type === 'paragraph') chain.clearNodes();
+    if (type === 'h1') chain.toggleHeading({ level: 1 });
+    if (type === 'h2') chain.toggleHeading({ level: 2 });
+    if (type === 'h3') chain.toggleHeading({ level: 3 });
+    if (type === 'bulletList') chain.toggleBulletList();
+    if (type === 'orderedList') chain.toggleOrderedList();
+    if (type === 'taskList') (chain as any).toggleTaskList();
+    if (type === 'blockquote') chain.toggleBlockquote();
+    chain.run();
+    setMenuOpen(false);
+  }, [editor, getCurrentNodeRange, insertTableWithSize, setBlockSelection]);
+
+  const handleCopyNode = useCallback(async () => {
+    const range = getCurrentNodeRange();
+    if (!range || !editor) return;
+    const text = editor.state.doc.textBetween(range.from, range.to, '\n\n');
+    await navigator.clipboard.writeText(text);
+    setMenuOpen(false);
+  }, [editor, getCurrentNodeRange]);
+
+  const handleDuplicateNode = useCallback(() => {
+    const range = getCurrentNodeRange();
+    if (!range || !editor) return;
+    const nodeJson = editor.state.doc.nodeAt(range.from)?.toJSON();
+    if (!nodeJson) return;
+    editor.chain().focus().insertContentAt(range.to, nodeJson).run();
+    setMenuOpen(false);
+  }, [editor, getCurrentNodeRange]);
+
+  const handleAskAI = useCallback(() => {
+    const range = getCurrentNodeRange();
+    const blockText = range && editor ? editor.state.doc.textBetween(range.from, range.to, '\n\n').trim() : '';
+    setAskAIContext(blockText || '');
+    setAskAITask(null);
+    setAskAIInsertRange(range || null);
+    setAskAIOpen(true);
+    setMenuOpen(false);
+  }, [editor, getCurrentNodeRange]);
+
+  const getCurrentNodeText = useCallback(() => {
+    const range = getCurrentNodeRange();
+    if (!range || !editor) return null;
+    const text = editor.state.doc.textBetween(range.from, range.to, '\n\n').trim();
+    if (!text) return null;
+    return { range, text };
+  }, [editor, getCurrentNodeRange]);
+
+  const openAiActionDialog = useCallback((actionName: string, instruction: string) => {
+    const target = getCurrentNodeText();
+    if (!target) {
+      toast('warning', '当前块没有可处理文本');
+      return;
+    }
+    const prompt = [
+      '你是 Cangjie Notebook 的文本改写助手。',
+      `任务：${actionName}`,
+      '',
+      '执行要求：',
+      instruction,
+      '',
+      '关键约束：务必直接返回改进后的内容，不要解释，不要加标题，不要加前后缀。',
+      '输出格式要求：必须严格使用下面格式，不得输出其他任何文字：',
+      '<result>',
+      '改进后的内容',
+      '</result>',
+      '',
+      '待处理文本：',
+      target.text,
+    ].join('\n');
+
+    setAskAIContext(target.text);
+    setAskAIInsertRange(target.range);
+    setAskAITask({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      displayText: `${actionName}（自动任务）`,
+      prompt,
+    });
+    setAskAIOpen(true);
+    setMenuOpen(false);
+  }, [getCurrentNodeText, toast]);
+
+  const insertAiResultBack = useCallback((result: string) => {
+    if (!editor) return;
+    const text = result.trim();
+    if (!text) {
+      toast('warning', 'AI 返回内容为空');
+      return;
+    }
+
+    if (askAIInsertRange) {
+      editor
+        .chain()
+        .focus()
+        .deleteRange(askAIInsertRange)
+        .setTextSelection(askAIInsertRange.from)
+        .insertContent(text, { contentType: 'markdown' })
+        .run();
+    } else {
+      editor.chain().focus().insertContent(text, { contentType: 'markdown' }).run();
+    }
+    setAskAIOpen(false);
+    toast('success', '已插入回原文');
+  }, [askAIInsertRange, editor, toast]);
+
+  const translateTargetLabel = translateTarget === 'en'
+    ? '英语'
+    : translateTarget === 'zh'
+      ? '中文'
+      : translateTarget === 'ja'
+        ? '日语'
+        : '韩语';
+  const translateInstruction = translateTarget === 'en'
+    ? '将文本完整翻译为英语。只输出英文译文，不要附加中文、解释或注释。'
+    : translateTarget === 'zh'
+      ? '将文本完整翻译为中文。只输出中文译文，不要附加其他语言、解释或注释。'
+      : translateTarget === 'ja'
+        ? '将文本完整翻译为日语。只输出日语译文，不要附加其他语言、解释或注释。'
+        : '将文本完整翻译为韩语。只输出韩语译文，不要附加其他语言、解释或注释。';
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem('notebook-translate-target');
+    if (saved === 'en' || saved === 'zh' || saved === 'ja' || saved === 'ko') {
+      setTranslateTarget(saved);
+    }
+  }, []);
+
+  const setTranslateTargetAndPersist = useCallback((target: 'en' | 'zh' | 'ja' | 'ko') => {
+    setTranslateTarget(target);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('notebook-translate-target', target);
+    }
+    const label = target === 'en' ? '英语' : target === 'zh' ? '中文' : target === 'ja' ? '日语' : '韩语';
+    toast('info', `翻译目标已切换为${label}`);
+  }, [toast]);
+
+  const isCodeContext = editor ? (editor.isActive('notebookCodeBlock') || editor.isActive('codeBlock')) : false;
+  const isTableContext = editor ? (editor.isActive('table') || editor.isActive('tableRow') || editor.isActive('tableCell') || editor.isActive('tableHeader')) : false;
+  const isImageContext = editor ? editor.isActive('image') : false;
+  const hasTextSelection = editor ? !editor.state.selection.empty : false;
+  const showContextToolbar = editor ? editor.isFocused : false;
+
+  const renderAiActionMenu = (dense = false) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className={`rounded px-2 py-1 hover:bg-accent ${dense ? 'text-xs' : 'text-sm'}`} title="AI 助手">
+          <span className="material-symbols-outlined text-base">smart_toy</span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="bottom" align="start" className="w-64 z-[86]">
+        <DropdownMenuLabel>通用</DropdownMenuLabel>
+        <DropdownMenuItem onClick={handleAskAI}>
+          <span className="material-symbols-outlined mr-2 text-base">forum</span>
+          问 AI
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>文本增强</DropdownMenuLabel>
+        <DropdownMenuItem onClick={() => { openAiActionDialog('修正拼写和语法', '修正拼写、标点和语法错误，保持原意与结构。'); }}>
+          <span className="material-symbols-outlined mr-2 text-base">spellcheck</span>
+          修正拼写和语法
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { openAiActionDialog('扩展文本', '在不偏离主题的前提下扩展内容，增加细节和上下文。'); }}>
+          <span className="material-symbols-outlined mr-2 text-base">expand_content</span>
+          扩展文本
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { openAiActionDialog('精简文本', '压缩篇幅，保留核心信息，去除冗余表达。'); }}>
+          <span className="material-symbols-outlined mr-2 text-base">compress</span>
+          精简文本
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { openAiActionDialog('简化表达', '改写为更清晰易懂的表达，降低阅读门槛。'); }}>
+          <span className="material-symbols-outlined mr-2 text-base">text_fields</span>
+          简化表达
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { openAiActionDialog('添加 Emoji', '在合适位置加入少量相关 emoji，保持专业和可读性。'); }}>
+          <span className="material-symbols-outlined mr-2 text-base">mood</span>
+          添加 Emoji
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>内容操作</DropdownMenuLabel>
+        <DropdownMenuItem onClick={() => { openAiActionDialog('补全句子', '补全不完整句子并确保语义连贯自然。'); }}>
+          <span className="material-symbols-outlined mr-2 text-base">format_list_bulleted_add</span>
+          补全句子
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); }}>
+          <span className="material-symbols-outlined mr-2 text-base">summarize</span>
+          总结内容
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>高级选项</DropdownMenuLabel>
+        <DropdownMenuItem onClick={() => { openAiActionDialog('调整语气', '改写为专业、友好且清晰的语气，不改变事实。'); }}>
+          <span className="material-symbols-outlined mr-2 text-base">tune</span>
+          调整语气
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { openAiActionDialog('翻译文本', translateInstruction); }}>
+          <span className="material-symbols-outlined mr-2 text-base">translate</span>
+          翻译文本（{translateTargetLabel}）
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
+  const slashMenuItems = useMemo<SlashMenuItem[]>(() => {
+    const openAIFromSlash = (targetEditor: Editor) => {
+      const target = getCurrentNodeText();
+      const text = target?.text || '';
+      setAskAIContext(text);
+      setAskAITask(null);
+      setAskAIInsertRange(target?.range || null);
+      setAskAIOpen(true);
+    };
+
+    return [
+      {
+        id: 'text',
+        title: '正文',
+        subtext: '普通段落文本',
+        aliases: ['paragraph', 'text'],
+        icon: 'notes',
+        group: '格式',
+        onSelect: (targetEditor) => {
+          targetEditor.chain().focus().clearNodes().run();
+        },
+      },
+      {
+        id: 'heading_1',
+        title: '标题 1',
+        subtext: '一级标题',
+        aliases: ['h1', 'heading'],
+        icon: 'title',
+        group: '格式',
+        onSelect: (targetEditor) => {
+          targetEditor.chain().focus().toggleHeading({ level: 1 }).run();
+        },
+      },
+      {
+        id: 'heading_2',
+        title: '标题 2',
+        subtext: '二级标题',
+        aliases: ['h2', 'heading'],
+        icon: 'title',
+        group: '格式',
+        onSelect: (targetEditor) => {
+          targetEditor.chain().focus().toggleHeading({ level: 2 }).run();
+        },
+      },
+      {
+        id: 'heading_3',
+        title: '标题 3',
+        subtext: '三级标题',
+        aliases: ['h3', 'heading'],
+        icon: 'title',
+        group: '格式',
+        onSelect: (targetEditor) => {
+          targetEditor.chain().focus().toggleHeading({ level: 3 }).run();
+        },
+      },
+      {
+        id: 'bullet_list',
+        title: '无序列表',
+        subtext: '创建项目符号列表',
+        aliases: ['ul', 'list', 'bullet'],
+        icon: 'format_list_bulleted',
+        group: '列表',
+        onSelect: (targetEditor) => {
+          targetEditor.chain().focus().toggleBulletList().run();
+        },
+      },
+      {
+        id: 'ordered_list',
+        title: '有序列表',
+        subtext: '创建编号列表',
+        aliases: ['ol', 'list', 'ordered'],
+        icon: 'format_list_numbered',
+        group: '列表',
+        onSelect: (targetEditor) => {
+          targetEditor.chain().focus().toggleOrderedList().run();
+        },
+      },
+      {
+        id: 'task_list',
+        title: '任务列表',
+        subtext: '创建待办事项',
+        aliases: ['todo', 'task', 'checklist'],
+        icon: 'checklist',
+        group: '列表',
+        onSelect: (targetEditor) => {
+          (targetEditor.chain().focus() as any).toggleTaskList().run();
+        },
+      },
+      {
+        id: 'quote',
+        title: '引用',
+        subtext: '插入引用块',
+        aliases: ['blockquote', 'quote'],
+        icon: 'format_quote',
+        group: '块',
+        onSelect: (targetEditor) => {
+          targetEditor.chain().focus().toggleBlockquote().run();
+        },
+      },
+      {
+        id: 'code_block',
+        title: '代码块',
+        subtext: '插入代码块',
+        aliases: ['code', 'snippet'],
+        icon: 'code',
+        group: '块',
+        onSelect: (targetEditor) => {
+          targetEditor.chain().focus().insertContent({
+            type: 'notebookCodeBlock',
+            attrs: {
+              language: 'cangjie',
+              cellId: createNotebookCellId(),
+            },
+          }).run();
+        },
+      },
+      {
+        id: 'horizontal_rule',
+        title: '分割线',
+        subtext: '插入水平分割线',
+        aliases: ['hr', 'divider', 'line'],
+        icon: 'horizontal_rule',
+        group: '块',
+        onSelect: (targetEditor) => {
+          targetEditor.chain().focus().setHorizontalRule().run();
+        },
+      },
+      {
+        id: 'table',
+        title: '表格',
+        subtext: '插入 3x3 表格',
+        aliases: ['table', 'grid'],
+        icon: 'table_chart',
+        group: '块',
+        onSelect: (targetEditor) => {
+          (targetEditor.chain().focus() as any).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+        },
+      },
+      {
+        id: 'ask_ai',
+        title: '问 AI',
+        subtext: '打开 Notebook AI 助手',
+        aliases: ['ai', 'ask'],
+        icon: 'smart_toy',
+        group: 'AI 助手',
+        onSelect: openAIFromSlash,
+      },
+      {
+        id: 'fix_spelling_grammar',
+        title: '修正拼写和语法',
+        subtext: '自动修复拼写与语法错误',
+        aliases: ['grammar', 'spelling', 'fix'],
+        icon: 'spellcheck',
+        group: 'AI 助手',
+        onSelect: () => { openAiActionDialog('修正拼写和语法', '修正拼写、标点和语法错误，保持原意与结构。'); },
+      },
+      {
+        id: 'extend_text',
+        title: '扩展文本',
+        subtext: '补充相关信息并展开内容',
+        aliases: ['extend', 'expand', 'more'],
+        icon: 'expand_content',
+        group: 'AI 助手',
+        onSelect: () => { openAiActionDialog('扩展文本', '在不偏离主题的前提下扩展内容，增加细节和上下文。'); },
+      },
+      {
+        id: 'reduce_text',
+        title: '精简文本',
+        subtext: '缩短文本并保留核心含义',
+        aliases: ['shorten', 'reduce', 'brief'],
+        icon: 'compress',
+        group: 'AI 助手',
+        onSelect: () => { openAiActionDialog('精简文本', '压缩篇幅，保留核心信息，去除冗余表达。'); },
+      },
+      {
+        id: 'simplify_text',
+        title: '简化表达',
+        subtext: '让复杂文本更易读',
+        aliases: ['simplify', 'readable', 'easy'],
+        icon: 'text_fields',
+        group: 'AI 助手',
+        onSelect: () => { openAiActionDialog('简化表达', '改写为更清晰易懂的表达，降低阅读门槛。'); },
+      },
+      {
+        id: 'emojify',
+        title: '添加 Emoji',
+        subtext: '加入合适表情让内容更生动',
+        aliases: ['emoji', 'emojify'],
+        icon: 'mood',
+        group: 'AI 助手',
+        onSelect: () => { openAiActionDialog('添加 Emoji', '在合适位置加入少量相关 emoji，保持专业和可读性。'); },
+      },
+      {
+        id: 'complete_sentence',
+        title: '补全句子',
+        subtext: '智能补全未完成句子',
+        aliases: ['complete', 'sentence', 'finish'],
+        icon: 'format_list_bulleted_add',
+        group: 'AI 助手',
+        onSelect: () => { openAiActionDialog('补全句子', '补全不完整句子并确保语义连贯自然。'); },
+      },
+      {
+        id: 'summarize',
+        title: '总结内容',
+        subtext: '生成更精炼的摘要',
+        aliases: ['summary', 'summarize'],
+        icon: 'summarize',
+        group: 'AI 助手',
+        onSelect: () => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); },
+      },
+      {
+        id: 'adjust_tone',
+        title: '调整语气',
+        subtext: '改为更专业/友好/口语化语气',
+        aliases: ['tone', 'style', 'professional', 'casual'],
+        icon: 'tune',
+        group: 'AI 助手',
+        onSelect: () => { openAiActionDialog('调整语气', '改写为专业、友好且清晰的语气，不改变事实。'); },
+      },
+      {
+        id: 'translate',
+        title: '翻译文本',
+        subtext: `翻译为${translateTargetLabel}`,
+        aliases: ['translate', 'translation', 'cn', 'en'],
+        icon: 'translate',
+        group: 'AI 助手',
+        onSelect: () => { openAiActionDialog('翻译文本', translateInstruction); },
+      },
+      {
+        id: 'translate_target_en',
+        title: '翻译目标：英语',
+        subtext: '设置默认翻译语言为英语',
+        aliases: ['translate en', 'english'],
+        icon: 'language',
+        group: 'AI 助手',
+        onSelect: () => { setTranslateTargetAndPersist('en'); },
+      },
+      {
+        id: 'translate_target_zh',
+        title: '翻译目标：中文',
+        subtext: '设置默认翻译语言为中文',
+        aliases: ['translate zh', 'chinese'],
+        icon: 'language',
+        group: 'AI 助手',
+        onSelect: () => { setTranslateTargetAndPersist('zh'); },
+      },
+      {
+        id: 'translate_target_ja',
+        title: '翻译目标：日语',
+        subtext: '设置默认翻译语言为日语',
+        aliases: ['translate ja', 'japanese'],
+        icon: 'language',
+        group: 'AI 助手',
+        onSelect: () => { setTranslateTargetAndPersist('ja'); },
+      },
+      {
+        id: 'translate_target_ko',
+        title: '翻译目标：韩语',
+        subtext: '设置默认翻译语言为韩语',
+        aliases: ['translate ko', 'korean'],
+        icon: 'language',
+        group: 'AI 助手',
+        onSelect: () => { setTranslateTargetAndPersist('ko'); },
+      },
+    ];
+  }, [getCurrentNodeText, openAiActionDialog, setTranslateTargetAndPersist, translateInstruction, translateTargetLabel]);
+
+  const filteredSlashItems = useMemo(() => {
+    const q = slashQuery.trim().toLowerCase();
+    if (!q) return slashMenuItems;
+    return slashMenuItems.filter((item) => {
+      const haystack = [item.title, item.subtext, ...item.aliases].join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [slashMenuItems, slashQuery]);
+
+  const closeSlashMenu = useCallback(() => {
+    setSlashMenuOpen(false);
+    setSlashPos(null);
+    setSlashRange(null);
+    setSlashActiveIndex(0);
+  }, []);
+
+  const applySlashItem = useCallback((item: SlashMenuItem) => {
+    if (!editor || !slashRangeRef.current) return;
+    editor.chain().focus().deleteRange(slashRangeRef.current).run();
+    item.onSelect(editor);
+    closeSlashMenu();
+  }, [closeSlashMenu, editor]);
+
+  useEffect(() => {
+    slashMenuOpenRef.current = slashMenuOpen;
+  }, [slashMenuOpen]);
+
+  useEffect(() => {
+    slashRangeRef.current = slashRange;
+  }, [slashRange]);
+
+  useEffect(() => {
+    slashActiveIndexRef.current = slashActiveIndex;
+  }, [slashActiveIndex]);
+
+  useEffect(() => {
+    if (!editor) return;
+
+    const updateSlashMenu = () => {
+      const { state, view } = editor;
+      const selection = state.selection;
+      if (!selection.empty || !editor.isFocused) {
+        closeSlashMenu();
+        return;
+      }
+
+      const { $from } = selection;
+      if (!$from.parent.isTextblock || $from.parent.type.name === 'notebookOutput') {
+        closeSlashMenu();
+        return;
+      }
+
+      const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '\n');
+      const slashIndex = textBefore.lastIndexOf('/');
+      if (slashIndex < 0) {
+        closeSlashMenu();
+        return;
+      }
+
+      const beforeSlash = textBefore.slice(0, slashIndex);
+      if (beforeSlash.length > 0 && !/\s$/.test(beforeSlash)) {
+        closeSlashMenu();
+        return;
+      }
+
+      const query = textBefore.slice(slashIndex + 1);
+      if (/\s/.test(query)) {
+        closeSlashMenu();
+        return;
+      }
+
+      const from = $from.start() + slashIndex;
+      const to = from + 1 + query.length;
+      const coords = view.coordsAtPos(selection.from);
+
+      setSlashQuery(query);
+      setSlashRange({ from, to });
+      setSlashPos({ top: coords.bottom + 8, left: coords.left });
+      setSlashMenuOpen(true);
+      setSlashActiveIndex(0);
+    };
+
+    const onUpdate = () => updateSlashMenu();
+    const onSelectionUpdate = () => updateSlashMenu();
+    const onBlur = () => {
+      setTimeout(() => {
+        closeSlashMenu();
+      }, 90);
+    };
+
+    editor.on('update', onUpdate);
+    editor.on('selectionUpdate', onSelectionUpdate);
+    editor.on('blur', onBlur);
+    updateSlashMenu();
+
+    return () => {
+      editor.off('update', onUpdate);
+      editor.off('selectionUpdate', onSelectionUpdate);
+      editor.off('blur', onBlur);
+    };
+  }, [closeSlashMenu, editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (!slashMenuOpenRef.current) return;
+      const availableItems = filteredSlashItems;
+      if (availableItems.length === 0) return;
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setSlashActiveIndex((prev) => (prev + 1) % availableItems.length);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setSlashActiveIndex((prev) => (prev - 1 + availableItems.length) % availableItems.length);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        const index = Math.max(0, Math.min(slashActiveIndexRef.current, availableItems.length - 1));
+        applySlashItem(availableItems[index]);
+      } else if (event.key === 'Escape' || event.key === 'Tab') {
+        event.preventDefault();
+        closeSlashMenu();
+      }
+    };
+
+    const dom = editor.view.dom;
+    dom.addEventListener('keydown', handleKeydown, true);
+    return () => {
+      dom.removeEventListener('keydown', handleKeydown, true);
+    };
+  }, [applySlashItem, closeSlashMenu, editor, filteredSlashItems]);
 
   if (!editor) {
     return <div className="flex items-center justify-center h-full text-muted-foreground">加载 Notebook 编辑器...</div>;
   }
 
   return (
-    <div className="h-full [&_.tiptap_p]:my-3 [&_.tiptap_code]:font-mono">
+    <div className="notebook-rich-editor h-full [&_.tiptap_p]:my-3 [&_.tiptap_code]:font-mono">
+      <div className={`sticky top-0 z-20 flex min-h-10 items-center gap-1 border-b bg-background/95 px-3 py-2 backdrop-blur ${showContextToolbar ? '' : 'pointer-events-none opacity-45'}`}>
+          {!isCodeContext && !isTableContext && !isImageContext && (
+            <>
+              <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('bold') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleBold().run()} title="加粗">
+                <span className="material-symbols-outlined text-base">format_bold</span>
+              </button>
+              <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('italic') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleItalic().run()} title="斜体">
+                <span className="material-symbols-outlined text-base">format_italic</span>
+              </button>
+              <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('strike') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleStrike().run()} title="删除线">
+                <span className="material-symbols-outlined text-base">strikethrough_s</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => editor.chain().focus().toggleBulletList().run()} title="无序列表">
+                <span className="material-symbols-outlined text-base">format_list_bulleted</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => editor.chain().focus().toggleOrderedList().run()} title="有序列表">
+                <span className="material-symbols-outlined text-base">format_list_numbered</span>
+              </button>
+            </>
+          )}
+          {isCodeContext && (
+            <>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => editor.chain().focus().clearNodes().run()} title="转为正文">
+                <span className="material-symbols-outlined text-base">notes</span>
+              </button>
+            </>
+          )}
+          {isTableContext && (
+            <>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addRowAfter().run()} title="新增行">
+                <span className="material-symbols-outlined text-base">table_rows</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addColumnAfter().run()} title="新增列">
+                <span className="material-symbols-outlined text-base">view_column</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteRow().run()} title="删除行">
+                <span className="material-symbols-outlined text-base">delete</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteColumn().run()} title="删除列">
+                <span className="material-symbols-outlined text-base">delete_sweep</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteTable().run()} title="删除表格">
+                <span className="material-symbols-outlined text-base">table_view</span>
+              </button>
+            </>
+          )}
+          {isImageContext && (
+            <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => editor.chain().focus().deleteSelection().run()} title="删除图片">
+              <span className="material-symbols-outlined text-base">delete</span>
+            </button>
+          )}
+          <TableSizeMenuButton dense onInsert={insertTableWithSize} />
+          {renderAiActionMenu(true)}
+      </div>
+      <BubbleMenu
+        editor={editor}
+        pluginKey="notebookBubbleMenu"
+        updateDelay={100}
+        shouldShow={({ editor: e }) => {
+          if (!e.isFocused) return false;
+          const inCode = e.isActive('notebookCodeBlock') || e.isActive('codeBlock');
+          const inTable = e.isActive('table') || e.isActive('tableCell') || e.isActive('tableHeader') || e.isActive('tableRow');
+          const inImage = e.isActive('image');
+          return !e.state.selection.empty || inCode || inTable || inImage;
+        }}
+      >
+        <div className="flex items-center gap-1 rounded-md border bg-popover p-1 shadow-lg">
+          {!isCodeContext && !isTableContext && !isImageContext && (
+            <>
+              <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('bold') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleBold().run()} title="加粗">
+                <span className="material-symbols-outlined text-base">format_bold</span>
+              </button>
+              <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('italic') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleItalic().run()} title="斜体">
+                <span className="material-symbols-outlined text-base">format_italic</span>
+              </button>
+              <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('strike') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleStrike().run()} title="删除线">
+                <span className="material-symbols-outlined text-base">strikethrough_s</span>
+              </button>
+            </>
+          )}
+          {isCodeContext && (
+            <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => editor.chain().focus().clearNodes().run()} title="转为正文">
+              <span className="material-symbols-outlined text-base">notes</span>
+            </button>
+          )}
+          {isTableContext && (
+            <>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addRowAfter().run()} title="新增行">
+                <span className="material-symbols-outlined text-base">table_rows</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).addColumnAfter().run()} title="新增列">
+                <span className="material-symbols-outlined text-base">view_column</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteTable().run()} title="删除表格">
+                <span className="material-symbols-outlined text-base">table_view</span>
+              </button>
+            </>
+          )}
+          {isImageContext && (
+            <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => editor.chain().focus().deleteSelection().run()} title="删除图片">
+              <span className="material-symbols-outlined text-base">delete</span>
+            </button>
+          )}
+          <TableSizeMenuButton dense onInsert={insertTableWithSize} />
+          {renderAiActionMenu(true)}
+        </div>
+      </BubbleMenu>
+      <DragHandle editor={editor} onNodeChange={handleNodeChange}>
+        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <button type="button" className="notebook-drag-handle-btn" draggable data-drag-handle title="拖拽或打开块菜单">
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>drag_indicator</span>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="right" align="start" className="w-56 z-[80]">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>块操作</DropdownMenuLabel>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <span className="material-symbols-outlined mr-2 text-base">edit_note</span>
+                  转为
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-52 z-[81]">
+                  <DropdownMenuItem onClick={() => transformBlock('paragraph')}>
+                    <span className="material-symbols-outlined mr-2 text-base">notes</span>
+                    正文
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => transformBlock('h1')}>
+                    <span className="material-symbols-outlined mr-2 text-base">title</span>
+                    标题 1
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => transformBlock('h2')}>
+                    <span className="material-symbols-outlined mr-2 text-base">title</span>
+                    标题 2
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => transformBlock('h3')}>
+                    <span className="material-symbols-outlined mr-2 text-base">title</span>
+                    标题 3
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => transformBlock('bulletList')}>
+                    <span className="material-symbols-outlined mr-2 text-base">format_list_bulleted</span>
+                    无序列表
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => transformBlock('orderedList')}>
+                    <span className="material-symbols-outlined mr-2 text-base">format_list_numbered</span>
+                    有序列表
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => transformBlock('taskList')}>
+                    <span className="material-symbols-outlined mr-2 text-base">checklist</span>
+                    任务列表
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => transformBlock('blockquote')}>
+                    <span className="material-symbols-outlined mr-2 text-base">format_quote</span>
+                    引用
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => transformBlock('codeBlock')}>
+                    <span className="material-symbols-outlined mr-2 text-base">code</span>
+                    代码块
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => transformBlock('table')}>
+                    <span className="material-symbols-outlined mr-2 text-base">table_chart</span>
+                    表格
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <span className="material-symbols-outlined mr-2 text-base">smart_toy</span>
+                AI 助手
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-64 z-[81]">
+                <DropdownMenuLabel>通用</DropdownMenuLabel>
+                <DropdownMenuItem onClick={handleAskAI}>
+                  <span className="material-symbols-outlined mr-2 text-base">forum</span>
+                  问 AI
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>文本增强</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => { openAiActionDialog('修正拼写和语法', '修正拼写、标点和语法错误，保持原意与结构。'); }}>
+                  <span className="material-symbols-outlined mr-2 text-base">spellcheck</span>
+                  修正拼写和语法
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { openAiActionDialog('扩展文本', '在不偏离主题的前提下扩展内容，增加细节和上下文。'); }}>
+                  <span className="material-symbols-outlined mr-2 text-base">expand_content</span>
+                  扩展文本
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { openAiActionDialog('精简文本', '压缩篇幅，保留核心信息，去除冗余表达。'); }}>
+                  <span className="material-symbols-outlined mr-2 text-base">compress</span>
+                  精简文本
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { openAiActionDialog('简化表达', '改写为更清晰易懂的表达，降低阅读门槛。'); }}>
+                  <span className="material-symbols-outlined mr-2 text-base">text_fields</span>
+                  简化表达
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { openAiActionDialog('添加 Emoji', '在合适位置加入少量相关 emoji，保持专业和可读性。'); }}>
+                  <span className="material-symbols-outlined mr-2 text-base">mood</span>
+                  添加 Emoji
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>内容操作</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => { openAiActionDialog('补全句子', '补全不完整句子并确保语义连贯自然。'); }}>
+                  <span className="material-symbols-outlined mr-2 text-base">format_list_bulleted_add</span>
+                  补全句子
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); }}>
+                  <span className="material-symbols-outlined mr-2 text-base">summarize</span>
+                  总结内容
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>高级选项</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => { openAiActionDialog('调整语气', '改写为专业、友好且清晰的语气，不改变事实。'); }}>
+                  <span className="material-symbols-outlined mr-2 text-base">tune</span>
+                  调整语气
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { openAiActionDialog('翻译文本', translateInstruction); }}>
+                  <span className="material-symbols-outlined mr-2 text-base">translate</span>
+                  翻译文本（{translateTargetLabel}）
+                </DropdownMenuItem>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <span className="material-symbols-outlined mr-2 text-base">language</span>
+                    翻译目标语言
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-52 z-[82]">
+                    <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('en')}>
+                      <span className="material-symbols-outlined mr-2 text-base">check</span>
+                      英语 {translateTarget === 'en' ? '（当前）' : ''}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('zh')}>
+                      <span className="material-symbols-outlined mr-2 text-base">check</span>
+                      中文 {translateTarget === 'zh' ? '（当前）' : ''}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('ja')}>
+                      <span className="material-symbols-outlined mr-2 text-base">check</span>
+                      日语 {translateTarget === 'ja' ? '（当前）' : ''}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('ko')}>
+                      <span className="material-symbols-outlined mr-2 text-base">check</span>
+                      韩语 {translateTarget === 'ko' ? '（当前）' : ''}
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuItem onClick={handleCopyNode}>
+              <span className="material-symbols-outlined mr-2 text-base">content_copy</span>
+              复制块内容
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleDuplicateNode}>
+              <span className="material-symbols-outlined mr-2 text-base">control_point_duplicate</span>
+              创建副本
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={handleDeleteNode}>
+              <span className="material-symbols-outlined mr-2 text-base">delete</span>
+              删除块
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </DragHandle>
       <EditorContent editor={editor} className="h-full" />
+      {slashMenuOpen && slashPos && (
+        <div
+          className="fixed z-[85] w-[320px] max-h-[320px] overflow-auto rounded-md border bg-popover p-1 shadow-xl"
+          style={{ top: slashPos.top, left: slashPos.left }}
+        >
+          {filteredSlashItems.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-muted-foreground">无匹配项</div>
+          ) : (
+            (() => {
+              let lastGroup = '';
+              return filteredSlashItems.map((item, index) => {
+                const showGroup = item.group !== lastGroup;
+                lastGroup = item.group;
+                return (
+                  <div key={item.id}>
+                    {showGroup && <div className="px-2 pt-2 pb-1 text-[11px] text-muted-foreground">{item.group}</div>}
+                    <button
+                      type="button"
+                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${index === slashActiveIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/70'}`}
+                      onMouseEnter={() => setSlashActiveIndex(index)}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        applySlashItem(item);
+                      }}
+                    >
+                      <span className="material-symbols-outlined text-base text-muted-foreground">{item.icon}</span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate">{item.title}</span>
+                        <span className="block truncate text-xs text-muted-foreground">{item.subtext}</span>
+                      </span>
+                    </button>
+                  </div>
+                );
+              });
+            })()
+          )}
+        </div>
+      )}
+      <NotebookAskAISheet
+        open={askAIOpen}
+        onOpenChange={setAskAIOpen}
+        context={askAIContext}
+        autoTask={askAITask}
+        onInsertResult={insertAiResultBack}
+      />
       <style jsx global>{`
         .hljs { display: block; color: #e5e7eb; background: transparent; }
         .ProseMirror .hljs { white-space: pre; }

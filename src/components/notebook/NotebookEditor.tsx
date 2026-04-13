@@ -84,12 +84,8 @@ export function NotebookEditor({ filePath, content, onSave }: NotebookEditorProp
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{filePath.split('/').pop()}</div>
-          <div className="text-xs text-muted-foreground flex items-center gap-2">
-            <span>.cj.md notebook</span>
-            <span className={isDirty ? 'text-amber-500' : 'text-emerald-500'}>{isDirty ? '未保存' : '已保存'}</span>
-          </div>
+        <div className="text-xs text-muted-foreground">
+          <span className={isDirty ? 'text-amber-500' : 'text-emerald-500'}>{isDirty ? '未保存' : '已保存'}</span>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={handleDownload}>
