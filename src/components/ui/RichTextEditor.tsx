@@ -8,7 +8,7 @@ import { ListKit } from '@tiptap/extension-list';
 import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
 import { Extension } from '@tiptap/core';
-import { useEffect, forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import { useEffect, forwardRef, useImperativeHandle, useRef, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { createPortal } from 'react-dom';
 
@@ -172,6 +172,37 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
     },
   });
 
+  const safeFocus = useCallback((delayMs = 0) => {
+    if (!editor) return;
+    const run = () => {
+      if (!editor || (editor as any).isDestroyed) return;
+      try {
+        // Prefer native view focus to avoid dispatching a transaction in unstable windows.
+        editor.view?.focus();
+      } catch {
+        try {
+          editor.commands.focus();
+        } catch {
+          // no-op: avoid crashing caller effects
+        }
+      }
+    };
+
+    const schedule = () => {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(run);
+      } else {
+        setTimeout(run, 0);
+      }
+    };
+
+    if (delayMs > 0) {
+      setTimeout(schedule, delayMs);
+    } else {
+      schedule();
+    }
+  }, [editor]);
+
   useImperativeHandle(ref, () => ({
     clear: () => {
       editor?.commands.clearContent();
@@ -180,7 +211,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
     getHTML: () => editor?.getHTML() || '',
     getMarkdown: () => editor?.getMarkdown() || '',
     focus: () => {
-      editor?.commands.focus();
+      safeFocus();
     },
     isEmpty: () => {
       if (!editor) return true;
@@ -189,7 +220,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
     setFullscreen: (value: boolean) => {
       setIsFullscreen(value);
       if (value) {
-        setTimeout(() => editor?.commands.focus(), 100);
+        safeFocus(100);
       }
     },
     setContent: (content: string) => {
@@ -197,7 +228,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
         editor.commands.setContent(content, { contentType: 'markdown' });
       }
     },
-  }), [editor]);
+  }), [editor, safeFocus]);
 
   const editorWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -252,15 +283,15 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
 
   useEffect(() => {
     if (autoFocus && editor) {
-      editor.commands.focus();
+      safeFocus();
     }
-  }, [autoFocus, editor]);
+  }, [autoFocus, editor, safeFocus]);
 
   useEffect(() => {
     if (isFullscreen && editor) {
-      setTimeout(() => editor.commands.focus(), 150);
+      safeFocus(150);
     }
-  }, [isFullscreen, editor]);
+  }, [isFullscreen, editor, safeFocus]);
 
   if (!editor) {
     return null;
