@@ -121,6 +121,56 @@ interface RunCangjieResponse {
   error?: string;
 }
 
+export type SdkChannel = 'nightly' | 'sts' | 'lts';
+export type HostOs = 'darwin' | 'linux' | 'win32';
+export type HostArch = 'x64' | 'arm64';
+
+export interface SdkPackage {
+  os: HostOs;
+  arch: HostArch;
+  url: string;
+  archiveType: 'tar.gz' | 'zip';
+  name: string;
+  sha256Url?: string;
+}
+
+export interface SdkCatalogEntry {
+  version: string;
+  releaseName: string;
+  tagName: string;
+  channel: SdkChannel;
+  createdAt?: string;
+  packages: SdkPackage[];
+}
+
+export interface InstalledSdk {
+  version: string;
+  channel: SdkChannel;
+  os: HostOs;
+  arch: HostArch;
+  installDir: string;
+  status: 'ready' | 'failed';
+  installedAt?: string;
+  lastError?: string;
+}
+
+export interface EffectiveSdkInfo {
+  source: 'managed' | 'none';
+  cangjieHome: string | null;
+  version?: string;
+  channel?: SdkChannel;
+  diagnostics: string[];
+}
+
+export interface SdkOverviewResponse {
+  host: { os: HostOs; arch: HostArch };
+  gitcodeTokenConfigured: boolean;
+  catalog: SdkCatalogEntry[];
+  installs: InstalledSdk[];
+  active: InstalledSdk | null;
+  effective: EffectiveSdkInfo;
+}
+
 export const configApi = {
   async listConfigs(): Promise<ConfigListResponse> {
     const response = await authFetch(`${API_BASE}/configs`);
@@ -595,6 +645,133 @@ export const scheduleApi = {
     const res = await authFetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/toggle`, { method: 'POST' });
     if (!res.ok) throw new Error('切换定时任务状态失败');
     return res.json();
+  },
+};
+
+export const envApi = {
+  async get(scope: 'system' | 'user'): Promise<{ vars: Array<{ key: string; value: string; enabled: boolean }> }> {
+    const response = await authFetch(`${API_BASE}/env?scope=${scope}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || '获取环境变量失败');
+    }
+    return data;
+  },
+
+  async save(scope: 'system' | 'user', vars: Array<{ key: string; value: string; enabled: boolean }>): Promise<{ success: boolean }> {
+    const response = await authFetch(`${API_BASE}/env`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, vars }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || '保存环境变量失败');
+    }
+    return data;
+  },
+};
+
+export const systemSettingsApi = {
+  async get(): Promise<{ gitcodeTokenConfigured: boolean }> {
+    const response = await authFetch(`${API_BASE}/system-settings`);
+    if (!response.ok) throw new Error('获取系统设置失败');
+    return response.json();
+  },
+
+  async save(data: { gitcodeToken?: string }): Promise<{ success: boolean }> {
+    const response = await authFetch(`${API_BASE}/system-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || '保存系统设置失败');
+    }
+    return response.json();
+  },
+};
+
+export const cangjieSdkApi = {
+  async getOverview(): Promise<SdkOverviewResponse> {
+    const response = await authFetch(`${API_BASE}/cangjie/sdk`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '获取 SDK 列表失败');
+    return data;
+  },
+
+  async install(
+    version: string,
+    channel: SdkChannel,
+    onProgress?: (event: { phase: string; downloaded?: number; total?: number }) => void,
+  ): Promise<{ success: boolean; install: InstalledSdk }> {
+    const headers = { 'Content-Type': 'application/json', ...getAuthHeaders() };
+    const response = await fetch(`${API_BASE}/cangjie/sdk/install`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ version, channel }),
+    });
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error((data as any).error || '安装 SDK 失败');
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const event = JSON.parse(line.slice(6));
+          if (event.phase === 'error') throw new Error(event.error || '安装 SDK 失败');
+          if (event.phase === 'done') return { success: true, install: event.install };
+          onProgress?.(event);
+        } catch (error) {
+          if (error instanceof SyntaxError) continue;
+          throw error;
+        }
+      }
+    }
+    throw new Error('安装 SDK 失败：连接意外断开');
+  },
+
+  async activate(version: string, channel: SdkChannel): Promise<{ success: boolean }> {
+    const response = await authFetch(`${API_BASE}/cangjie/sdk/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version, channel }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '激活 SDK 失败');
+    return data;
+  },
+
+  async deactivate(): Promise<{ success: boolean }> {
+    const response = await authFetch(`${API_BASE}/cangjie/sdk/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deactivate: true }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '取消激活失败');
+    return data;
+  },
+
+  async remove(version: string, channel: SdkChannel): Promise<{ success: boolean }> {
+    const response = await authFetch(`${API_BASE}/cangjie/sdk/remove`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version, channel }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '删除 SDK 失败');
+    return data;
   },
 };
 

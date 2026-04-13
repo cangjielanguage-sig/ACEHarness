@@ -293,6 +293,13 @@ function AccountContent() {
               </button>
             </div>
           </div>
+          <button onClick={() => router.push('/account/system-settings')} className="w-full px-6 py-4 flex items-center justify-between hover:bg-muted/50 transition-colors">
+            <div className="flex items-center gap-3">
+              <span className="material-symbols-outlined text-muted-foreground">settings</span>
+              <span>系统设置</span>
+            </div>
+            <span className="material-symbols-outlined text-muted-foreground text-sm">chevron_right</span>
+          </button>
           <button onClick={() => setShowUserEnvVars(true)} className="w-full px-6 py-4 flex items-center justify-between hover:bg-muted/50 transition-colors">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-muted-foreground">key</span>

@@ -7,13 +7,22 @@ import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 import { loadEnvVars, buildEnvObject } from './env-manager';
+import { getEffectiveManagedCangjieHome } from './cangjie-sdk-manager';
 
 /**
  * Detect CANGJIE_HOME from user-configured env vars (env-vars.yaml) or process.env.
  * Returns the path or null if not found.
  */
 export async function detectCangjieHome(options?: { userId?: string }): Promise<string | null> {
-  // 1. Check user-configured env vars first (highest priority)
+  // 0. Check managed SDK first
+  try {
+    const managed = await getEffectiveManagedCangjieHome();
+    if (managed.cangjieHome && existsSync(managed.cangjieHome)) {
+      return managed.cangjieHome;
+    }
+  } catch { /* ignore */ }
+
+  // 1. Check user-configured env vars first (fallback)
   try {
     const vars = await loadEnvVars(options?.userId ? { scope: 'merged', userId: options.userId } : { scope: 'merged' });
     const envObj = buildEnvObject(vars);

@@ -14,9 +14,16 @@ interface RunCangjieRequest {
 }
 
 function sanitizeSourceName(name?: string) {
-  if (!name) return 'hello.cj';
-  const normalized = name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  return normalized.endsWith('.cj') ? normalized : `${normalized}.cj`;
+  if (!name) return 'main.cj';
+  // strip extensions, keep only alphanumeric/underscore, max 32 chars
+  const base = name
+    .replace(/\.[^.]*$/, '')          // strip last extension
+    .replace(/\.[^.]*$/, '')          // strip second-to-last extension (e.g. .cj.md → strip .md then .cj)
+    .replace(/[^a-zA-Z0-9_]/g, '_')  // replace non-alphanumeric with _
+    .replace(/^_+|_+$/g, '')          // trim leading/trailing underscores
+    .slice(0, 32)
+    || 'main';
+  return `${base}.cj`;
 }
 
 function runProcess(command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number }) {

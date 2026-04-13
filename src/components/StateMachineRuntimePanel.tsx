@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import { Progress } from './ui/progress';
 import {
   Activity,
   Clock,
@@ -92,18 +93,16 @@ export default function StateMachineRuntimePanel({
             {transitionCount} / {maxTransitions}
           </div>
           <div className="mt-2">
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
-              <div
-                className={`h-1.5 rounded-full transition-all ${
-                  transitionCount / maxTransitions > 0.8
-                    ? 'bg-red-500'
-                    : transitionCount / maxTransitions > 0.5
-                    ? 'bg-yellow-500'
-                    : 'bg-green-500'
-                }`}
-                style={{ width: `${(transitionCount / maxTransitions) * 100}%` }}
-              />
-            </div>
+            <Progress
+              value={(transitionCount / maxTransitions) * 100}
+              className={`h-1.5 ${
+                transitionCount / maxTransitions > 0.8
+                  ? '[&>[data-slot=progress-indicator]]:bg-red-500'
+                  : transitionCount / maxTransitions > 0.5
+                  ? '[&>[data-slot=progress-indicator]]:bg-yellow-500'
+                  : '[&>[data-slot=progress-indicator]]:bg-green-500'
+              }`}
+            />
           </div>
         </div>
 

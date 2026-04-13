@@ -63,7 +63,9 @@ export function NotebookCodeBlock({ editor, node, selected, getPos, updateAttrib
 
   useEffect(() => {
     if (!cellId) {
-      updateAttributes({ cellId: createNotebookCellId() });
+      queueMicrotask(() => {
+        updateAttributes({ cellId: createNotebookCellId() });
+      });
     }
   }, [cellId, updateAttributes]);
 

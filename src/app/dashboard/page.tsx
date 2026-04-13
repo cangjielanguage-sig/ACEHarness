@@ -12,7 +12,6 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import NewConfigModal from '@/components/NewConfigModal';
-import EnvVarsDialog from '@/components/EnvVarsDialog';
 import UserMenu from '@/components/UserMenu';
 import { RobotLogo } from '@/components/chat/ChatMessage';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
@@ -48,7 +47,6 @@ export default function DashboardPage() {
   const [recentRuns, setRecentRuns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
-  const [showEnvVars, setShowEnvVars] = useState(false);
   const [agentUsageData, setAgentUsageData] = useState<any[]>([]);
   const [activityData, setActivityData] = useState<any[]>([]);
   const [runningRuns, setRunningRuns] = useState<any[]>([]);
@@ -323,7 +321,7 @@ export default function DashboardPage() {
                   icon={Key}
                   label={t('dashboard.quickActions.envVars')}
                   desc={t('dashboard.quickActions.envVarsDesc')}
-                  onClick={() => setShowEnvVars(true)}
+                  onClick={() => router.push('/account/system-settings')}
                   color="from-amber-500 to-amber-600"
                 />
                 <QuickAction
@@ -518,10 +516,6 @@ export default function DashboardPage() {
             router.push(`/workbench/${encodeURIComponent(filename)}?mode=design`);
           }}
         />
-      )}
-
-      {showEnvVars && (
-        <EnvVarsDialog onClose={() => setShowEnvVars(false)} />
       )}
     </div>
   );

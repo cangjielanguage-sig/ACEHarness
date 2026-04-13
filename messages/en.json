@@ -29,8 +29,8 @@
       "apiDocs": "API Docs",
       "apiDocsDesc": "View REST API documentation",
       "chatMode": "Chat Mode",
-      "envVars": "Env Vars",
-      "envVarsDesc": "Manage process environment variables",
+      "envVars": "System Settings",
+      "envVarsDesc": "Manage system env vars, managed SDKs, and GitCode token",
       "globalNotebook": "Notebook",
       "globalNotebookDesc": "Open the shared collaboration space"
     },

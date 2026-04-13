@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Progress } from '@/components/ui/progress';
 
 // --- Schema Types ---
 
@@ -210,12 +211,7 @@ function ProgressBlock({ value, max = 100, label }: { value: number; max?: numbe
   return (
     <div className="space-y-1">
       {label && <div className="text-xs text-muted-foreground">{label}</div>}
-      <div className="h-2 rounded-full bg-muted overflow-hidden">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 transition-all duration-500"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      <Progress value={pct} className="h-2 [&>[data-slot=progress-indicator]]:bg-gradient-to-r [&>[data-slot=progress-indicator]]:from-blue-500 [&>[data-slot=progress-indicator]]:to-cyan-500" />
     </div>
   );
 }

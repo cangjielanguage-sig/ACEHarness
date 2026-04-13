@@ -69,13 +69,14 @@ export function NotebookEditor({
 
   const handleRunCell = useCallback(async ({ code, cellId }: { pos: number; cellId: string; language: string; code: string }) => {
     try {
-      const result = await workspaceApi.runCangjie(code, `${filePath.split('/').pop() || 'snippet'}.${cellId}.cj`, 'markdown');
-      const output = [result.stdout, result.stderr].filter(Boolean).join('\n') || '无输出';
-      toast(result.success ? 'success' : 'error', result.success ? '运行完成' : '运行失败');
+      const result = await workspaceApi.runCangjie(code, `cell_${cellId}`, 'markdown');
+      const output = result.combinedOutput || [result.stdout, result.stderr].filter(Boolean).join('\n') || result.error || '无输出';
+      toast(result.success ? 'success' : 'error', result.success ? '运行完成' : (result.error || '运行失败'));
       return { output, success: result.success };
     } catch (error: any) {
-      toast('error', error?.message || '运行失败');
-      return { output: null, success: false };
+      const message = error?.message || '运行失败';
+      toast('error', message);
+      return { output: message, success: false };
     }
   }, [filePath, toast]);
 

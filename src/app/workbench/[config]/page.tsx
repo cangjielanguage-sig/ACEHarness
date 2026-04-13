@@ -22,6 +22,7 @@ import Markdown from '@/components/Markdown';
 import ResizablePanels from '@/components/ResizablePanels';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { MultiCombobox } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -2649,12 +2650,9 @@ export default function WorkbenchPage() {
                   </div>
                   <div className="w-full h-2 rounded bg-background border overflow-hidden">
                     {preparingProgress && preparingProgress.percent !== null ? (
-                      <div
-                        className="h-full bg-blue-500 transition-all duration-300"
-                        style={{ width: `${Math.max(0, Math.min(100, preparingProgress.percent ?? 0))}%` }}
-                      />
+                      <Progress value={Math.max(0, Math.min(100, preparingProgress.percent ?? 0))} className="h-2 rounded" />
                     ) : (
-                      <div className="h-full w-1/3 bg-blue-500/70 animate-pulse" />
+                      <Progress value={null} className="h-2 rounded [&>[data-slot=progress-indicator]]:w-1/3 [&>[data-slot=progress-indicator]]:animate-pulse [&>[data-slot=progress-indicator]]:bg-blue-500/70" />
                     )}
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-1">
