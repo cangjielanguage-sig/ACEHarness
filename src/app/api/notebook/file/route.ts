@@ -22,15 +22,15 @@ export async function GET(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    if (!auth.personalDir) {
-      return NextResponse.json({ error: '用户未配置个人目录' }, { status: 400 });
-    }
-
     const { searchParams } = new URL(request.url);
     const file = searchParams.get('file');
     const mode = searchParams.get('mode');
     const scope = normalizeNotebookScope(searchParams.get('scope'));
     const shareToken = searchParams.get('shareToken') || '';
+
+    if (scope === 'personal' && !auth.personalDir) {
+      return NextResponse.json({ error: '用户未配置个人目录' }, { status: 400 });
+    }
 
     if (!file) {
       return NextResponse.json({ error: '缺少 file 参数' }, { status: 400 });
@@ -96,13 +96,13 @@ export async function PUT(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    if (!auth.personalDir) {
-      return NextResponse.json({ error: '用户未配置个人目录' }, { status: 400 });
-    }
-
     const body = await request.json();
     const { file, content, scope: rawScope, shareToken } = body;
     const scope = normalizeNotebookScope(rawScope);
+
+    if (scope === 'personal' && !auth.personalDir) {
+      return NextResponse.json({ error: '用户未配置个人目录' }, { status: 400 });
+    }
 
     if (!file || content === undefined) {
       return NextResponse.json({ error: '缺少 file 或 content 参数' }, { status: 400 });

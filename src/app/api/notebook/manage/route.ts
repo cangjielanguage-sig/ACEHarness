@@ -21,13 +21,13 @@ export async function POST(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    if (!auth.personalDir) {
-      return NextResponse.json({ error: '用户未配置个人目录' }, { status: 400 });
-    }
-
     const body = await request.json();
     const { action, scope: rawScope, shareToken, ...params } = body;
     const scope = normalizeNotebookScope(rawScope);
+
+    if (scope === 'personal' && !auth.personalDir) {
+      return NextResponse.json({ error: '用户未配置个人目录' }, { status: 400 });
+    }
 
     if (!action) {
       return NextResponse.json({ error: '缺少 action 参数' }, { status: 400 });

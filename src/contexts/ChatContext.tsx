@@ -161,6 +161,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [globalEngine, setGlobalEngine] = useState('claude-code');
   const effectiveEngine = engine || globalEngine;
 
+  const refreshGlobalEngineConfig = useCallback(() => {
+    fetch('/api/engine').then(r => r.json()).then(data => {
+      if (data.engine) setGlobalEngine(data.engine);
+      const savedModel = typeof window !== 'undefined' ? localStorage.getItem('chat-model') : null;
+      if (!savedModel && data.defaultModel) setModel(data.defaultModel);
+    }).catch(() => {});
+  }, []);
+
   const handleSetEngine = useCallback((e: string) => {
     setEngineState(e);
     if (typeof window !== 'undefined') {
@@ -177,14 +185,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     updateActiveSession(s => ({ ...s, model: m }));
   }, []);
 
-  // Load global engine config and default model on mount
+  // Load global engine config and default model on mount, and keep it in sync with engine settings page
   useEffect(() => {
-    fetch('/api/engine').then(r => r.json()).then(data => {
-      if (data.engine) setGlobalEngine(data.engine);
-      const savedModel = typeof window !== 'undefined' ? localStorage.getItem('chat-model') : null;
-      if (!savedModel && data.defaultModel) setModel(data.defaultModel);
-    }).catch(() => {});
-  }, []);
+    refreshGlobalEngineConfig();
+    const onEngineUpdated = () => refreshGlobalEngineConfig();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'engine-config-updated-at') refreshGlobalEngineConfig();
+    };
+    window.addEventListener('engine:updated', onEngineUpdated as EventListener);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('engine:updated', onEngineUpdated as EventListener);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [refreshGlobalEngineConfig]);
 
   const [skillSettings, setSkillSettings] = useState<Record<string, boolean>>({ 'power-gitcode': true });
   const [discoveredSkills, setDiscoveredSkills] = useState<{ name: string; label: string; description: string; source?: string; tags?: string[] }[]>([]);

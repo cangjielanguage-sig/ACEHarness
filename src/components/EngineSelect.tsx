@@ -18,11 +18,23 @@ export function EngineSelect({ value, onChange, className = '', allowGlobal = fa
   const [globalEngine, setGlobalEngine] = useState('claude-code');
 
   useEffect(() => {
-    if (allowGlobal) {
+    if (!allowGlobal) return;
+    const refresh = () => {
       fetch('/api/engine').then(r => r.json()).then(d => {
         if (d.engine) setGlobalEngine(d.engine);
       }).catch(() => {});
-    }
+    };
+    refresh();
+    const onEngineUpdated = () => refresh();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'engine-config-updated-at') refresh();
+    };
+    window.addEventListener('engine:updated', onEngineUpdated as EventListener);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('engine:updated', onEngineUpdated as EventListener);
+      window.removeEventListener('storage', onStorage);
+    };
   }, [allowGlobal]);
 
   const globalLabel = getEngineMeta(globalEngine)?.name || globalEngine;
@@ -61,9 +73,22 @@ export function useCurrentEngine(override?: string): string {
   const [globalEngine, setGlobalEngine] = useState('claude-code');
 
   useEffect(() => {
-    fetch('/api/engine').then(r => r.json()).then(d => {
-      if (d.engine) setGlobalEngine(d.engine);
-    }).catch(() => {});
+    const refresh = () => {
+      fetch('/api/engine').then(r => r.json()).then(d => {
+        if (d.engine) setGlobalEngine(d.engine);
+      }).catch(() => {});
+    };
+    refresh();
+    const onEngineUpdated = () => refresh();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'engine-config-updated-at') refresh();
+    };
+    window.addEventListener('engine:updated', onEngineUpdated as EventListener);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('engine:updated', onEngineUpdated as EventListener);
+      window.removeEventListener('storage', onStorage);
+    };
   }, []);
 
   return override || globalEngine;

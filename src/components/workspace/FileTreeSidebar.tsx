@@ -16,6 +16,7 @@ import {
   ContextMenuSeparator,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
+import { useToast } from "@/components/ui/toast"
 
 export interface ClipboardItem {
   path: string
@@ -37,6 +38,12 @@ interface FileTreeSidebarProps {
   notebookScope?: NotebookScope
   notebookShareToken?: string
   notebookPermission?: 'read' | 'write'
+}
+
+function formatErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error.trim()) return error
+  return fallback
 }
 
 // Inline rename input
@@ -88,6 +95,7 @@ const TreeContext = React.createContext<{
   notebookShareToken?: string
   notebookPermission: 'read' | 'write'
   notebookCanWrite: boolean
+  toast: (type: "success" | "error" | "info" | "warning", message: string) => void
 } | null>(null)
 
 function useTreeCtx() {
@@ -301,7 +309,22 @@ function TreeFileItem({
 }: {
   node: TreeNode; selectedFile: string | null; depth: number
 }) {
-  const { workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, onSelectFile, onDeletedPath, contextTarget, setContextTarget, notebookScope, notebookShareToken, notebookCanWrite } = useTreeCtx()
+  const {
+    workspacePath,
+    mode,
+    setClipboard,
+    onRefresh,
+    renamingPath,
+    setRenamingPath,
+    onSelectFile,
+    onDeletedPath,
+    contextTarget,
+    setContextTarget,
+    notebookScope,
+    notebookShareToken,
+    notebookCanWrite,
+    toast,
+  } = useTreeCtx()
 
   const handleRename = async (newName: string) => {
     const parent = getParentDir(node.path)
@@ -314,7 +337,9 @@ function TreeFileItem({
         await workspaceApi.manage(workspacePath, "rename", { oldPath: node.path, newPath })
       }
       onRefresh()
-    } catch {}
+    } catch (error) {
+      toast("error", formatErrorMessage(error, "重命名失败"))
+    }
     setRenamingPath(null)
   }
 
@@ -329,7 +354,9 @@ function TreeFileItem({
       }
       onDeletedPath?.(node.path)
       onRefresh()
-    } catch {}
+    } catch (error) {
+      toast("error", formatErrorMessage(error, "删除失败"))
+    }
   }
 
   const handleCopyBetweenScopes = async () => {
@@ -346,7 +373,9 @@ function TreeFileItem({
         },
         { scope: notebookScope }
       )
-    } catch {}
+    } catch (error) {
+      toast("error", formatErrorMessage(error, "跨空间复制失败"))
+    }
   }
 
   if (renamingPath === node.path) {
@@ -399,7 +428,25 @@ function TreeDirItem({
 }: {
   node: TreeNode; selectedFile: string | null; depth: number
 }) {
-  const { workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, onDeletedPath, contextTarget, setContextTarget, notebookScope, notebookShareToken, notebookCanWrite } = useTreeCtx()
+  const {
+    workspacePath,
+    mode,
+    clipboard,
+    setClipboard,
+    onRefresh,
+    renamingPath,
+    setRenamingPath,
+    creatingIn,
+    setCreatingIn,
+    onSelectFile,
+    onDeletedPath,
+    contextTarget,
+    setContextTarget,
+    notebookScope,
+    notebookShareToken,
+    notebookCanWrite,
+    toast,
+  } = useTreeCtx()
   const [children, setChildren] = React.useState<TreeNode[] | undefined>(node.children)
   const [loadingChildren, setLoadingChildren] = React.useState(false)
 
@@ -420,10 +467,12 @@ function TreeDirItem({
             setChildren(data.tree || [])
           }
         }
-      } catch {}
+      } catch (error) {
+        toast("error", formatErrorMessage(error, `加载目录失败：${node.name}`))
+      }
       setLoadingChildren(false)
     }
-  }, [children, loadingChildren, workspacePath, node.path, mode, notebookScope, notebookShareToken])
+  }, [children, loadingChildren, workspacePath, node.path, mode, notebookScope, notebookShareToken, toast, node.name])
 
   const handleRename = async (newName: string) => {
     const parent = getParentDir(node.path)
@@ -436,7 +485,9 @@ function TreeDirItem({
         await workspaceApi.manage(workspacePath, "rename", { oldPath: node.path, newPath })
       }
       onRefresh()
-    } catch {}
+    } catch (error) {
+      toast("error", formatErrorMessage(error, "重命名失败"))
+    }
     setRenamingPath(null)
   }
 
@@ -451,7 +502,9 @@ function TreeDirItem({
       }
       onDeletedPath?.(node.path)
       onRefresh()
-    } catch {}
+    } catch (error) {
+      toast("error", formatErrorMessage(error, "删除失败"))
+    }
   }
 
   const handlePaste = async () => {
@@ -476,7 +529,9 @@ function TreeDirItem({
         setClipboard(null)
       }
       onRefresh()
-    } catch {}
+    } catch (error) {
+      toast("error", formatErrorMessage(error, "粘贴失败"))
+    }
   }
 
   const handleCreateConfirm = async (name: string) => {
@@ -490,7 +545,9 @@ function TreeDirItem({
         await workspaceApi.manage(workspacePath, creatingIn.type === "file" ? "create-file" : "create-folder", { path: newPath })
       }
       onRefresh()
-    } catch {}
+    } catch (error) {
+      toast("error", formatErrorMessage(error, `创建${creatingIn.type === "file" ? "文件" : "文件夹"}失败`))
+    }
     setCreatingIn(null)
   }
 
@@ -508,7 +565,9 @@ function TreeDirItem({
         },
         { scope: notebookScope }
       )
-    } catch {}
+    } catch (error) {
+      toast("error", formatErrorMessage(error, "跨空间复制失败"))
+    }
   }
 
   if (renamingPath === node.path) {
@@ -591,6 +650,7 @@ export function FileTreeSidebar({
   notebookShareToken,
   notebookPermission = 'write',
 }: FileTreeSidebarProps) {
+  const { toast } = useToast()
   const notebookCanWrite = mode !== 'notebook' || notebookPermission === 'write'
   const workspaceName = mode === "notebook" ? "Cangjie Notebook" : (workspacePath.split("/").filter(Boolean).pop() || "Workspace")
   const [renamingPath, setRenamingPath] = React.useState<string | null>(null)
@@ -618,7 +678,9 @@ export function FileTreeSidebar({
         setClipboard(null)
       }
       onRefresh()
-    } catch {}
+    } catch (error) {
+      toast("error", formatErrorMessage(error, "粘贴失败"))
+    }
   }
 
   const handleRootCreateConfirm = async (name: string) => {
@@ -632,14 +694,16 @@ export function FileTreeSidebar({
         await workspaceApi.manage(workspacePath, creatingIn.type === "file" ? "create-file" : "create-folder", { path: name })
       }
       onRefresh()
-    } catch {}
+    } catch (error) {
+      toast("error", formatErrorMessage(error, `创建${creatingIn.type === "file" ? "文件" : "文件夹"}失败`))
+    }
     setCreatingIn(null)
   }
 
   const isCreatingAtRoot = creatingIn?.dir === ""
 
   return (
-    <TreeContext.Provider value={{ workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, onDeletedPath, contextTarget, setContextTarget, notebookScope, notebookShareToken, notebookPermission, notebookCanWrite }}>
+    <TreeContext.Provider value={{ workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, onDeletedPath, contextTarget, setContextTarget, notebookScope, notebookShareToken, notebookPermission, notebookCanWrite, toast }}>
       <div className="flex flex-col h-full bg-card">
         <div className="flex items-center gap-2 px-3 py-2 border-b shrink-0">
           <img src={`${FILE_TYPE_ICON_DIR}/folder.svg`} alt="" aria-hidden className="h-4 w-4 shrink-0" />

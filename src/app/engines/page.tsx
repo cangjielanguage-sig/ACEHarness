@@ -101,6 +101,12 @@ export default function EnginesPage() {
   const [engineAvailability, setEngineAvailability] = useState<Record<string, boolean>>({});
   const [checkingAvailability, setCheckingAvailability] = useState(false);
 
+  const broadcastEngineUpdated = () => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('engine-config-updated-at', String(Date.now()));
+    window.dispatchEvent(new CustomEvent('engine:updated'));
+  };
+
   useEffect(() => {
     loadCurrentEngine();
     checkEngineAvailability();
@@ -189,6 +195,7 @@ export default function EnginesPage() {
         if (defaultModel && !compatible.find(m => m.value === defaultModel)) {
           setDefaultModel('');
         }
+        broadcastEngineUpdated();
         toast('success', `已切换到 ${engine?.name} 引擎`);
       } else {
         toast('error', '切换引擎失败');
@@ -209,6 +216,7 @@ export default function EnginesPage() {
       if (response.ok) {
         setDefaultModel(modelValue);
         const label = models.find(m => m.value === modelValue)?.label || modelValue;
+        broadcastEngineUpdated();
         toast('success', `默认模型已设置: ${label}`);
       }
     } catch (error) {

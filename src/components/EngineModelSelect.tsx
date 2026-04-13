@@ -22,10 +22,23 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
   const { toast } = useToast();
 
   useEffect(() => {
-    fetch('/api/models').then(r => r.json()).then(d => setModels(d.models || [])).catch(() => {});
-    fetch('/api/engine').then(r => r.json()).then(d => {
-      if (d.engine) setGlobalEngine(d.engine);
-    }).catch(() => {});
+    const refresh = () => {
+      fetch('/api/models').then(r => r.json()).then(d => setModels(d.models || [])).catch(() => {});
+      fetch('/api/engine').then(r => r.json()).then(d => {
+        if (d.engine) setGlobalEngine(d.engine);
+      }).catch(() => {});
+    };
+    refresh();
+    const onEngineUpdated = () => refresh();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'engine-config-updated-at') refresh();
+    };
+    window.addEventListener('engine:updated', onEngineUpdated as EventListener);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('engine:updated', onEngineUpdated as EventListener);
+      window.removeEventListener('storage', onStorage);
+    };
   }, []);
 
   const effectiveEngine = engine || globalEngine;

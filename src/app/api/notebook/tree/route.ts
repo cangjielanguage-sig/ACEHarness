@@ -68,15 +68,16 @@ export async function GET(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    if (!auth.personalDir) {
-      return NextResponse.json({ error: '用户未配置个人目录' }, { status: 400 });
-    }
-
     const { searchParams } = new URL(request.url);
     const scope = normalizeNotebookScope(searchParams.get('scope'));
     const maxDepth = Math.min(parseInt(searchParams.get('depth') || '2', 10), 10);
     const subPath = searchParams.get('sub') || '';
     const shareToken = searchParams.get('shareToken') || '';
+
+    if (scope === 'personal' && !auth.personalDir) {
+      return NextResponse.json({ error: '用户未配置个人目录' }, { status: 400 });
+    }
+
     const notebookRoot = await ensureNotebookRoot(scope, auth.personalDir);
     const targetPath = safeResolve(notebookRoot, subPath);
 
