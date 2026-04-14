@@ -9,12 +9,14 @@ import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import { useToast } from '@/components/ui/toast';
 import { workspaceApi } from '@/lib/api';
 import { NOTEBOOK_OUTPUT_ATTR } from '@/lib/notebook-markdown';
+import { copyText } from '@/lib/clipboard';
 import styles from './Markdown.module.css';
 
 function CopyButton({ text, className = 'absolute top-2 right-2' }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(text).then(() => {
+    void copyText(text).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });

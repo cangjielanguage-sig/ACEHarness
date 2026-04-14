@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { createNotebookCellId, displayNotebookCellId, isRunnableNotebookLanguage, normalizeNotebookLanguage } from '@/lib/notebook-markdown';
+import { copyText } from '@/lib/clipboard';
 
 interface NotebookCodeBlockProps extends ReactNodeViewProps {
   onRunCell: (payload: { pos: number; cellId: string; language: string; code: string; dependsOn: string[] }) => Promise<{ output: string | null; success: boolean }>;
@@ -81,7 +82,11 @@ export function NotebookCodeBlock({ editor, node, selected, getPos, updateAttrib
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(code);
+      const ok = await copyText(code);
+      if (!ok) {
+        setCopying(false);
+        return;
+      }
       setCopying(true);
       if (copyTimerRef.current) {
         window.clearTimeout(copyTimerRef.current);
@@ -222,11 +227,47 @@ interface NotebookOutputBlockProps extends ReactNodeViewProps {}
 export function NotebookOutputBlock({ node }: NotebookOutputBlockProps) {
   const summary = String(node.attrs.summary || 'Output');
   const output = String(node.attrs.output || '');
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyOutput = async () => {
+    try {
+      const ok = await copyText(output || '');
+      if (!ok) {
+        setCopied(false);
+        return;
+      }
+      setCopied(true);
+      if (copyTimerRef.current) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   return (
     <NodeViewWrapper className="my-3 rounded-lg border bg-muted/30">
-      <div contentEditable={false} className="border-b px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {summary}
+      <div contentEditable={false} className="border-b px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground flex items-center justify-between gap-2">
+        <span>{summary}</span>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-normal normal-case tracking-normal hover:bg-accent"
+          onClick={handleCopyOutput}
+          title="复制输出"
+        >
+          <span className="material-symbols-outlined text-[14px]">{copied ? 'check' : 'content_copy'}</span>
+          {copied ? '已复制' : '复制'}
+        </button>
       </div>
       <div contentEditable={false} className="px-3 py-3">
         <pre className="m-0 overflow-x-auto whitespace-pre-wrap break-words rounded-md border bg-background px-3 py-2 text-[13px] leading-6 text-foreground">

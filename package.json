@@ -68,6 +68,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "copy-to-clipboard": "^3.3.3",
     "framer-motion": "^12.34.0",
     "lib0": "^0.2.117",
     "lowlight": "^3.3.0",

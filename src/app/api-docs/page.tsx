@@ -8,6 +8,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useTranslations } from '@/hooks/useTranslations';
+import { copyText } from '@/lib/clipboard';
 
 interface ApiEndpoint {
   method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
@@ -285,8 +286,9 @@ export default function ApiDocsPage() {
 
   const totalEndpoints = API_DATA.reduce((sum, cat) => sum + cat.endpoints.length, 0);
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string) => {
+    const ok = await copyText(text);
+    if (!ok) return;
     setCopiedPath(text);
     setTimeout(() => setCopiedPath(null), 2000);
   };

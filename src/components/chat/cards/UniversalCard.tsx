@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Progress } from '@/components/ui/progress';
+import { copyText } from '@/lib/clipboard';
 
 // --- Schema Types ---
 
@@ -184,8 +185,9 @@ function TextBlock({ content, maxLines }: { content: string; maxLines?: number }
 
 function CodeBlock({ code, lang, copyable }: { code: string; lang?: string; copyable?: boolean }) {
   const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
+  const handleCopy = async () => {
+    const ok = await copyText(code);
+    if (!ok) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

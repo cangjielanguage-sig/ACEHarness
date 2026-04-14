@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Copy, Download, Loader2, Save } from 'lucide-react';
 import { workspaceApi, type NotebookScope } from '@/lib/api';
 import { useToast } from '@/components/ui/toast';
+import { copyText } from '@/lib/clipboard';
 
 const RichNotebookEditor = dynamic(() => import('./RichNotebookEditor').then((mod) => mod.RichNotebookEditor), {
   ssr: false,
@@ -109,8 +110,12 @@ export function NotebookEditor({
     params.set('notebookShare', shared.token);
     params.set('notebookPermission', shared.permission);
     const url = `${typeof window !== 'undefined' ? window.location.origin : ''}${path}?${params.toString()}`;
-    await navigator.clipboard.writeText(url);
-    toast('success', 'Notebook 分享链接已复制');
+    const ok = await copyText(url);
+    if (ok) {
+      toast('success', 'Notebook 分享链接已复制');
+    } else {
+      toast('error', '复制失败，请手动复制链接');
+    }
   }, [filePath, permission, scope, shareToken, toast]);
 
   useEffect(() => {

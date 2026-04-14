@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import Markdown from '@/components/Markdown';
 import styles from '@/app/workbench/[config]/page.module.css';
+import { copyText } from '@/lib/clipboard';
 
 interface TokenUsage {
   inputTokens: number;
@@ -65,8 +66,8 @@ export default function AgentPanel({ agent, logs, onClearLogs, stepSummary }: Ag
     return texts[status] || status;
   };
 
-  const copyOutput = () => {
-    if (agent.output) navigator.clipboard.writeText(agent.output);
+  const copyOutput = async () => {
+    if (agent.output) await copyText(agent.output);
   };
 
   const formatTokens = (n: number) => {

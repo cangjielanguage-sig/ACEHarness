@@ -45,6 +45,7 @@ import xml from 'highlight.js/lib/languages/xml';
 import bash from 'highlight.js/lib/languages/bash';
 import yaml from 'highlight.js/lib/languages/yaml';
 import markdown from 'highlight.js/lib/languages/markdown';
+import { copyText } from '@/lib/clipboard';
 import python from 'highlight.js/lib/languages/python';
 import java from 'highlight.js/lib/languages/java';
 import cpp from 'highlight.js/lib/languages/cpp';
@@ -974,7 +975,7 @@ export function RichNotebookEditor({
     const range = getCurrentNodeRange();
     if (!range || !editor) return;
     const text = editor.state.doc.textBetween(range.from, range.to, '\n\n');
-    await navigator.clipboard.writeText(text);
+    await copyText(text);
     setMenuOpen(false);
   }, [editor, getCurrentNodeRange]);
 
