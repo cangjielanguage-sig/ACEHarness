@@ -1,0 +1,489 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scrollbar-gutter: stable;
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 221.2 83.2% 53.3%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 221.2 83.2% 53.3%;
+
+    /* Flow diagram semantic colors */
+    --flow-bg: 210 20% 96%;
+    --flow-success: 142 71% 35%;
+    --flow-error: 0 72% 51%;
+    --flow-warning: 25 95% 53%;
+    --flow-info: 217 91% 60%;
+    --flow-judge: 43 96% 56%;
+    --flow-defender: 207 44% 57%;
+    --flow-attacker: 25 60% 50%;
+    --flow-node-bg: 0 0% 98%;
+    --flow-node-border: 214 32% 91%;
+    --flow-step-bg: 0 0% 100%;
+    --flow-step-number: 215 16% 47%;
+    --flow-step-text: 222 47% 11%;
+    --flow-agent-text: 215 16% 47%;
+    --flow-group-bg: 217 91% 60% / 0.06;
+    --flow-group-border: 214 32% 91%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 217.2 91.2% 59.8%;
+    --sidebar-primary-foreground: 222.2 47.4% 11.2%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 224.3 76.3% 48%;
+
+    /* Flow diagram semantic colors */
+    --flow-bg: 222 84% 5%;
+    --flow-success: 100 33% 40%;
+    --flow-error: 1 52% 55%;
+    --flow-warning: 25 60% 50%;
+    --flow-info: 213 53% 53%;
+    --flow-judge: 43 100% 71%;
+    --flow-defender: 207 44% 57%;
+    --flow-attacker: 25 60% 50%;
+    --flow-node-bg: 220 13% 24%;
+    --flow-node-border: 220 7% 32%;
+    --flow-step-bg: 220 10% 20%;
+    --flow-step-number: 220 7% 32%;
+    --flow-step-text: 213 32% 73%;
+    --flow-agent-text: 0 0% 50%;
+    --flow-group-bg: 213 53% 53% / 0.06;
+    --flow-group-border: 220 7% 32%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  .dark body {
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -20%, hsl(217 91% 60% / 0.08), transparent),
+      radial-gradient(ellipse 60% 40% at 100% 50%, hsl(260 80% 50% / 0.05), transparent),
+      radial-gradient(ellipse 60% 40% at 0% 80%, hsl(200 80% 50% / 0.04), transparent),
+      linear-gradient(180deg, hsl(222 84% 4.9%) 0%, hsl(225 60% 6%) 100%);
+    background-attachment: fixed;
+  }
+  html, body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
+  .thin-scrollbar { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+  .thin-scrollbar::-webkit-scrollbar { height: 6px; }
+  .thin-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .thin-scrollbar::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+  .thin-scrollbar::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }
+}
+
+/* Tiptap task list styles */
+ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0!important;
+}
+
+ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.25rem 0;
+}
+
+ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  user-select: none;
+}
+
+ul[data-type="taskList"] li > label input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid hsl(var(--muted-foreground) / 0.4);
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  background: transparent;
+  margin-top: 4px;
+}
+
+ul[data-type="taskList"] li > label input[type="checkbox"]:hover {
+  border-color: hsl(var(--primary));
+}
+
+ul[data-type="taskList"] li > label input[type="checkbox"]:checked {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+}
+
+ul[data-type="taskList"] li > label input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0px;
+  width: 6px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+ul[data-type="taskList"] li > div {
+  flex: 1;
+  min-width: 0;
+}
+
+ul[data-type="taskList"] > li > div > p:first-child {
+  margin: 0;
+}
+
+ul[data-type="taskList"] ul[data-type="taskList"] {
+  padding-left: 0!important;
+}
+
+/* Notebook drag handle (Notion-like) */
+.drag-handle {
+  position: absolute;
+  z-index: 50;
+}
+
+.notebook-rich-editor .drag-handle {
+  margin-left: -10px;
+}
+
+.notebook-drag-handle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.drag-handle[style*="visible"] .notebook-drag-handle,
+.drag-handle:not([style*="hidden"]) .notebook-drag-handle {
+  opacity: 1;
+}
+
+.notebook-drag-handle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.5rem;
+  border: none;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  border-radius: 0.25rem;
+  cursor: grab;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.notebook-drag-handle-btn:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+}
+
+.notebook-drag-handle-delete {
+  cursor: pointer;
+}
+
+.notebook-drag-handle-delete:hover {
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 0.1);
+}
+
+/* Override react-resizable-panels cursor on handle button */
+button[data-resize-btn][data-resize-btn],
+button[data-resize-btn][data-resize-btn]:hover {
+  cursor: pointer !important;
+}
+
+/* Sci-fi grid overlay for dark mode */
+.dark .sci-fi-grid {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(hsl(217 91% 60% / 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(217 91% 60% / 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, black 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, black 30%, transparent 80%);
+}
+
+/* Animated glow orb */
+.dark .sci-fi-grid::after {
+  content: '';
+  position: absolute;
+  width: 800px;
+  height: 800px;
+  border-radius: 50%;
+  background: radial-gradient(circle, hsl(217 91% 60% / 0.12), transparent 70%);
+  top: -300px;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: glowDrift 12s ease-in-out infinite alternate;
+}
+
+@keyframes glowDrift {
+  0% { transform: translateX(-50%) translateY(0); opacity: 0.7; }
+  50% { transform: translateX(-30%) translateY(60px); opacity: 1; }
+  100% { transform: translateX(-70%) translateY(-30px); opacity: 0.6; }
+}
+
+/* Siri-style bottom glow bar */
+.dark .siri-glow {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 120px;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.dark .siri-glow .orb {
+  position: absolute;
+  bottom: -40px;
+  border-radius: 50%;
+  filter: blur(40px);
+}
+
+.dark .siri-glow .orb-1 {
+  width: 300px;
+  height: 120px;
+  left: 15%;
+  background: hsl(217 91% 60% / 0.25);
+  animation: siriPulse1 4s ease-in-out infinite;
+}
+
+.dark .siri-glow .orb-2 {
+  width: 250px;
+  height: 100px;
+  left: 35%;
+  background: hsl(280 80% 60% / 0.2);
+  animation: siriPulse2 5s ease-in-out infinite;
+}
+
+.dark .siri-glow .orb-3 {
+  width: 280px;
+  height: 110px;
+  left: 55%;
+  background: hsl(190 80% 55% / 0.22);
+  animation: siriPulse3 4.5s ease-in-out infinite;
+}
+
+.dark .siri-glow .orb-4 {
+  width: 220px;
+  height: 90px;
+  left: 72%;
+  background: hsl(330 70% 55% / 0.18);
+  animation: siriPulse4 5.5s ease-in-out infinite;
+}
+
+@keyframes siriPulse1 {
+  0%, 100% { opacity: 0.4; transform: translateX(0) scaleX(1); }
+  50% { opacity: 1; transform: translateX(20px) scaleX(1.2); }
+}
+
+@keyframes siriPulse2 {
+  0%, 100% { opacity: 0.8; transform: translateX(0) scaleX(1.1); }
+  50% { opacity: 0.3; transform: translateX(-30px) scaleX(0.9); }
+}
+
+@keyframes siriPulse3 {
+  0%, 100% { opacity: 0.3; transform: translateX(0) scaleX(0.9); }
+  50% { opacity: 0.9; transform: translateX(15px) scaleX(1.15); }
+}
+
+@keyframes siriPulse4 {
+  0%, 100% { opacity: 0.7; transform: translateX(0) scaleX(1); }
+  50% { opacity: 0.25; transform: translateX(-20px) scaleX(1.1); }
+}
+
+/* Material Symbols - prevent text fallback during font load */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  /* Hide text content until font loads */
+  font-display: block;
+  /* Prevent layout shift */
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  line-height: 1;
+  text-align: center;
+  vertical-align: middle;
+  /* Hide text fallback */
+  color: transparent;
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+/* Show icon only when font is loaded */
+@supports (font-variation-settings: normal) {
+  .material-symbols-outlined {
+    color: inherit;
+  }
+}
+
+/* Dashboard animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes glow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes botBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes dotFade {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+
+@keyframes robotPulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0px rgba(99, 102, 241, 0));
+  }
+  50% {
+    transform: scale(1.05);
+    filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.5));
+  }
+}
+
+@keyframes robotGlow {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(99, 102, 241, 0.3)); }
+  50% { filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.8)); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow 3s ease-in-out infinite;
+}
+
+.animate-robotPulse {
+  animation: robotPulse 2s ease-in-out infinite;
+}
+
+.animate-robotGlow {
+  animation: robotGlow 2s ease-in-out infinite;
+}
+
+.animate-dotFade {
+  animation: dotFade 1.4s ease-in-out infinite;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.animate-gradientShift {
+  animation: gradientShift 3s ease linear infinite;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeInUp {
+  animation: fadeInUp 0.8s ease-out forwards;
+}
+
+.delay-1000 {
+  animation-delay: 1s;
+}
+
+.delay-2000 {
+  animation-delay: 2s;
+}

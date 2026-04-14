@@ -1,0 +1,226 @@
+{
+  "dashboard": {
+    "title": "ACEHarness 控制中心",
+    "subtitle": "全流程 Multi-Agent 智能编排系统",
+    "stats": {
+      "totalRuns": "总运行次数",
+      "successRate": "成功率",
+      "avgDuration": "平均耗时",
+      "activeProcesses": "活跃进程"
+    },
+    "quickActions": {
+      "title": "快速操作",
+      "newWorkflow": "新建工作流",
+      "newWorkflowDesc": "创建并启动新的编排流程",
+      "manageAgents": "Agent 管理",
+      "manageAgentsDesc": "配置 Agent 角色与能力",
+      "viewHistory": "查看历史",
+      "settings": "设置",
+      "models": "模型管理",
+      "modelsDesc": "管理可用的 AI 模型",
+      "workflows": "工作流管理",
+      "workflowsDesc": "查看和管理所有工作流",
+      "skills": "Skills 管理",
+      "skillsDesc": "管理 Agent 技能插件",
+      "engines": "引擎管理",
+      "enginesDesc": "配置执行引擎参数",
+      "schedules": "定时任务",
+      "schedulesDesc": "设置定时自动执行任务",
+      "apiDocs": "API 文档",
+      "apiDocsDesc": "查看 REST API 接口文档",
+      "chatMode": "对话模式",
+      "envVars": "系统设置",
+      "envVarsDesc": "管理系统环境变量、托管 SDK 与 GitCode Token"
+      ,
+      "globalNotebook": "Notebook",
+      "globalNotebookDesc": "打开系统共享与协作空间"
+    },
+    "charts": {
+      "agentUsage": "Agent 使用统计",
+      "weeklyActivity": "每周活动",
+      "calls": "调用次数",
+      "cost": "费用 ($)"
+    },
+    "sections": {
+      "activeWorkflows": "活跃工作流",
+      "recentRuns": "最近运行",
+      "phases": "个阶段",
+      "noActiveWorkflows": "暂无活跃工作流"
+    },
+    "status": {
+      "pending": "待启动",
+      "completed": "已完成",
+      "failed": "失败",
+      "running": "运行中",
+      "stopped": "已停止",
+      "crashed": "崩溃"
+    },
+    "weekdays": ["周日", "周一", "周二", "周三", "周四", "周五", "周六"],
+    "starting": "启动中"
+  },
+  "agents": {
+    "title": "Agent 管理",
+    "new": "新建 Agent",
+    "search": "搜索 Agent...",
+    "team": "团队",
+    "category": "分类",
+    "tags": "标签",
+    "all": "全部",
+    "blue": "蓝队",
+    "red": "红队",
+    "judge": "裁判",
+    "edit": "编辑",
+    "delete": "删除",
+    "save": "保存",
+    "cancel": "取消"
+  },
+  "models": {
+    "title": "模型管理",
+    "subtitle": "配置 AI 模型选项",
+    "addNew": "添加新模型",
+    "configured": "已配置模型",
+    "modelValue": "模型值",
+    "displayLabel": "显示标签",
+    "costMultiplier": "费用倍率",
+    "addModel": "添加模型",
+    "value": "值",
+    "label": "标签",
+    "saveChanges": "保存更改",
+    "saving": "保存中...",
+    "loading": "加载模型中...",
+    "noModels": "未配置模型",
+    "placeholders": {
+      "value": "例如: claude-opus-4-6",
+      "label": "例如: Claude Opus 4.6",
+      "cost": "例如: 0.3"
+    },
+    "messages": {
+      "saveSuccess": "模型保存成功!",
+      "saveFailed": "模型保存失败",
+      "fillAllFields": "请填写所有字段",
+      "confirmDelete": "确定要删除这个模型吗?",
+      "deleteTitle": "确认删除"
+    }
+  },
+  "schedules": {
+    "title": "定时任务",
+    "new": "新建定时任务",
+    "empty": "还没有定时任务",
+    "createFirst": "创建第一个定时任务",
+    "columns": {
+      "name": "名称",
+      "config": "配置文件",
+      "schedule": "调度规则",
+      "status": "状态",
+      "lastRun": "上次执行",
+      "nextRun": "下次执行",
+      "actions": "操作"
+    },
+    "dialog": {
+      "editTitle": "编辑定时任务",
+      "createTitle": "新建定时任务",
+      "name": "任务名称",
+      "namePlaceholder": "例：每日代码审计",
+      "configFile": "配置文件",
+      "selectConfig": "选择配置文件",
+      "scheduleMode": "调度模式",
+      "simpleMode": "简单模式",
+      "cronMode": "Cron 模式",
+      "intervalType": "间隔类型",
+      "everyNHours": "每隔N小时",
+      "daily": "每天",
+      "weekly": "每周",
+      "interval": "间隔",
+      "weekday": "星期",
+      "hour": "时",
+      "minute": "分",
+      "cronExpression": "Cron 表达式",
+      "cronHelp": "格式: 分 时 日 月 周 (例: 0 2 * * * = 每天凌晨2点)",
+      "enableOnCreate": "创建后立即启用",
+      "cancel": "取消",
+      "save": "保存",
+      "create": "创建"
+    },
+    "messages": {
+      "fillRequired": "请填写名称和配置文件",
+      "updated": "定时任务已更新",
+      "created": "定时任务已创建",
+      "loadFailed": "加载定时任务失败",
+      "toggleFailed": "切换失败",
+      "triggered": "已触发",
+      "triggerFailed": "触发失败",
+      "deleted": "已删除",
+      "deleteFailed": "删除失败",
+      "deleteTitle": "删除定时任务",
+      "deleteConfirm": "确定要删除"
+    },
+    "units": {
+      "hour": "小时",
+      "day": "天",
+      "week": "周",
+      "every": "每"
+    },
+    "weekdays": ["周日", "周一", "周二", "周三", "周四", "周五", "周六"],
+    "actions": {
+      "edit": "编辑",
+      "run": "立即执行",
+      "delete": "删除"
+    },
+    "quickCreate": "快速创建",
+    "currentConfig": "当前配置",
+    "quickCreateHint": "点击「快速创建」添加每天凌晨自动执行，或前往定时任务页面自定义",
+    "notConfigured": "未配置",
+    "manageAll": "管理所有定时任务"
+  },
+  "documents": {
+    "folders": "文件夹",
+    "allFiles": "全部文件",
+    "searchFiles": "搜索文件...",
+    "byName": "按名称",
+    "byTime": "按时间",
+    "bySize": "按大小",
+    "ascending": "升序",
+    "descending": "降序",
+    "delete": "删除",
+    "openManager": "弹出文件管理器",
+    "fullscreen": "全屏",
+    "exitFullscreen": "退出全屏",
+    "loading": "加载中...",
+    "noDocuments": "暂无文档",
+    "fileName": "文件名",
+    "size": "大小",
+    "time": "时间",
+    "rename": "重命名",
+    "download": "下载",
+    "confirmDelete": "确认删除",
+    "confirmDeleteOne": "确定要删除",
+    "confirmDeleteMulti": "确定要删除选中的",
+    "files": "个文件吗？",
+    "previewHint": "点击文件预览内容",
+    "loadFailed": "无法加载",
+    "startWorkflow": "启动工作流后查看产出文档",
+    "attacker": "攻击方",
+    "defender": "防守方",
+    "judge": "裁判",
+    "other": "其他"
+  },
+  "workbench": {
+    "tabs": {
+      "workflow": "工作流",
+      "agents": "Agents",
+      "config": "配置",
+      "documents": "文档",
+      "schedules": "定时任务"
+    }
+  },
+  "common": {
+    "back": "返回",
+    "close": "关闭",
+    "loading": "加载中...",
+    "noData": "暂无数据",
+    "confirm": "确定",
+    "cancel": "取消",
+    "delete": "删除",
+    "alert": "提示"
+  }
+}
