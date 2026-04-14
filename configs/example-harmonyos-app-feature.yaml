@@ -119,7 +119,7 @@ workflow:
           role: defender
           task: |
             执行项目构建验证编译通过。
-            项目路径：C:/Users/Shawn/xwechat_files/wxid_8pxeudez26yn22_c6c8/msg/file/2026-03/AIChat_old/ai_chat
+            项目路径：path/to/ai_chat
         - name: 构建结果验证
           agent: tester
           role: judge
@@ -171,5 +171,5 @@ context:
     1. 在"我的"页面添加"账号管理"入口列表项
     2. 账号管理页面包含：头像预览、背景颜色选择、用户名输入与校验、保存按钮
     3. 首页头像点击可进入账号管理页面
-  codebase: ../xwechat_files/wxid_8pxeudez26yn22_c6c8/msg/file/2026-03/AI_Chat
+  codebase: ../AI_Chat
   timeoutMinutes: 180

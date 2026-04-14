@@ -1,6 +1,12 @@
 <div align="center">
 
 # ACE Harness (Agent Centric Engineering Harness)
+
+<picture>
+    <source media="(prefers-color-scheme: light)" srcset="./public/logo.png">
+    <img src="./public/logo.png" alt="OpenClaw" width="300">
+</picture>
+
 ***仓颉团队出品***
 
 ***企业级 AI Multi-Agent 智能协作系统 -- 状态机驱动 / Supervisor 智能路由 / 对抗式迭代 / 对话式创建***
@@ -66,13 +72,6 @@ Agent 只声明"我缺什么"，Supervisor 做零成本关键词路由 + 轻量 
 </tr>
 </table>
 
-</div>
-
-
-<div align="center">
-
-
-![首页-登录](./public/images/home-login.png)
 </div>
 
 ---

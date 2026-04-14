@@ -29,10 +29,10 @@ tags:
 
 ```bash
 # ✅ 正确：使用 Bash 读取日志文件
-Read(file_path: "C:\\path\\to\\build-full.log")
+Read(file_path: "path\\to\\build-full.log")
 
 # 如果读取失败，可尝试使用 Bash 读取
-Bash(command: 'type "C:\\path\\to\\build-full.log"', timeout: 30000)
+Bash(command: 'type "path\\to\\build-full.log"', timeout: 30000)
 ```
 
 ### 如何判断是否为 UTF-16 编码
@@ -52,17 +52,17 @@ Error: Cannot read binary file: C:\path\to\build-full.log
 # 1. 先复制脚本
 cd "path/to/MyApplication10"
 # Windows 环境直接复制 Python 脚本
-Bash(command: 'copy ".\\.claude\\skills\\utils\\scripts\\build.py" ".\\build.py"')
+Bash(command: 'copy ".\\skills\\utils\\scripts\\build.py" ".\\build.py"')
 
 # 2. 在根目录执行构建，并把【完整 stdout+stderr】落到日志文件
 #    注意：timeout=300000 只有 5 分钟，构建常常不够；建议至少 900000(15分钟) 或更大
 Bash(
-    command: 'cd "C:\\Users\\Shawn\\DevEcoStudioProjects\\MyApplication" && python build.py > build-full.log 2>&1',
+    command: 'cd "path\\to\\MyApplication" && python build.py > build-full.log 2>&1',
     timeout: 900000
 )
 
 # 3. 读取日志文件来分析
-Read(file_path: "C:\\path\\to\\build-full.log")
+Read(file_path: "path\\to\\build-full.log")
 ```
 
 ## 📦 构建流程说明
@@ -103,12 +103,12 @@ Read(file_path: "C:\\path\\to\\build-full.log")
 ```bash
 # 始终将完整输出落盘（stdout+stderr），避免 UI 截断
 Bash(
-  command: 'cd "C:\\Users\\Shawn\\DevEcoStudioProjects\\MyApplication" && python build.py > build-full.log 2>&1',
+  command: 'cd "path\\to\\DevEcoStudioProjects\\MyApplication" && python build.py > build-full.log 2>&1',
   timeout: 900000
 )
 
 # 读取日志文件
-Read(file_path: "C:\\Users\\Shawn\\DevEcoStudioProjects\\MyApplication\\build-full.log")
+Read(file_path: "path\\to\\DevEcoStudioProjects\\MyApplication\\build-full.log")
 ```
 
 **原则**: 只有在获得完整 build.py 输出后，才能进入下一步分析。
@@ -275,12 +275,12 @@ Step 2: L3 本地文档搜索（使用 harmonyos-doc-search-guide skill）
 
 1. **复制脚本到项目根目录**（必须执行）：
    ```bash
-   copy .\.claude\skills\utils\scripts\build.py .\build.py
+   copy .\skills\utils\scripts\build.py .\build.py
    ```
 
 2. **在项目根目录执行构建**：
    ```bash
-   cd "C:\Users\Shawn\DevEcoStudioProjects\MyApplication"  # 确保在项目根目录
+   cd "path\to\DevEcoStudioProjects\MyApplication"  # 确保在项目根目录
    python build.py
    ```
 
@@ -297,18 +297,18 @@ Step 2: L3 本地文档搜索（使用 harmonyos-doc-search-guide skill）
 **正确示例**：
 ```bash
 # 1. 先复制脚本
-cd "C:\Users\Shawn\DevEcoStudioProjects\MyApplication"
-copy ".\.claude\skills\utils\scripts\build.py" ".\build.py"
+cd "path\to\DevEcoStudioProjects\MyApplication"
+copy ".\skills\utils\scripts\build.py" ".\build.py"
 
 # 2. 在根目录执行构建，并把【完整 stdout+stderr】落到日志文件
 #    注意：timeout=300000 只有 5 分钟，构建常常不够；建议至少 900000(15分钟) 或更大
 Bash(
-    command: 'cd "C:\\Users\\Shawn\\DevEcoStudioProjects\\MyApplication" && python build.py > build-full.log 2>&1',
+    command: 'cd "path\\to\\DevEcoStudioProjects\\MyApplication" && python build.py > build-full.log 2>&1',
     timeout: 900000
 )
 
 # 3. 读取日志文件来做分析
-Read(file_path: "C:\\Users\\Shawn\\DevEcoStudioProjects\\MyApplication\\build-full.log")
+Read(file_path: "path\\to\\DevEcoStudioProjects\\MyApplication\\build-full.log")
 ```
 
 **重要！兼容性配置**：务必将`./entry/build-profile.json5` 文件中的""buildOption"字段配置正确，确保包含对鸿蒙构建环境的兼容性设置，严格按照如下所示配置：

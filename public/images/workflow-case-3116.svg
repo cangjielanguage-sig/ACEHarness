@@ -37,7 +37,7 @@
   <g filter="url(#shadow3116)">
     <rect x="92" y="224" width="210" height="104" rx="22" fill="#0b1223" stroke="#1d4ed8"/>
     <text x="118" y="262" fill="#93c5fd" font-size="16" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif">总耗时</text>
-    <text x="118" y="308" fill="#f8fafc" font-size="30" font-weight="700" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif">25.75h</text>
+    <text x="118" y="308" fill="#f8fafc" font-size="30" font-weight="700" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif">7.5h</text>
 
     <rect x="324" y="224" width="210" height="104" rx="22" fill="#0b1223" stroke="#0ea5e9"/>
     <text x="350" y="262" fill="#93c5fd" font-size="16" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif">执行步骤</text>
