@@ -3,7 +3,10 @@ import { loadChatSession, saveChatSession, deleteChatSession } from '@/lib/chat-
 import { requireAuth } from '@/lib/auth-middleware';
 
 function isOwner(session: any, userId: string): boolean {
-  return !!session && session.createdBy === userId;
+  // Backward compatibility: legacy sessions without createdBy are treated as shared.
+  if (!session) return false;
+  if (!session.createdBy) return true;
+  return session.createdBy === userId;
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

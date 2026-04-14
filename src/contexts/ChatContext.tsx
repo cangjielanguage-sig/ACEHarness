@@ -95,9 +95,16 @@ const DashboardChatContext = createContext<DashboardChatContextType>({
 const genId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 // --- Server API helpers ---
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('auth-token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 async function apiListSessions(): Promise<SessionSummary[]> {
-  const res = await fetch('/api/chat/sessions');
+  const res = await fetch('/api/chat/sessions', {
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) return [];
   const data = await res.json();
   return data.sessions || [];
@@ -106,13 +113,15 @@ async function apiListSessions(): Promise<SessionSummary[]> {
 async function apiCreateSession(session: ChatSession): Promise<void> {
   await fetch('/api/chat/sessions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(session),
   });
 }
 
 async function apiLoadSession(id: string): Promise<ChatSession | null> {
-  const res = await fetch(`/api/chat/sessions/${encodeURIComponent(id)}`);
+  const res = await fetch(`/api/chat/sessions/${encodeURIComponent(id)}`, {
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) return null;
   const data = await res.json();
   return data.session || null;
@@ -121,13 +130,16 @@ async function apiLoadSession(id: string): Promise<ChatSession | null> {
 async function apiSaveSession(session: ChatSession): Promise<void> {
   await fetch(`/api/chat/sessions/${encodeURIComponent(session.id)}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(session),
   });
 }
 
 async function apiDeleteSession(id: string): Promise<void> {
-  await fetch(`/api/chat/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await fetch(`/api/chat/sessions/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {
@@ -436,6 +448,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', `/api/chat/sessions/${encodeURIComponent(pending.id)}`, false);
           xhr.setRequestHeader('Content-Type', 'application/json');
+          const token = localStorage.getItem('auth-token');
+          if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
           xhr.send(JSON.stringify(pending));
         } catch { /* best effort */ }
       }

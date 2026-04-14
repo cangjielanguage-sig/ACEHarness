@@ -7,8 +7,9 @@ export async function GET(request: NextRequest) {
   if (user instanceof NextResponse) return user;
   try {
     const allSessions = await listChatSessions();
-    // Strict isolation: every role (including admin) only sees own sessions.
-    const sessions = allSessions.filter(s => (s as any).createdBy === user.id);
+    // Backward compatibility: legacy sessions without createdBy are visible to everyone.
+    // New sessions always include createdBy and are isolated by user.
+    const sessions = allSessions.filter(s => !s.createdBy || s.createdBy === user.id);
     return NextResponse.json({ sessions });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
