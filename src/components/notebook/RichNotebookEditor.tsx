@@ -1018,6 +1018,46 @@ export function RichNotebookEditor({
     setAskAIOpen(true);
   }, [editor]);
 
+  const getSelectionText = useCallback(() => {
+    if (!editor) return null as { range: { from: number; to: number }; text: string } | null;
+    const { from, to, empty } = editor.state.selection;
+    if (empty) return null;
+    const text = editor.state.doc.textBetween(from, to, '\n\n').trim();
+    if (!text) return null;
+    return { range: { from, to }, text };
+  }, [editor]);
+
+  const openCodeAiTask = useCallback((actionName: string, instruction: string, replaceSelection = false) => {
+    const selected = getSelectionText();
+    if (!selected) {
+      toast('warning', '请先选中代码块内容');
+      return;
+    }
+
+    const prompt = [
+      '你是 Cangjie Notebook 的代码助手。',
+      `任务：${actionName}`,
+      '',
+      '执行要求：',
+      instruction,
+      '',
+      '请直接输出结果，不要添加与任务无关的前后缀。',
+      '',
+      '待处理代码：',
+      selected.text,
+    ].join('\n');
+
+    setAskAIContext(selected.text);
+    setAskAIInsertRange(replaceSelection ? selected.range : null);
+    setAskAITask({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      displayText: `${actionName}（自动任务）`,
+      prompt,
+    });
+    setAskAIOpen(true);
+    setMenuOpen(false);
+  }, [getSelectionText, toast]);
+
   const getCurrentNodeText = useCallback(() => {
     const range = getCurrentNodeRange();
     if (!range || !editor) return null;
@@ -1119,6 +1159,7 @@ export function RichNotebookEditor({
   const isTableContext = editor ? (editor.isActive('table') || editor.isActive('tableRow') || editor.isActive('tableCell') || editor.isActive('tableHeader')) : false;
   const isImageContext = editor ? editor.isActive('image') : false;
   const hasTextSelection = editor ? !editor.state.selection.empty : false;
+  const isCodeSelectionMode = hasTextSelection && isCodeContext;
   const showContextToolbar = editor ? editor.isFocused : false;
 
   const renderAiActionMenu = (dense = false) => (
@@ -1129,53 +1170,77 @@ export function RichNotebookEditor({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="bottom" align="start" className="w-64 z-[86]">
-        <DropdownMenuLabel>通用</DropdownMenuLabel>
-        <DropdownMenuItem onClick={handleAskAI}>
-          <span className="material-symbols-outlined mr-2 text-base">forum</span>
-          问 AI
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel>文本增强</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => { openAiActionDialog('修正拼写和语法', '修正拼写、标点和语法错误，保持原意与结构。'); }}>
-          <span className="material-symbols-outlined mr-2 text-base">spellcheck</span>
-          修正拼写和语法
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { openAiActionDialog('扩展文本', '在不偏离主题的前提下扩展内容，增加细节和上下文。'); }}>
-          <span className="material-symbols-outlined mr-2 text-base">expand_content</span>
-          扩展文本
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { openAiActionDialog('精简文本', '压缩篇幅，保留核心信息，去除冗余表达。'); }}>
-          <span className="material-symbols-outlined mr-2 text-base">compress</span>
-          精简文本
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { openAiActionDialog('简化表达', '改写为更清晰易懂的表达，降低阅读门槛。'); }}>
-          <span className="material-symbols-outlined mr-2 text-base">text_fields</span>
-          简化表达
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { openAiActionDialog('添加 Emoji', '在合适位置加入少量相关 emoji，保持专业和可读性。'); }}>
-          <span className="material-symbols-outlined mr-2 text-base">mood</span>
-          添加 Emoji
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel>内容操作</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => { openAiActionDialog('补全句子', '补全不完整句子并确保语义连贯自然。'); }}>
-          <span className="material-symbols-outlined mr-2 text-base">format_list_bulleted_add</span>
-          补全句子
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); }}>
-          <span className="material-symbols-outlined mr-2 text-base">summarize</span>
-          总结内容
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel>高级选项</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => { openAiActionDialog('调整语气', '改写为专业、友好且清晰的语气，不改变事实。'); }}>
-          <span className="material-symbols-outlined mr-2 text-base">tune</span>
-          调整语气
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { openAiActionDialog('翻译文本', translateInstruction); }}>
-          <span className="material-symbols-outlined mr-2 text-base">translate</span>
-          翻译文本（{translateTargetLabel}）
-        </DropdownMenuItem>
+        {isCodeSelectionMode ? (
+          <>
+            <DropdownMenuLabel>代码块 AI</DropdownMenuLabel>
+            <DropdownMenuItem onClick={handleAskAIFromSelection}>
+              <span className="material-symbols-outlined mr-2 text-base">forum</span>
+              问AI
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { openCodeAiTask('解释代码', '解释代码的功能、关键逻辑、输入输出与注意事项，使用简洁分点。'); }}>
+              <span className="material-symbols-outlined mr-2 text-base">help</span>
+              解释代码
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { openCodeAiTask('AI检视', '对代码做检视，指出潜在 bug、风险、可维护性和性能问题，并给出改进建议。'); }}>
+              <span className="material-symbols-outlined mr-2 text-base">fact_check</span>
+              AI检视
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { openCodeAiTask('添加注释', '在不改变代码行为的前提下，为代码添加必要且精炼的注释，返回完整代码。', true); }}>
+              <span className="material-symbols-outlined mr-2 text-base">add_comment</span>
+              添加注释
+            </DropdownMenuItem>
+          </>
+        ) : (
+          <>
+            <DropdownMenuLabel>通用</DropdownMenuLabel>
+            <DropdownMenuItem onClick={handleAskAI}>
+              <span className="material-symbols-outlined mr-2 text-base">forum</span>
+              问 AI
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>文本增强</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => { openAiActionDialog('修正拼写和语法', '修正拼写、标点和语法错误，保持原意与结构。'); }}>
+              <span className="material-symbols-outlined mr-2 text-base">spellcheck</span>
+              修正拼写和语法
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { openAiActionDialog('扩展文本', '在不偏离主题的前提下扩展内容，增加细节和上下文。'); }}>
+              <span className="material-symbols-outlined mr-2 text-base">expand_content</span>
+              扩展文本
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { openAiActionDialog('精简文本', '压缩篇幅，保留核心信息，去除冗余表达。'); }}>
+              <span className="material-symbols-outlined mr-2 text-base">compress</span>
+              精简文本
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { openAiActionDialog('简化表达', '改写为更清晰易懂的表达，降低阅读门槛。'); }}>
+              <span className="material-symbols-outlined mr-2 text-base">text_fields</span>
+              简化表达
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { openAiActionDialog('添加 Emoji', '在合适位置加入少量相关 emoji，保持专业和可读性。'); }}>
+              <span className="material-symbols-outlined mr-2 text-base">mood</span>
+              添加 Emoji
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>内容操作</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => { openAiActionDialog('补全句子', '补全不完整句子并确保语义连贯自然。'); }}>
+              <span className="material-symbols-outlined mr-2 text-base">format_list_bulleted_add</span>
+              补全句子
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); }}>
+              <span className="material-symbols-outlined mr-2 text-base">summarize</span>
+              总结内容
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>高级选项</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => { openAiActionDialog('调整语气', '改写为专业、友好且清晰的语气，不改变事实。'); }}>
+              <span className="material-symbols-outlined mr-2 text-base">tune</span>
+              调整语气
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { openAiActionDialog('翻译文本', translateInstruction); }}>
+              <span className="material-symbols-outlined mr-2 text-base">translate</span>
+              翻译文本（{translateTargetLabel}）
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -1753,9 +1818,7 @@ export function RichNotebookEditor({
             </button>
           )}
           {!isCodeContext && <TableSizeMenuButton dense onInsert={insertTableWithSize} />}
-          <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={handleAskAIFromSelection} title="问 AI">
-            <span className="material-symbols-outlined text-base">smart_toy</span>
-          </button>
+          {renderAiActionMenu(true)}
         </div>
       </BubbleMenu>
       <DragHandle editor={editor} onNodeChange={handleNodeChange}>
@@ -1824,77 +1887,101 @@ export function RichNotebookEditor({
                 AI 助手
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-64 z-[81]">
-                <DropdownMenuLabel>通用</DropdownMenuLabel>
-                <DropdownMenuItem onClick={handleAskAI}>
-                  <span className="material-symbols-outlined mr-2 text-base">forum</span>
-                  问 AI
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>文本增强</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => { openAiActionDialog('修正拼写和语法', '修正拼写、标点和语法错误，保持原意与结构。'); }}>
-                  <span className="material-symbols-outlined mr-2 text-base">spellcheck</span>
-                  修正拼写和语法
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { openAiActionDialog('扩展文本', '在不偏离主题的前提下扩展内容，增加细节和上下文。'); }}>
-                  <span className="material-symbols-outlined mr-2 text-base">expand_content</span>
-                  扩展文本
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { openAiActionDialog('精简文本', '压缩篇幅，保留核心信息，去除冗余表达。'); }}>
-                  <span className="material-symbols-outlined mr-2 text-base">compress</span>
-                  精简文本
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { openAiActionDialog('简化表达', '改写为更清晰易懂的表达，降低阅读门槛。'); }}>
-                  <span className="material-symbols-outlined mr-2 text-base">text_fields</span>
-                  简化表达
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { openAiActionDialog('添加 Emoji', '在合适位置加入少量相关 emoji，保持专业和可读性。'); }}>
-                  <span className="material-symbols-outlined mr-2 text-base">mood</span>
-                  添加 Emoji
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>内容操作</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => { openAiActionDialog('补全句子', '补全不完整句子并确保语义连贯自然。'); }}>
-                  <span className="material-symbols-outlined mr-2 text-base">format_list_bulleted_add</span>
-                  补全句子
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); }}>
-                  <span className="material-symbols-outlined mr-2 text-base">summarize</span>
-                  总结内容
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>高级选项</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => { openAiActionDialog('调整语气', '改写为专业、友好且清晰的语气，不改变事实。'); }}>
-                  <span className="material-symbols-outlined mr-2 text-base">tune</span>
-                  调整语气
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { openAiActionDialog('翻译文本', translateInstruction); }}>
-                  <span className="material-symbols-outlined mr-2 text-base">translate</span>
-                  翻译文本（{translateTargetLabel}）
-                </DropdownMenuItem>
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <span className="material-symbols-outlined mr-2 text-base">language</span>
-                    翻译目标语言
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent className="w-52 z-[82]">
-                    <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('en')}>
-                      <span className="material-symbols-outlined mr-2 text-base">check</span>
-                      英语 {translateTarget === 'en' ? '（当前）' : ''}
+                {isCodeSelectionMode ? (
+                  <>
+                    <DropdownMenuLabel>代码块 AI</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={handleAskAIFromSelection}>
+                      <span className="material-symbols-outlined mr-2 text-base">forum</span>
+                      问AI
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('zh')}>
-                      <span className="material-symbols-outlined mr-2 text-base">check</span>
-                      中文 {translateTarget === 'zh' ? '（当前）' : ''}
+                    <DropdownMenuItem onClick={() => { openCodeAiTask('解释代码', '解释代码的功能、关键逻辑、输入输出与注意事项，使用简洁分点。'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">help</span>
+                      解释代码
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('ja')}>
-                      <span className="material-symbols-outlined mr-2 text-base">check</span>
-                      日语 {translateTarget === 'ja' ? '（当前）' : ''}
+                    <DropdownMenuItem onClick={() => { openCodeAiTask('AI检视', '对代码做检视，指出潜在 bug、风险、可维护性和性能问题，并给出改进建议。'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">fact_check</span>
+                      AI检视
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('ko')}>
-                      <span className="material-symbols-outlined mr-2 text-base">check</span>
-                      韩语 {translateTarget === 'ko' ? '（当前）' : ''}
+                    <DropdownMenuItem onClick={() => { openCodeAiTask('添加注释', '在不改变代码行为的前提下，为代码添加必要且精炼的注释，返回完整代码。', true); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">add_comment</span>
+                      添加注释
                     </DropdownMenuItem>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
+                  </>
+                ) : (
+                  <>
+                    <DropdownMenuLabel>通用</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={handleAskAI}>
+                      <span className="material-symbols-outlined mr-2 text-base">forum</span>
+                      问 AI
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>文本增强</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => { openAiActionDialog('修正拼写和语法', '修正拼写、标点和语法错误，保持原意与结构。'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">spellcheck</span>
+                      修正拼写和语法
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { openAiActionDialog('扩展文本', '在不偏离主题的前提下扩展内容，增加细节和上下文。'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">expand_content</span>
+                      扩展文本
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { openAiActionDialog('精简文本', '压缩篇幅，保留核心信息，去除冗余表达。'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">compress</span>
+                      精简文本
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { openAiActionDialog('简化表达', '改写为更清晰易懂的表达，降低阅读门槛。'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">text_fields</span>
+                      简化表达
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { openAiActionDialog('添加 Emoji', '在合适位置加入少量相关 emoji，保持专业和可读性。'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">mood</span>
+                      添加 Emoji
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>内容操作</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => { openAiActionDialog('补全句子', '补全不完整句子并确保语义连贯自然。'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">format_list_bulleted_add</span>
+                      补全句子
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">summarize</span>
+                      总结内容
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>高级选项</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => { openAiActionDialog('调整语气', '改写为专业、友好且清晰的语气，不改变事实。'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">tune</span>
+                      调整语气
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { openAiActionDialog('翻译文本', translateInstruction); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">translate</span>
+                      翻译文本（{translateTargetLabel}）
+                    </DropdownMenuItem>
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <span className="material-symbols-outlined mr-2 text-base">language</span>
+                        翻译目标语言
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-52 z-[82]">
+                        <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('en')}>
+                          <span className="material-symbols-outlined mr-2 text-base">check</span>
+                          英语 {translateTarget === 'en' ? '（当前）' : ''}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('zh')}>
+                          <span className="material-symbols-outlined mr-2 text-base">check</span>
+                          中文 {translateTarget === 'zh' ? '（当前）' : ''}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('ja')}>
+                          <span className="material-symbols-outlined mr-2 text-base">check</span>
+                          日语 {translateTarget === 'ja' ? '（当前）' : ''}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setTranslateTargetAndPersist('ko')}>
+                          <span className="material-symbols-outlined mr-2 text-base">check</span>
+                          韩语 {translateTarget === 'ko' ? '（当前）' : ''}
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  </>
+                )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             <DropdownMenuItem onClick={handleCopyNode}>

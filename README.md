@@ -5,10 +5,13 @@
 
 ***企业级 AI Multi-Agent 智能协作系统 -- 状态机驱动 / Supervisor 智能路由 / 对抗式迭代 / 对话式创建***
 
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)
+![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)
+![Status](https://img.shields.io/badge/Status-Active-success)
+
 Your team of AIs, collaborating to get work done.
-
-
-![核心能力总览](./public/images/features-overview.svg)
 
 <table>
 <tr>
@@ -24,19 +27,19 @@ Your team of AIs, collaborating to get work done.
 <tr>
 <td width="33%" valign="top">
 
-### 🔴🔵 对抗式迭代
+### 对抗式迭代
 蓝军(Defender)实现、红军(Attacker)挑战、裁判(Judge)仲裁。结构化判决驱动自动收敛，避免一次误判固化进代码。
 
 </td>
 <td width="33%" valign="top">
 
-### ⚙️ 状态机引擎
+### 状态机引擎
 不是线性流水线。支持条件跳转、自动回退、最大转移保护、崩溃恢复。实测修复编译器 ICE 时自动回退 3 次后收敛。
 
 </td>
 <td width="33%" valign="top">
 
-### 🧠 Supervisor 路由
+### Supervisor 路由
 Agent 只声明"我缺什么"，Supervisor 做零成本关键词路由 + 轻量 LLM 语义匹配，打破线性信息流。
 
 </td>
@@ -44,19 +47,19 @@ Agent 只声明"我缺什么"，Supervisor 做零成本关键词路由 + 轻量 
 <tr>
 <td width="33%" valign="top">
 
-### 👤 Human-in-the-Loop
+### Human-in-the-Loop
 关键节点设人工审批门。支持反馈注入、强制跳转，在自动化和可控性之间取得平衡。
 
 </td>
 <td width="33%" valign="top">
 
-### 💬 对话式创建
+### 对话式创建
 "帮我创建一个修复 Issue #701 的工作流" —— 70+ 种指令覆盖全生命周期，按风险等级分级确认。
 
 </td>
 <td width="33%" valign="top">
 
-### 📊 智能分析
+### 智能分析
 回归测试判定（O0/O1/O2）、回退热点分析、Token 成本追踪、Prompt 质量评估 —— 不只跑任务，还能分析结果。
 
 </td>
