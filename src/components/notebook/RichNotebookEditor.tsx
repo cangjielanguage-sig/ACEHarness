@@ -10,7 +10,9 @@ import Placeholder from '@tiptap/extension-placeholder';
 import Typography from '@tiptap/extension-typography';
 import { ListKit } from '@tiptap/extension-list';
 import { TableKit } from '@tiptap/extension-table';
+import Image from '@tiptap/extension-image';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { BlockMath, InlineMath } from '@tiptap/extension-mathematics';
 import { TrailingNode } from '@tiptap/extensions/trailing-node';
 import { UndoRedo } from '@tiptap/extensions/undo-redo';
 import { Node, mergeAttributes } from '@tiptap/core';
@@ -20,6 +22,7 @@ import { TextSelection } from '@tiptap/pm/state';
 import { Markdown } from '@tiptap/markdown';
 import ReactFlow, { Background, Controls, MiniMap, MarkerType, Position, type Edge as RFEdge, type Node as RFNode } from 'reactflow';
 import 'reactflow/dist/style.css';
+import 'katex/dist/katex.min.css';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -51,9 +54,10 @@ import java from 'highlight.js/lib/languages/java';
 import cpp from 'highlight.js/lib/languages/cpp';
 import sql from 'highlight.js/lib/languages/sql';
 import cangjie from '@/lib/cangjie-highlight';
-import { NotebookCodeBlock, NotebookOutputBlock } from './NotebookBlocks';
+import { NotebookAiSuggestionBlock, NotebookCodeBlock, NotebookMathBlock, NotebookOutputBlock } from './NotebookBlocks';
 import { NotebookAskAISheet } from './NotebookAskAISheet';
 import { NotebookOutput, buildNotebookOutput, createNotebookCellId, createNotebookOutputId, displayNotebookCellId, normalizeNotebookLanguage } from '@/lib/notebook-markdown';
+import { uploadImageFile } from '@/lib/client-image-upload';
 
 const lowlight = createLowlight();
 
@@ -127,6 +131,23 @@ function findOrphanOutputRanges(editor: Editor): Array<{ from: number; to: numbe
     return true;
   });
   return outputs.filter((item) => !item.cellId || !codeCellIds.has(item.cellId)).map((item) => ({ from: item.from, to: item.to }));
+}
+
+function countAiSuggestionNodes(editor: Editor): number {
+  let count = 0;
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === 'notebookAiSuggestion') count += 1;
+    return true;
+  });
+  return count;
+}
+
+function plainTextToParagraphNodes(text: string) {
+  return text.split('\n').map((line) => (
+    line
+      ? { type: 'paragraph' as const, content: [{ type: 'text' as const, text: line }] }
+      : { type: 'paragraph' as const }
+  ));
 }
 
 interface DependencyGraphCell {
@@ -302,6 +323,12 @@ const NotebookCodeBlockExtension = CodeBlockLowlight.extend({
   },
 });
 
+const NotebookBlockMathExtension = BlockMath.extend({
+  addNodeView() {
+    return ReactNodeViewRenderer(NotebookMathBlock);
+  },
+});
+
 interface RichNotebookEditorProps {
   content: string;
   filePath: string;
@@ -325,6 +352,146 @@ interface SlashMenuItem {
   group: string;
   onSelect: (editor: Editor) => void;
 }
+
+interface AiSuggestionItem {
+  id: string;
+  original: string;
+  optimized: string;
+}
+
+interface AiSuggestionSegment {
+  type: 'equal' | 'change';
+  text?: string;
+  itemId?: string;
+}
+
+function splitByParagraph(text: string): string[] {
+  return text
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildLcsMatrix(a: string[], b: string[]): number[][] {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  return dp;
+}
+
+function buildAiOptimizationDraft(sourceText: string, optimizedText: string): { items: AiSuggestionItem[]; segments: AiSuggestionSegment[] } {
+  const a = splitByParagraph(sourceText);
+  const b = splitByParagraph(optimizedText);
+  const dp = buildLcsMatrix(a, b);
+  const segments: AiSuggestionSegment[] = [];
+  const items: AiSuggestionItem[] = [];
+  let i = 0;
+  let j = 0;
+  let changeIndex = 0;
+
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      segments.push({ type: 'equal', text: a[i] });
+      i += 1;
+      j += 1;
+      continue;
+    }
+
+    const deleted: string[] = [];
+    const inserted: string[] = [];
+    while (i < a.length || j < b.length) {
+      const canStop = i < a.length && j < b.length && a[i] === b[j];
+      if (canStop) break;
+      if (i < a.length && (j >= b.length || dp[i + 1][j] >= dp[i][j + 1])) {
+        deleted.push(a[i]);
+        i += 1;
+      } else if (j < b.length) {
+        inserted.push(b[j]);
+        j += 1;
+      }
+    }
+
+    if (deleted.length > 0 || inserted.length > 0) {
+      const id = `ai-s-${changeIndex++}`;
+      items.push({
+        id,
+        original: deleted.join('\n\n'),
+        optimized: inserted.join('\n\n'),
+      });
+      segments.push({ type: 'change', itemId: id });
+    }
+  }
+
+  return { items, segments };
+}
+
+function textToParagraphNodes(text: string) {
+  const parts = splitByParagraph(text);
+  if (parts.length === 0) {
+    return [{ type: 'paragraph' as const }];
+  }
+  return parts.map((part) => ({
+    type: 'paragraph' as const,
+    content: [{ type: 'text' as const, text: part }],
+  }));
+}
+
+function buildAiSuggestionNodes(draft: { items: AiSuggestionItem[]; segments: AiSuggestionSegment[] }) {
+  const itemMap = new Map(draft.items.map((item) => [item.id, item]));
+  const nodes: any[] = [];
+  draft.segments.forEach((segment) => {
+    if (segment.type === 'equal') {
+      nodes.push(...textToParagraphNodes(segment.text || ''));
+      return;
+    }
+    const item = itemMap.get(segment.itemId || '');
+    if (!item) return;
+    nodes.push({
+      type: 'notebookAiSuggestion',
+      attrs: {
+        original: item.original || '',
+        optimized: item.optimized || '',
+      },
+    });
+  });
+  return nodes.length > 0 ? nodes : [{ type: 'paragraph' }];
+}
+
+const NotebookAiSuggestionExtension = Node.create({
+  name: 'notebookAiSuggestion',
+  group: 'block',
+  atom: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      original: { default: '' },
+      optimized: { default: '' },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="notebook-ai-suggestion"]' }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'notebook-ai-suggestion' })];
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer((props) => (
+      <NotebookAiSuggestionBlock
+        {...props}
+        onAccept={(payload) => (props.extension.options as any).onAccept?.(payload, props.editor)}
+        onReject={(payload) => (props.extension.options as any).onReject?.(payload, props.editor)}
+      />
+    ));
+  },
+});
 
 function TableSizeMenuButton({ onInsert, dense = false }: { onInsert: (rows: number, cols: number) => void; dense?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -399,6 +566,7 @@ export function RichNotebookEditor({
   const [outputBackedSuccess, setOutputBackedSuccess] = useState<Record<string, boolean>>({});
   const cellRunStateRef = useRef<Record<string, 'idle' | 'running' | 'success' | 'failed'>>({});
   const outputBackedSuccessRef = useRef<Record<string, boolean>>({});
+  const editorRef = useRef<Editor | null>(null);
   // dependencyGraphOpen is controlled by parent menu
   const [dependencyNodes, setDependencyNodes] = useState<RFNode[]>([]);
   const [dependencyEdges, setDependencyEdges] = useState<RFEdge[]>([]);
@@ -488,9 +656,10 @@ export function RichNotebookEditor({
     const state = cellRunStateRef.current[cellId];
     if (state && state !== 'idle') return state;
     if (outputBackedSuccessRef.current[cellId]) return 'success';
-    if (currentEditor) {
+    const targetEditor = currentEditor || editorRef.current;
+    if (targetEditor) {
       let found = false;
-      currentEditor.state.doc.descendants((node) => {
+      targetEditor.state.doc.descendants((node) => {
         if (node.type.name === 'notebookOutput' && String(node.attrs.cellId || '') === cellId) {
           found = true;
           return false;
@@ -508,6 +677,42 @@ export function RichNotebookEditor({
     setDependencyEdges(edges);
   }, []);
 
+  const replaceSuggestionNodeWithText = useCallback((targetEditor: Editor, pos: number, text: string) => {
+    const node = targetEditor.state.doc.nodeAt(pos);
+    if (!node || node.type.name !== 'notebookAiSuggestion') return;
+    const markdown = (text || '').trim();
+    const replacement = markdown.length > 0 ? markdown : '\n';
+    targetEditor
+      .chain()
+      .focus()
+      .deleteRange({ from: pos, to: pos + node.nodeSize })
+      .insertContentAt(pos, replacement, { contentType: 'markdown' })
+      .run();
+  }, []);
+
+  const applyAllAiSuggestions = useCallback((mode: 'accept' | 'reject') => {
+    const targetEditor = editorRef.current;
+    if (!targetEditor) return;
+    const targets: Array<{ pos: number; original: string; optimized: string }> = [];
+    targetEditor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'notebookAiSuggestion') {
+        targets.push({
+          pos,
+          original: String(node.attrs.original || ''),
+          optimized: String(node.attrs.optimized || ''),
+        });
+      }
+      return true;
+    });
+    if (targets.length === 0) return;
+    [...targets]
+      .sort((a, b) => b.pos - a.pos)
+      .forEach((item) => {
+        replaceSuggestionNodeWithText(targetEditor, item.pos, mode === 'accept' ? item.optimized : item.original);
+      });
+    toast('success', mode === 'accept' ? `已接受全部建议（${targets.length} 条）` : `已拒绝全部建议（${targets.length} 条）`);
+  }, [replaceSuggestionNodeWithText, toast]);
+
   const notebookExtensions = useMemo(() => {
     const base: any[] = [
       StarterKit.configure({
@@ -518,7 +723,41 @@ export function RichNotebookEditor({
         listItem: false,
       }),
       Markdown,
-      Placeholder.configure({ placeholder: '开始编写 Cangjie Notebook...' }),
+      Image,
+      InlineMath.configure({
+        onClick: (node, pos) => {
+          const current = String((node as any)?.attrs?.latex || '');
+          const next = window.prompt('编辑行内公式（LaTeX）', current);
+          if (next === null) return;
+          const chain = editorRef.current?.chain().focus();
+          if (!chain) return;
+          (chain as any).setNodeSelection(pos).updateInlineMath({ latex: next }).run();
+        },
+        katexOptions: {
+          throwOnError: false,
+          strict: 'ignore',
+        },
+      }),
+      NotebookBlockMathExtension.configure({
+        katexOptions: {
+          throwOnError: false,
+          strict: 'ignore',
+        },
+      }),
+      Placeholder.configure({
+        emptyEditorClass: 'is-editor-empty',
+        emptyNodeClass: 'is-empty',
+        dataAttribute: 'placeholder',
+        showOnlyWhenEditable: true,
+        showOnlyCurrent: false,
+        includeChildren: true,
+        placeholder: ({ node }) => {
+          if (node.type.name === 'heading') return '输入标题，例如：问题背景 / 结论';
+          if (node.type.name === 'notebookCodeBlock') return '粘贴代码，右上角运行，或输入 / 触发命令菜单';
+          if (node.type.name === 'blockquote') return '可写备注、限制条件或风险提示';
+          return '输入 / 触发命令菜单，或直接开始记录';
+        },
+      }),
       Typography,
       ListKit.configure({
         taskItem: { nested: true },
@@ -569,6 +808,16 @@ export function RichNotebookEditor({
       base.push(UndoRedo.configure({ depth: 100, newGroupDelay: 500 }));
     }
     base.push(
+      NotebookAiSuggestionExtension.configure({
+        onAccept: (payload: { pos: number; original: string; optimized: string }, currentEditor: Editor) => {
+          replaceSuggestionNodeWithText(currentEditor, payload.pos, payload.optimized);
+          toast('success', '已接受该建议');
+        },
+        onReject: (payload: { pos: number; original: string; optimized: string }, currentEditor: Editor) => {
+          replaceSuggestionNodeWithText(currentEditor, payload.pos, payload.original);
+          toast('info', '已拒绝该建议');
+        },
+      } as any),
       NotebookCodeBlockExtension.configure({
       lowlight,
       enableTabIndentation: true,
@@ -632,7 +881,7 @@ export function RichNotebookEditor({
       }),
     );
     return base;
-  }, [cellRunState, collabSession, collabUser.color, collabUser.id, collabUser.name, filePath, onRunCell, outputBackedSuccess, resolveCellStatus, setCellRunStateWithRef, toast]);
+  }, [cellRunState, collabSession, collabUser.color, collabUser.id, collabUser.name, filePath, onRunCell, outputBackedSuccess, replaceSuggestionNodeWithText, resolveCellStatus, setCellRunStateWithRef, toast]);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -642,14 +891,40 @@ export function RichNotebookEditor({
     contentType: 'markdown',
     editorProps: {
       attributes: {
-        class: 'tiptap prose prose-invert max-w-none min-h-full px-10 md:px-12 py-5 focus:outline-none [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-3 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/50 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_hr]:my-4 [&_hr]:border-border [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:rounded-md [&_table]:overflow-hidden [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5',
+        class: 'tiptap prose prose-invert max-w-none min-h-full px-10 md:px-12 py-5 focus:outline-none [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-3 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/50 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_hr]:my-4 [&_hr]:border-border [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:rounded-md [&_table]:overflow-hidden [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_img]:my-3 [&_img]:max-h-[420px] [&_img]:max-w-full [&_img]:rounded-md [&_img]:border [&_img]:border-border [&_img]:object-contain',
+      },
+      handlePaste: (_view, event) => {
+        const clipboard = event.clipboardData;
+        if (!clipboard) return false;
+        const files = Array.from(clipboard.files || []).filter((file) => file.type?.startsWith('image/'));
+        if (files.length === 0) return false;
+        event.preventDefault();
+        files.forEach((file) => {
+          void insertUploadedImage(file);
+        });
+        return true;
+      },
+      handleDrop: (view, event, _slice, moved) => {
+        if (moved) return false;
+        const dt = event.dataTransfer;
+        if (!dt) return false;
+        const files = Array.from(dt.files || []).filter((file) => file.type?.startsWith('image/'));
+        if (files.length === 0) return false;
+        event.preventDefault();
+        const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+        files.forEach((file) => {
+          void insertUploadedImage(file, pos);
+        });
+        return true;
       },
     },
     onCreate: ({ editor }) => {
+      editorRef.current = editor;
       if (!collabSession && content) {
         editor.commands.setContent(content, { contentType: 'markdown', emitUpdate: false });
       }
       setOutputBackedSuccessWithRef(buildOutputBackedStatus(editor));
+      setAiSuggestionCount(countAiSuggestionNodes(editor));
       refreshDependencyGraph(editor);
     },
     onUpdate: ({ editor }) => {
@@ -664,11 +939,19 @@ export function RichNotebookEditor({
         return;
       }
       setOutputBackedSuccessWithRef(buildOutputBackedStatus(editor));
+      setAiSuggestionCount(countAiSuggestionNodes(editor));
       refreshDependencyGraph(editor);
       const markdown = editor.getMarkdown();
       onChange(markdown);
     },
   }, [collabSession?.provider, collabSession?.doc, permission, filePath, scope, shareToken, collabUser.name, collabUser.color]);
+
+  useEffect(() => {
+    editorRef.current = editor || null;
+    return () => {
+      editorRef.current = null;
+    };
+  }, [editor]);
 
   useEffect(() => {
     if (!editor) return;
@@ -680,6 +963,7 @@ export function RichNotebookEditor({
     if (content === editor.getMarkdown()) return;
     editor.commands.setContent(content, { contentType: 'markdown', emitUpdate: false });
     setOutputBackedSuccessWithRef(buildOutputBackedStatus(editor));
+    setAiSuggestionCount(countAiSuggestionNodes(editor));
     refreshDependencyGraph(editor);
   }, [collabSession, content, editor, refreshDependencyGraph, setOutputBackedSuccessWithRef]);
 
@@ -737,6 +1021,9 @@ export function RichNotebookEditor({
         if (selfId !== leaderId) return;
         changeSourceRef.current = 'internal';
         editor.commands.setContent(content, { contentType: 'markdown', emitUpdate: false });
+        setOutputBackedSuccessWithRef(buildOutputBackedStatus(editor));
+        setAiSuggestionCount(countAiSuggestionNodes(editor));
+        refreshDependencyGraph(editor);
         doc.transact(() => {
           config.set('initialContentLoaded', true);
         }, 'seed-init');
@@ -886,10 +1173,21 @@ export function RichNotebookEditor({
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [askAITask, setAskAITask] = useState<{ id: string; displayText: string; prompt: string } | null>(null);
   const [askAIInsertRange, setAskAIInsertRange] = useState<{ from: number; to: number } | null>(null);
+  const [askAIApplyMode, setAskAIApplyMode] = useState<'insert' | 'optimize'>('insert');
+  const [askAIOptimizeMeta, setAskAIOptimizeMeta] = useState<{ scope: 'selection' | 'document'; range: { from: number; to: number }; sourceText: string } | null>(null);
   const [translateTarget, setTranslateTarget] = useState<'en' | 'zh' | 'ja' | 'ko'>('en');
+  const [bubbleAiMenuOpen, setBubbleAiMenuOpen] = useState(false);
+  const [domCodeContext, setDomCodeContext] = useState(false);
+  const [bubbleAiMenuPos, setBubbleAiMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [aiSuggestionCount, setAiSuggestionCount] = useState(0);
+  const [uploadingImages, setUploadingImages] = useState(0);
   const slashMenuOpenRef = useRef(false);
   const slashRangeRef = useRef<{ from: number; to: number } | null>(null);
   const slashActiveIndexRef = useRef(0);
+  const slashMenuRef = useRef<HTMLDivElement | null>(null);
+  const slashItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const bubbleAiMenuRef = useRef<HTMLDivElement | null>(null);
+  const bubbleAiTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const getCurrentNodeRange = useCallback(() => {
     if (!editor || currentNodePos < 0 || !currentNode) return;
@@ -897,6 +1195,38 @@ export function RichNotebookEditor({
     const to = from + currentNode.nodeSize;
     return { from, to };
   }, [editor, currentNode, currentNodePos]);
+
+  const insertUploadedImage = useCallback(async (file: File, atPos?: number) => {
+    const targetEditor = editorRef.current;
+    if (!targetEditor) return;
+    setUploadingImages((prev) => prev + 1);
+    try {
+      const uploaded = await uploadImageFile(file);
+      const safeName = uploaded.fileName?.replace(/\]/g, '') || 'image';
+      const nodes = [
+        {
+          type: 'image' as const,
+          attrs: {
+            src: uploaded.url,
+            alt: safeName,
+            title: `local-path::${uploaded.absolutePath}`,
+          },
+        },
+        { type: 'paragraph' as const },
+      ];
+      const chain = targetEditor.chain().focus();
+      if (typeof atPos === 'number' && Number.isFinite(atPos)) {
+        chain.insertContentAt(atPos, nodes).run();
+      } else {
+        chain.insertContent(nodes).run();
+      }
+    } catch (error) {
+      console.error('[RichNotebookEditor] 图片上传失败', error);
+      toast('error', '图片上传失败');
+    } finally {
+      setUploadingImages((prev) => Math.max(0, prev - 1));
+    }
+  }, [toast]);
 
   const getRangeWithLinkedOutput = useCallback((range: { from: number; to: number }) => {
     if (!editor) return range;
@@ -994,13 +1324,16 @@ export function RichNotebookEditor({
         dependsOn: oldDependsOn.filter((id) => id && id !== oldId),
       };
     }
-    editor.chain().focus().insertContentAt(range.to, nodeJson).run();
+    const insertRange = getRangeWithLinkedOutput(range);
+    editor.chain().focus().insertContentAt(insertRange.to, nodeJson).run();
     setMenuOpen(false);
-  }, [editor, getCurrentNodeRange]);
+  }, [editor, getCurrentNodeRange, getRangeWithLinkedOutput]);
 
   const handleAskAI = useCallback(() => {
     const range = getCurrentNodeRange();
     const blockText = range && editor ? editor.state.doc.textBetween(range.from, range.to, '\n\n').trim() : '';
+    setAskAIApplyMode('insert');
+    setAskAIOptimizeMeta(null);
     setAskAIContext(blockText || '');
     setAskAITask(null);
     setAskAIInsertRange(range || null);
@@ -1013,6 +1346,8 @@ export function RichNotebookEditor({
     const { from, to } = editor.state.selection;
     const contextText = editor.state.doc.textBetween(from, to, '\n\n').trim()
       || editor.state.doc.textBetween(Math.max(0, from - 200), Math.min(editor.state.doc.content.size, to + 200), '\n').trim();
+    setAskAIApplyMode('insert');
+    setAskAIOptimizeMeta(null);
     setAskAIContext(contextText || '');
     setAskAITask(null);
     setAskAIInsertRange({ from, to });
@@ -1028,10 +1363,22 @@ export function RichNotebookEditor({
     return { range: { from, to }, text };
   }, [editor]);
 
-  const openCodeAiTask = useCallback((actionName: string, instruction: string, replaceSelection = false) => {
+  const getCodeTarget = useCallback(() => {
     const selected = getSelectionText();
-    if (!selected) {
-      toast('warning', '请先选中代码块内容');
+    if (selected) return selected;
+    const range = getCurrentNodeRange();
+    if (!range || !editor) return null;
+    const node = editor.state.doc.nodeAt(range.from);
+    if (!node || node.type.name !== 'notebookCodeBlock') return null;
+    const text = (node.textContent || '').trim();
+    if (!text) return null;
+    return { range, text };
+  }, [editor, getCurrentNodeRange, getSelectionText]);
+
+  const openCodeAiTask = useCallback((actionName: string, instruction: string, replaceSelection = false) => {
+    const target = getCodeTarget();
+    if (!target) {
+      toast('warning', '请先选中代码块或将光标置于代码块中');
       return;
     }
 
@@ -1045,11 +1392,13 @@ export function RichNotebookEditor({
       '请直接输出结果，不要添加与任务无关的前后缀。',
       '',
       '待处理代码：',
-      selected.text,
+      target.text,
     ].join('\n');
 
-    setAskAIContext(selected.text);
-    setAskAIInsertRange(replaceSelection ? selected.range : null);
+    setAskAIApplyMode('insert');
+    setAskAIOptimizeMeta(null);
+    setAskAIContext(target.text);
+    setAskAIInsertRange(replaceSelection ? target.range : null);
     setAskAITask({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       displayText: `${actionName}（自动任务）`,
@@ -1057,7 +1406,7 @@ export function RichNotebookEditor({
     });
     setAskAIOpen(true);
     setMenuOpen(false);
-  }, [getSelectionText, toast]);
+  }, [getCodeTarget, toast]);
 
   const getCurrentNodeText = useCallback(() => {
     const range = getCurrentNodeRange();
@@ -1090,6 +1439,8 @@ export function RichNotebookEditor({
       target.text,
     ].join('\n');
 
+    setAskAIApplyMode('insert');
+    setAskAIOptimizeMeta(null);
     setAskAIContext(target.text);
     setAskAIInsertRange(target.range);
     setAskAITask({
@@ -1101,11 +1452,135 @@ export function RichNotebookEditor({
     setMenuOpen(false);
   }, [getCurrentNodeText, toast]);
 
+  const openAiOptimizeTask = useCallback((scope: 'selection' | 'document') => {
+    if (!editor) return;
+    if (scope === 'selection') {
+      const selected = getSelectionText();
+      const blockRange = getCurrentNodeRange();
+      const blockNode = blockRange ? editor.state.doc.nodeAt(blockRange.from) : null;
+      const isCodeBlockTarget = blockNode?.type.name === 'notebookCodeBlock';
+      const fallbackRange = blockRange
+        ? (isCodeBlockTarget
+          ? { from: blockRange.from + 1, to: Math.max(blockRange.from + 1, blockRange.to - 1) }
+          : blockRange)
+        : null;
+      const fallbackText = isCodeBlockTarget
+        ? (blockNode?.textContent || '').trim()
+        : (fallbackRange ? editor.state.doc.textBetween(fallbackRange.from, fallbackRange.to, '\n\n').trim() : '');
+
+      const targetRange = selected?.range || fallbackRange;
+      const targetText = selected?.text || fallbackText;
+      if (!targetRange || !targetText) {
+        toast('warning', '请先选中要优化的内容，或将光标放在要优化的块内');
+        return;
+      }
+
+      const prompt = [
+        isCodeBlockTarget
+          ? '你是 Cangjie Notebook 的代码优化助手。'
+          : '你是 Cangjie Notebook 的编辑优化助手。',
+        isCodeBlockTarget
+          ? '请在不改变业务逻辑与输出行为的前提下优化代码：提高可读性、可维护性与性能（若可行）。'
+          : '请在不改变事实和技术含义的前提下优化文本表达：提高清晰度、结构性、可读性，保留 Markdown 结构。',
+        isCodeBlockTarget
+          ? '禁止改变功能语义，禁止添加与任务无关内容。'
+          : '禁止添加编造信息，禁止输出解释。',
+        '如果无需改动，请原样返回。',
+        '',
+        '输出格式要求：只允许输出下面格式，不要输出其它任何内容：',
+        '<result>',
+        isCodeBlockTarget ? '优化后的完整代码' : '优化后的内容',
+        '</result>',
+        '',
+        isCodeBlockTarget ? '待优化代码：' : '待优化内容：',
+        targetText,
+      ].join('\n');
+      setAskAIApplyMode('optimize');
+      setAskAIOptimizeMeta({ scope: 'selection', range: targetRange, sourceText: targetText });
+      setAskAIContext(targetText);
+      setAskAIInsertRange(targetRange);
+      setAskAITask({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        displayText: isCodeBlockTarget ? 'AI优化（当前代码块）' : 'AI优化（选中/当前块）',
+        prompt,
+      });
+      setAskAIOpen(true);
+      setMenuOpen(false);
+      return;
+    }
+
+    const sourceText = editor.getMarkdown().trim();
+    if (!sourceText) {
+      toast('warning', '全文为空，暂无可优化内容');
+      return;
+    }
+    const docTo = Math.max(1, editor.state.doc.content.size - 1);
+    const prompt = [
+      '你是 Cangjie Notebook 的编辑优化助手。',
+      '请在不改变事实和技术含义的前提下优化全文表达：提高清晰度、结构性、可读性，保留 Markdown 结构。',
+      '禁止添加编造信息，禁止输出解释。',
+      '如果无需改动，请原样返回。',
+      '',
+      '输出格式要求：只允许输出下面格式，不要输出其它任何内容：',
+      '<result>',
+      '优化后的内容',
+      '</result>',
+      '',
+      '待优化全文：',
+      sourceText,
+    ].join('\n');
+    setAskAIApplyMode('optimize');
+    setAskAIOptimizeMeta({ scope: 'document', range: { from: 1, to: docTo }, sourceText });
+    setAskAIContext(sourceText.length > 5000 ? `${sourceText.slice(0, 5000)}\n\n...（全文较长，已截断预览）` : sourceText);
+    setAskAIInsertRange({ from: 1, to: docTo });
+    setAskAITask({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      displayText: 'AI优化（全文）',
+      prompt,
+    });
+    setAskAIOpen(true);
+    setMenuOpen(false);
+  }, [editor, getCurrentNodeRange, getSelectionText, toast]);
+
   const insertAiResultBack = useCallback((result: string) => {
     if (!editor) return;
     const text = result.trim();
     if (!text) {
       toast('warning', 'AI 返回内容为空');
+      return;
+    }
+
+    if (askAIApplyMode === 'optimize' && askAIOptimizeMeta) {
+      const sourceText = askAIOptimizeMeta.sourceText.trim();
+      if (!sourceText) {
+        toast('warning', '缺少原始文本，无法生成建议');
+        return;
+      }
+      if (text === sourceText) {
+        toast('info', 'AI 认为无需优化');
+        setAskAIOpen(false);
+        return;
+      }
+      const draftCore = buildAiOptimizationDraft(sourceText, text);
+      if (draftCore.items.length === 0) {
+        toast('info', '未检测到可审阅的差异');
+        setAskAIOpen(false);
+        return;
+      }
+      const suggestionNodes = buildAiSuggestionNodes(draftCore);
+      if (askAIOptimizeMeta.scope === 'document') {
+        editor.commands.setContent(suggestionNodes);
+      } else {
+        editor
+          .chain()
+          .focus()
+          .deleteRange(askAIOptimizeMeta.range)
+          .setTextSelection(askAIOptimizeMeta.range.from)
+          .insertContent(suggestionNodes)
+          .run();
+      }
+      setAskAIOpen(false);
+      toast('success', `已生成 ${draftCore.items.length} 条可接受/拒绝建议`);
       return;
     }
 
@@ -1122,7 +1597,7 @@ export function RichNotebookEditor({
     }
     setAskAIOpen(false);
     toast('success', '已插入回原文');
-  }, [askAIInsertRange, editor, toast]);
+  }, [askAIApplyMode, askAIInsertRange, askAIOptimizeMeta, editor, toast]);
 
   const translateTargetLabel = translateTarget === 'en'
     ? '英语'
@@ -1147,6 +1622,40 @@ export function RichNotebookEditor({
     }
   }, []);
 
+  useEffect(() => {
+    if (!bubbleAiMenuOpen) return;
+    const onDocDown = (event: MouseEvent) => {
+      const target = event.target as globalThis.Node | null;
+      if (!bubbleAiMenuRef.current || (target && bubbleAiMenuRef.current.contains(target))) return;
+      setBubbleAiMenuOpen(false);
+    };
+    const recalcPosition = () => {
+      const trigger = bubbleAiTriggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const menuWidth = 256;
+      const menuHeight = 260;
+      const margin = 8;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const left = Math.max(margin, Math.min(rect.left, vw - menuWidth - margin));
+      const preferAbove = rect.bottom + menuHeight + margin > vh && rect.top - menuHeight - margin > margin;
+      const top = preferAbove
+        ? Math.max(margin, rect.top - menuHeight - 6)
+        : Math.min(rect.bottom + 6, vh - menuHeight - margin);
+      setBubbleAiMenuPos({ top, left });
+    };
+    recalcPosition();
+    window.addEventListener('mousedown', onDocDown, true);
+    window.addEventListener('resize', recalcPosition, true);
+    window.addEventListener('scroll', recalcPosition, true);
+    return () => {
+      window.removeEventListener('mousedown', onDocDown, true);
+      window.removeEventListener('resize', recalcPosition, true);
+      window.removeEventListener('scroll', recalcPosition, true);
+    };
+  }, [bubbleAiMenuOpen]);
+
   const setTranslateTargetAndPersist = useCallback((target: 'en' | 'zh' | 'ja' | 'ko') => {
     setTranslateTarget(target);
     if (typeof window !== 'undefined') {
@@ -1156,95 +1665,226 @@ export function RichNotebookEditor({
     toast('info', `翻译目标已切换为${label}`);
   }, [toast]);
 
-  const isCodeContext = editor ? (editor.isActive('notebookCodeBlock') || editor.isActive('codeBlock')) : false;
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const checkDomCodeContext = () => {
+      const sel = window.getSelection();
+      const anchor = sel?.anchorNode || null;
+      const anchorEl = anchor instanceof Element ? anchor : anchor?.parentElement || null;
+      const activeEl = document.activeElement instanceof Element ? document.activeElement : null;
+      const inCode = Boolean(
+        anchorEl?.closest('.notebook-code-node') ||
+        activeEl?.closest('.notebook-code-node'),
+      );
+      setDomCodeContext(inCode);
+    };
+    document.addEventListener('selectionchange', checkDomCodeContext, true);
+    window.addEventListener('focusin', checkDomCodeContext, true);
+    window.addEventListener('click', checkDomCodeContext, true);
+    checkDomCodeContext();
+    return () => {
+      document.removeEventListener('selectionchange', checkDomCodeContext, true);
+      window.removeEventListener('focusin', checkDomCodeContext, true);
+      window.removeEventListener('click', checkDomCodeContext, true);
+    };
+  }, []);
+
+  const isSelectionInCodeBlock = editor ? editor.state.selection.$from.parent.type.name === 'notebookCodeBlock' : false;
+  const isCodeContext = editor ? (editor.isActive('notebookCodeBlock') || editor.isActive('codeBlock') || isSelectionInCodeBlock) : false;
+  const isCodeNodeContext = currentNode?.type.name === 'notebookCodeBlock';
+  const isOutputNodeContext = currentNode?.type.name === 'notebookOutput';
   const isTableContext = editor ? (editor.isActive('table') || editor.isActive('tableRow') || editor.isActive('tableCell') || editor.isActive('tableHeader')) : false;
   const isImageContext = editor ? editor.isActive('image') : false;
   const hasTextSelection = editor ? !editor.state.selection.empty : false;
-  const isCodeSelectionMode = hasTextSelection && isCodeContext;
+  const isCodeSelectionMode = isCodeContext || isCodeNodeContext || domCodeContext;
   const showContextToolbar = editor ? editor.isFocused : false;
 
-  const renderAiActionMenu = (dense = false) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button type="button" className={`rounded px-2 py-1 hover:bg-accent ${dense ? 'text-xs' : 'text-sm'}`} title="AI 助手">
-          <span className="material-symbols-outlined text-base">smart_toy</span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="bottom" align="start" className="w-64 z-[86]">
-        {isCodeSelectionMode ? (
-          <>
-            <DropdownMenuLabel>代码块 AI</DropdownMenuLabel>
-            <DropdownMenuItem onClick={handleAskAIFromSelection}>
-              <span className="material-symbols-outlined mr-2 text-base">forum</span>
-              问AI
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { openCodeAiTask('解释代码', '解释代码的功能、关键逻辑、输入输出与注意事项，使用简洁分点。'); }}>
-              <span className="material-symbols-outlined mr-2 text-base">help</span>
-              解释代码
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { openCodeAiTask('AI检视', '对代码做检视，指出潜在 bug、风险、可维护性和性能问题，并给出改进建议。'); }}>
-              <span className="material-symbols-outlined mr-2 text-base">fact_check</span>
-              AI检视
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { openCodeAiTask('添加注释', '在不改变代码行为的前提下，为代码添加必要且精炼的注释，返回完整代码。', true); }}>
-              <span className="material-symbols-outlined mr-2 text-base">add_comment</span>
-              添加注释
-            </DropdownMenuItem>
-          </>
-        ) : (
-          <>
-            <DropdownMenuLabel>通用</DropdownMenuLabel>
-            <DropdownMenuItem onClick={handleAskAI}>
-              <span className="material-symbols-outlined mr-2 text-base">forum</span>
-              问 AI
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>文本增强</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => { openAiActionDialog('修正拼写和语法', '修正拼写、标点和语法错误，保持原意与结构。'); }}>
-              <span className="material-symbols-outlined mr-2 text-base">spellcheck</span>
-              修正拼写和语法
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { openAiActionDialog('扩展文本', '在不偏离主题的前提下扩展内容，增加细节和上下文。'); }}>
-              <span className="material-symbols-outlined mr-2 text-base">expand_content</span>
-              扩展文本
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { openAiActionDialog('精简文本', '压缩篇幅，保留核心信息，去除冗余表达。'); }}>
-              <span className="material-symbols-outlined mr-2 text-base">compress</span>
-              精简文本
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { openAiActionDialog('简化表达', '改写为更清晰易懂的表达，降低阅读门槛。'); }}>
-              <span className="material-symbols-outlined mr-2 text-base">text_fields</span>
-              简化表达
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { openAiActionDialog('添加 Emoji', '在合适位置加入少量相关 emoji，保持专业和可读性。'); }}>
-              <span className="material-symbols-outlined mr-2 text-base">mood</span>
-              添加 Emoji
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>内容操作</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => { openAiActionDialog('补全句子', '补全不完整句子并确保语义连贯自然。'); }}>
-              <span className="material-symbols-outlined mr-2 text-base">format_list_bulleted_add</span>
-              补全句子
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); }}>
-              <span className="material-symbols-outlined mr-2 text-base">summarize</span>
-              总结内容
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>高级选项</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => { openAiActionDialog('调整语气', '改写为专业、友好且清晰的语气，不改变事实。'); }}>
-              <span className="material-symbols-outlined mr-2 text-base">tune</span>
-              调整语气
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { openAiActionDialog('翻译文本', translateInstruction); }}>
-              <span className="material-symbols-outlined mr-2 text-base">translate</span>
-              翻译文本（{translateTargetLabel}）
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+  useEffect(() => {
+    if (!isOutputNodeContext) return;
+    if (menuOpen) setMenuOpen(false);
+    if (bubbleAiMenuOpen) setBubbleAiMenuOpen(false);
+  }, [bubbleAiMenuOpen, isOutputNodeContext, menuOpen]);
+
+  const renderAiActionMenu = (dense = false, inBubble = false) => {
+    if (inBubble) {
+      const commonBtn = 'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent';
+      return (
+        <div className="relative" ref={bubbleAiMenuRef}>
+          <button
+            type="button"
+            ref={bubbleAiTriggerRef}
+            className={`rounded px-2 py-1 hover:bg-accent ${dense ? 'text-xs' : 'text-sm'}`}
+            title="AI 助手"
+            onClick={() => setBubbleAiMenuOpen((v) => !v)}
+          >
+            <span className="material-symbols-outlined text-base">smart_toy</span>
+          </button>
+          {bubbleAiMenuOpen && bubbleAiMenuPos && (
+            <div
+              className="fixed z-[220] w-64 rounded-md border bg-popover p-1 shadow-xl"
+              style={{ top: bubbleAiMenuPos.top, left: bubbleAiMenuPos.left }}
+            >
+              {isCodeSelectionMode ? (
+                <>
+                  <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">代码块 AI</div>
+                  <button type="button" className={commonBtn} onClick={() => { handleAskAIFromSelection(); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">forum</span>
+                    问AI
+                  </button>
+                  <button type="button" className={commonBtn} onClick={() => { openCodeAiTask('解释代码', '解释代码的功能、关键逻辑、输入输出与注意事项，使用简洁分点。'); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">help</span>
+                    解释代码
+                  </button>
+                  <button type="button" className={commonBtn} onClick={() => { openCodeAiTask('AI检视', '对代码做检视，指出潜在 bug、风险、可维护性和性能问题，并给出改进建议。'); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">fact_check</span>
+                    AI检视
+                  </button>
+                  <button type="button" className={commonBtn} onClick={() => { openAiOptimizeTask('selection'); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">auto_fix_high</span>
+                    AI优化（选中）
+                  </button>
+                  <button type="button" className={commonBtn} onClick={() => { openAiOptimizeTask('document'); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">dataset</span>
+                    AI优化（全文）
+                  </button>
+                  <button type="button" className={commonBtn} onClick={() => { openCodeAiTask('添加注释', '在不改变代码行为的前提下，为代码添加必要且精炼的注释，返回完整代码。', true); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">add_comment</span>
+                    添加注释
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">通用 AI</div>
+                  <button type="button" className={commonBtn} onClick={() => { handleAskAI(); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">forum</span>
+                    问 AI
+                  </button>
+                  <button type="button" className={commonBtn} onClick={() => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">summarize</span>
+                    总结内容
+                  </button>
+                  <button type="button" className={commonBtn} onClick={() => { openAiOptimizeTask('selection'); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">auto_fix_high</span>
+                    AI优化（选中）
+                  </button>
+                  <button type="button" className={commonBtn} onClick={() => { openAiOptimizeTask('document'); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">dataset</span>
+                    AI优化（全文）
+                  </button>
+                  <button type="button" className={commonBtn} onClick={() => { openAiActionDialog('翻译文本', translateInstruction); setBubbleAiMenuOpen(false); }}>
+                    <span className="material-symbols-outlined text-base">translate</span>
+                    翻译文本（{translateTargetLabel}）
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className={`rounded px-2 py-1 hover:bg-accent ${dense ? 'text-xs' : 'text-sm'}`}
+            title="AI 助手"
+          >
+            <span className="material-symbols-outlined text-base">smart_toy</span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="bottom" align="start" className="w-64 z-[86]">
+          {isCodeSelectionMode ? (
+            <>
+              <DropdownMenuLabel>代码块 AI</DropdownMenuLabel>
+              <DropdownMenuItem onClick={handleAskAIFromSelection}>
+                <span className="material-symbols-outlined mr-2 text-base">forum</span>
+                问AI
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openCodeAiTask('解释代码', '解释代码的功能、关键逻辑、输入输出与注意事项，使用简洁分点。'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">help</span>
+                解释代码
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openCodeAiTask('AI检视', '对代码做检视，指出潜在 bug、风险、可维护性和性能问题，并给出改进建议。'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">fact_check</span>
+                AI检视
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openAiOptimizeTask('selection'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">auto_fix_high</span>
+                AI优化（选中）
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openAiOptimizeTask('document'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">dataset</span>
+                AI优化（全文）
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openCodeAiTask('添加注释', '在不改变代码行为的前提下，为代码添加必要且精炼的注释，返回完整代码。', true); }}>
+                <span className="material-symbols-outlined mr-2 text-base">add_comment</span>
+                添加注释
+              </DropdownMenuItem>
+            </>
+          ) : (
+            <>
+              <DropdownMenuLabel>通用</DropdownMenuLabel>
+              <DropdownMenuItem onClick={handleAskAI}>
+                <span className="material-symbols-outlined mr-2 text-base">forum</span>
+                问 AI
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>文本增强</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => { openAiActionDialog('修正拼写和语法', '修正拼写、标点和语法错误，保持原意与结构。'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">spellcheck</span>
+                修正拼写和语法
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openAiActionDialog('扩展文本', '在不偏离主题的前提下扩展内容，增加细节和上下文。'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">expand_content</span>
+                扩展文本
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openAiActionDialog('精简文本', '压缩篇幅，保留核心信息，去除冗余表达。'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">compress</span>
+                精简文本
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openAiActionDialog('简化表达', '改写为更清晰易懂的表达，降低阅读门槛。'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">text_fields</span>
+                简化表达
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openAiActionDialog('添加 Emoji', '在合适位置加入少量相关 emoji，保持专业和可读性。'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">mood</span>
+                添加 Emoji
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>内容操作</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => { openAiActionDialog('补全句子', '补全不完整句子并确保语义连贯自然。'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">format_list_bulleted_add</span>
+                补全句子
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">summarize</span>
+                总结内容
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openAiOptimizeTask('selection'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">auto_fix_high</span>
+                AI优化（选中）
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openAiOptimizeTask('document'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">dataset</span>
+                AI优化（全文）
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>高级选项</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => { openAiActionDialog('调整语气', '改写为专业、友好且清晰的语气，不改变事实。'); }}>
+                <span className="material-symbols-outlined mr-2 text-base">tune</span>
+                调整语气
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { openAiActionDialog('翻译文本', translateInstruction); }}>
+                <span className="material-symbols-outlined mr-2 text-base">translate</span>
+                翻译文本（{translateTargetLabel}）
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
 
   const handleJumpToHeading = useCallback((pos: number, id: string) => {
     if (!editor) return;
@@ -1398,6 +2038,28 @@ export function RichNotebookEditor({
         },
       },
       {
+        id: 'inline_math',
+        title: '行内公式',
+        subtext: '插入行内 LaTeX 公式',
+        aliases: ['math', 'latex', 'equation', 'inline'],
+        icon: 'functions',
+        group: '块',
+        onSelect: (targetEditor) => {
+          (targetEditor.chain().focus() as any).insertInlineMath({ latex: 'a^2+b^2=c^2' }).run();
+        },
+      },
+      {
+        id: 'block_math',
+        title: '块级公式',
+        subtext: '插入独立展示的 LaTeX 公式块',
+        aliases: ['math block', 'latex block', 'equation block'],
+        icon: 'calculate',
+        group: '块',
+        onSelect: (targetEditor) => {
+          (targetEditor.chain().focus() as any).insertBlockMath({ latex: '\\frac{a}{b}' }).run();
+        },
+      },
+      {
         id: 'ask_ai',
         title: '问 AI',
         subtext: '打开 Notebook AI 助手',
@@ -1535,6 +2197,14 @@ export function RichNotebookEditor({
     });
   }, [slashMenuItems, slashQuery]);
 
+  useEffect(() => {
+    if (!slashMenuOpen) return;
+    const btn = slashItemRefs.current[slashActiveIndex];
+    if (btn) {
+      btn.scrollIntoView({ block: 'nearest' });
+    }
+  }, [slashActiveIndex, slashMenuOpen]);
+
   const closeSlashMenu = useCallback(() => {
     setSlashMenuOpen(false);
     setSlashPos(null);
@@ -1600,10 +2270,20 @@ export function RichNotebookEditor({
       const from = $from.start() + slashIndex;
       const to = from + 1 + query.length;
       const coords = view.coordsAtPos(selection.from);
+      const menuWidth = 320;
+      const menuHeight = 320;
+      const margin = 12;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const left = Math.max(margin, Math.min(coords.left, viewportWidth - menuWidth - margin));
+      const showAbove = coords.bottom + menuHeight + margin > viewportHeight && coords.top - menuHeight - margin > margin;
+      const top = showAbove
+        ? Math.max(margin, coords.top - menuHeight - 8)
+        : Math.min(coords.bottom + 8, viewportHeight - menuHeight - margin);
 
       setSlashQuery(query);
       setSlashRange({ from, to });
-      setSlashPos({ top: coords.bottom + 8, left: coords.left });
+      setSlashPos({ top, left });
       setSlashMenuOpen(true);
       setSlashActiveIndex(0);
     };
@@ -1726,6 +2406,29 @@ export function RichNotebookEditor({
           {renderAiActionMenu(true)}
           </div>
           <div className="ml-auto flex items-center gap-1">
+            {uploadingImages > 0 && (
+              <span className="mr-2 text-[11px] text-muted-foreground">图片上传中...</span>
+            )}
+            {aiSuggestionCount > 0 && (
+              <>
+                <button
+                  type="button"
+                  className="rounded px-2 py-1 text-xs hover:bg-accent"
+                  onClick={() => applyAllAiSuggestions('accept')}
+                  title={`接受全部建议（${aiSuggestionCount}）`}
+                >
+                  <span className="material-symbols-outlined text-base">check_circle</span>
+                </button>
+                <button
+                  type="button"
+                  className="rounded px-2 py-1 text-xs hover:bg-accent"
+                  onClick={() => applyAllAiSuggestions('reject')}
+                  title={`拒绝全部建议（${aiSuggestionCount}）`}
+                >
+                  <span className="material-symbols-outlined text-base">cancel</span>
+                </button>
+              </>
+            )}
             {collabUsers.length > 0 && (
               <div className="mr-2 hidden items-center gap-1 md:flex">
                 {collabUsers.slice(0, 4).map((user) => (
@@ -1762,14 +2465,17 @@ export function RichNotebookEditor({
         pluginKey="notebookBubbleMenu"
         updateDelay={100}
         shouldShow={({ editor: e }) => {
-          if (!e.isFocused) return false;
+          const inOutput = e.isActive('notebookOutput')
+            || e.state.selection.$from.parent.type.name === 'notebookOutput'
+            || e.state.selection.$to.parent.type.name === 'notebookOutput';
+          if (inOutput) return false;
           const inCode = e.isActive('notebookCodeBlock') || e.isActive('codeBlock');
           const inTable = e.isActive('table') || e.isActive('tableCell') || e.isActive('tableHeader') || e.isActive('tableRow');
           const inImage = e.isActive('image');
-          return !e.state.selection.empty || inCode || inTable || inImage;
+          return bubbleAiMenuOpen || domCodeContext || !e.state.selection.empty || inCode || inTable || inImage;
         }}
       >
-        <div className="flex items-center gap-1 rounded-md border bg-popover p-1 shadow-lg">
+        <div className="notebook-bubble-menu flex items-center gap-1 rounded-md border bg-popover p-1 shadow-lg">
           {!isCodeContext && !isImageContext && (
             <>
               <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('bold') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleBold().run()} title="加粗">
@@ -1819,13 +2525,25 @@ export function RichNotebookEditor({
             </button>
           )}
           {!isCodeContext && <TableSizeMenuButton dense onInsert={insertTableWithSize} />}
-          {renderAiActionMenu(true)}
+          {renderAiActionMenu(true, true)}
         </div>
       </BubbleMenu>
       <DragHandle editor={editor} onNodeChange={handleNodeChange}>
-        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenu
+          open={menuOpen}
+          onOpenChange={(next) => {
+            if (isOutputNodeContext && next) return;
+            setMenuOpen(next);
+          }}
+        >
           <DropdownMenuTrigger asChild>
-            <button type="button" className="notebook-drag-handle-btn" draggable data-drag-handle title="拖拽或打开块菜单">
+            <button
+              type="button"
+              className={`notebook-drag-handle-btn ${isOutputNodeContext ? 'pointer-events-none opacity-0' : ''}`}
+              draggable={!isOutputNodeContext}
+              data-drag-handle
+              title={isOutputNodeContext ? '' : '拖拽或打开块菜单'}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>drag_indicator</span>
             </button>
           </DropdownMenuTrigger>
@@ -1903,6 +2621,14 @@ export function RichNotebookEditor({
                       <span className="material-symbols-outlined mr-2 text-base">fact_check</span>
                       AI检视
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { openAiOptimizeTask('selection'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">auto_fix_high</span>
+                      AI优化（选中）
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { openAiOptimizeTask('document'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">dataset</span>
+                      AI优化（全文）
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => { openCodeAiTask('添加注释', '在不改变代码行为的前提下，为代码添加必要且精炼的注释，返回完整代码。', true); }}>
                       <span className="material-symbols-outlined mr-2 text-base">add_comment</span>
                       添加注释
@@ -1946,6 +2672,14 @@ export function RichNotebookEditor({
                     <DropdownMenuItem onClick={() => { openAiActionDialog('总结内容', '提炼核心观点，输出简洁摘要。'); }}>
                       <span className="material-symbols-outlined mr-2 text-base">summarize</span>
                       总结内容
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { openAiOptimizeTask('selection'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">auto_fix_high</span>
+                      AI优化（选中）
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { openAiOptimizeTask('document'); }}>
+                      <span className="material-symbols-outlined mr-2 text-base">dataset</span>
+                      AI优化（全文）
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel>高级选项</DropdownMenuLabel>
@@ -2061,6 +2795,7 @@ export function RichNotebookEditor({
       </div>
       {slashMenuOpen && slashPos && (
         <div
+          ref={slashMenuRef}
           className="fixed z-[85] w-[320px] max-h-[320px] overflow-auto rounded-md border bg-popover p-1 shadow-xl"
           style={{ top: slashPos.top, left: slashPos.left }}
         >
@@ -2077,6 +2812,9 @@ export function RichNotebookEditor({
                     {showGroup && <div className="px-2 pt-2 pb-1 text-[11px] text-muted-foreground">{item.group}</div>}
                     <button
                       type="button"
+                      ref={(el) => {
+                        slashItemRefs.current[index] = el;
+                      }}
                       className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${index === slashActiveIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/70'}`}
                       onMouseEnter={() => setSlashActiveIndex(index)}
                       onMouseDown={(event) => {
@@ -2102,6 +2840,7 @@ export function RichNotebookEditor({
         onOpenChange={setAskAIOpen}
         context={askAIContext}
         autoTask={askAITask}
+        insertButtonLabel={askAIApplyMode === 'optimize' ? '生成建议列表' : '插入回原文'}
         onInsertResult={insertAiResultBack}
       />
       </div>
@@ -2183,6 +2922,37 @@ export function RichNotebookEditor({
           white-space: nowrap;
           user-select: none;
           pointer-events: none;
+        }
+        .notebook-rich-editor .tiptap p.is-empty:last-child::before,
+        .notebook-rich-editor .tiptap h1.is-empty:last-child::before,
+        .notebook-rich-editor .tiptap h2.is-empty:last-child::before,
+        .notebook-rich-editor .tiptap h3.is-empty:last-child::before,
+        .notebook-rich-editor .tiptap blockquote.is-empty:last-child::before {
+          color: hsl(var(--muted-foreground));
+          content: attr(data-placeholder);
+          float: left;
+          height: 0;
+          pointer-events: none;
+          opacity: 0.7;
+        }
+        .notebook-rich-editor .tiptap-mathematics-render {
+          border: 1px solid hsl(var(--border));
+          background: hsl(var(--muted) / 0.45);
+          border-radius: 8px;
+          padding: 4px 8px;
+        }
+        .notebook-rich-editor .tiptap-mathematics-render[data-type="inline-math"] {
+          display: inline-flex;
+          margin: 0 2px;
+          padding: 2px 6px;
+          border-radius: 6px;
+          cursor: pointer;
+        }
+        .notebook-rich-editor .tiptap-mathematics-render[data-type="block-math"] {
+          display: block;
+          margin: 8px 0;
+          padding: 8px 10px;
+          overflow-x: auto;
         }
       `}</style>
     </div>

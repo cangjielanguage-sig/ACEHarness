@@ -107,5 +107,5 @@ iterationPrompt: |
   - 读者无需翻阅任何历史迭代记录即可理解全貌并直接用于编码
 _file: compiler_architect.yaml
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

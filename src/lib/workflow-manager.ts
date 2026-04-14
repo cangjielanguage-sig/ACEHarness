@@ -804,8 +804,7 @@ export class WorkflowManager extends EventEmitter {
         if (!existsSync(srcDir)) {
           this.emit('log', { message: `项目目录不存在: ${srcDir}，跳过目录隔离` });
         } else {
-          const isoRunId = `run-${formatTimestamp()}`;
-          const isolatedDir = resolve(this._userPersonalDir, isoRunId);
+          const isolatedDir = resolve(this._userPersonalDir, runId);
           try {
             await mkdir(isolatedDir, { recursive: true });
             // Persist target working directory early so cleanup can find it

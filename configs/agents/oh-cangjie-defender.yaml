@@ -101,5 +101,5 @@ systemPrompt: >
 
   - 最终状态（成功/失败 + 原因）
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

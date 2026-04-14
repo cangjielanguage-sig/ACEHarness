@@ -255,3 +255,9 @@ models:
       - claude-code
       - codex
       - opencode
+  - value: csi-provider/GLM-4.7
+    label: csi.ai/GLM-4.7
+    costMultiplier: 0.1
+    endpoints: []
+    engines:
+      - opencode

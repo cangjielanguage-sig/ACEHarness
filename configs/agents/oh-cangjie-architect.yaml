@@ -51,5 +51,5 @@ constraints:
   - syscap/since 等元信息必须来自 ArkTS 声明或前序报告，禁止编造
 _file: oh-cangjie-architect.yaml
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

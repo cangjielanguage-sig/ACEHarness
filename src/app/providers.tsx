@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { usePathname } from 'next/navigation';
 import { ThemeProvider } from '@/components/theme-provider';
 import { ToastProvider } from '@/components/ui/toast';
+import OnboardingPortal from '@/components/onboarding/OnboardingPortal';
 
 // 动态导入 ChatModalWrapper 避免阻塞首屏
 const ChatModalWrapper = dynamic(() => import('@/components/ChatModalWrapper'), {
@@ -46,6 +47,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <ChatProvider>
           <ToastProvider>
             {children}
+            <OnboardingPortal />
             <ChatModalWrapper />
           </ToastProvider>
         </ChatProvider>

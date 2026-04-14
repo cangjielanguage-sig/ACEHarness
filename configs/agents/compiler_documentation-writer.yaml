@@ -79,5 +79,5 @@ iterationPrompt: |
   - 结构清晰，易于阅读和维护
 _file: documentation-writer.yaml
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

@@ -125,5 +125,5 @@ iterationPrompt: |
   - 新增/修改的测试用例
   - 构建和测试验证结果
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

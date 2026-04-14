@@ -107,5 +107,5 @@ iterationPrompt: |
   - 测试执行结果
   - 覆盖率改进报告
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

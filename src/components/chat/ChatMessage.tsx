@@ -198,7 +198,7 @@ export default memo(function ChatMessage({ message, isStreaming, onConfirmAction
           )}
         </div>
         <div className="max-w-[80%] rounded-2xl rounded-br-sm px-4 py-2.5 bg-primary text-primary-foreground text-sm">
-          <div className="[&_a]:text-white [&_a]:underline [&_a:hover]:text-blue-200">
+          <div className="[&_a]:text-white [&_a]:underline [&_a:hover]:text-blue-200 [&_img]:my-2 [&_img]:max-h-64 [&_img]:max-w-[320px] [&_img]:rounded-md [&_img]:border [&_img]:border-white/25 [&_img]:object-contain">
             <Markdown>{message.content}</Markdown>
           </div>
         </div>
@@ -239,7 +239,7 @@ export default memo(function ChatMessage({ message, isStreaming, onConfirmAction
       <div className="max-w-[85%] space-y-1">
         {isStreaming && !message.content && <ThinkingBot />}
         {message.content && (
-          <div className="rounded-2xl rounded-bl-sm px-4 py-2.5 bg-muted text-sm prose-sm prose-neutral dark:prose-invert max-w-none [&_pre]:bg-background [&_pre]:border [&_pre]:rounded [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:bg-background/50 [&_code]:text-foreground [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5">
+          <div className="rounded-2xl rounded-bl-sm px-4 py-2.5 bg-muted text-sm prose-sm prose-neutral dark:prose-invert max-w-none [&_pre]:bg-background [&_pre]:border [&_pre]:rounded [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:bg-background/50 [&_code]:text-foreground [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_img]:my-2 [&_img]:max-h-64 [&_img]:max-w-[360px] [&_img]:rounded-md [&_img]:border [&_img]:border-border [&_img]:object-contain">
             <Markdown>{message.content}</Markdown>
             {isStreaming && <ThinkingBot />}
           </div>
@@ -250,7 +250,7 @@ export default memo(function ChatMessage({ message, isStreaming, onConfirmAction
               <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>unfold_more</span>
               查看完整内容
             </summary>
-            <div className="px-3 py-2 prose-sm prose-neutral dark:prose-invert max-w-none [&_p]:my-1 [&_pre]:bg-background [&_pre]:border [&_pre]:rounded [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:bg-background/50 [&_code]:text-foreground [&_code]:px-1 [&_code]:rounded [&_code]:text-xs">
+            <div className="px-3 py-2 prose-sm prose-neutral dark:prose-invert max-w-none [&_p]:my-1 [&_pre]:bg-background [&_pre]:border [&_pre]:rounded [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:bg-background/50 [&_code]:text-foreground [&_code]:px-1 [&_code]:rounded [&_code]:text-xs [&_img]:my-2 [&_img]:max-h-64 [&_img]:max-w-[360px] [&_img]:rounded-md [&_img]:border [&_img]:border-border [&_img]:object-contain">
               <Markdown>{message.rawContent}</Markdown>
             </div>
           </details>

@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/toast"
+import { useConfirmDialog } from "@/hooks/useConfirmDialog"
+import ConfirmDialog from "@/components/ConfirmDialog"
 
 export interface ClipboardItem {
   path: string
@@ -96,6 +98,13 @@ const TreeContext = React.createContext<{
   notebookPermission: 'read' | 'write'
   notebookCanWrite: boolean
   toast: (type: "success" | "error" | "info" | "warning", message: string) => void
+  confirm: (options: {
+    title: string
+    description: string
+    confirmLabel?: string
+    cancelLabel?: string
+    variant?: "default" | "destructive"
+  }) => Promise<boolean>
 } | null>(null)
 
 function useTreeCtx() {
@@ -341,6 +350,7 @@ function TreeFileItem({
     notebookShareToken,
     notebookCanWrite,
     toast,
+    confirm,
   } = useTreeCtx()
 
   const handleRename = async (newName: string) => {
@@ -362,7 +372,13 @@ function TreeFileItem({
   }
 
   const handleDelete = async () => {
-    if (!window.confirm(`确认删除文件「${node.name}」吗？`)) return
+    const ok = await confirm({
+      title: "删除文件",
+      description: `确认删除文件「${node.name}」吗？`,
+      confirmLabel: "删除",
+      variant: "destructive",
+    })
+    if (!ok) return
     try {
       if (mode === "notebook") {
         if (!notebookCanWrite) return
@@ -468,14 +484,24 @@ function TreeDirItem({
     notebookShareToken,
     notebookCanWrite,
     toast,
+    confirm,
   } = useTreeCtx()
+  const isCreatingHere = creatingIn?.dir === node.path
   const [children, setChildren] = React.useState<TreeNode[] | undefined>(node.children)
   const [loadingChildren, setLoadingChildren] = React.useState(false)
+  const shouldAutoOpen = Boolean(
+    selectedFile && (selectedFile === node.path || selectedFile.startsWith(`${node.path}/`))
+  )
+  const [open, setOpen] = React.useState(isCreatingHere || shouldAutoOpen)
 
   React.useEffect(() => { setChildren(node.children) }, [node.children])
+  React.useEffect(() => {
+    if (isCreatingHere || shouldAutoOpen) setOpen(true)
+  }, [isCreatingHere, shouldAutoOpen])
 
-  const handleOpenChange = React.useCallback(async (open: boolean) => {
-    if (open && children === undefined && !loadingChildren) {
+  const handleOpenChange = React.useCallback(async (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (nextOpen && children === undefined && !loadingChildren) {
       setLoadingChildren(true)
       try {
         if (mode === "notebook") {
@@ -514,7 +540,13 @@ function TreeDirItem({
   }
 
   const handleDelete = async () => {
-    if (!window.confirm(`确认删除文件夹「${node.name}」及其全部内容吗？`)) return
+    const ok = await confirm({
+      title: "删除文件夹",
+      description: `确认删除文件夹「${node.name}」及其全部内容吗？`,
+      confirmLabel: "删除",
+      variant: "destructive",
+    })
+    if (!ok) return
     try {
       if (mode === "notebook") {
         if (!notebookCanWrite) return
@@ -601,11 +633,10 @@ function TreeDirItem({
     )
   }
 
-  const isCreatingHere = creatingIn?.dir === node.path
   const isContextActive = contextTarget === node.path
 
   return (
-    <Collapsible className="group/collapsible" onOpenChange={handleOpenChange} defaultOpen={isCreatingHere}>
+    <Collapsible className="group/collapsible" onOpenChange={handleOpenChange} open={open}>
       <ContextMenu onOpenChange={(open) => { if (open) setContextTarget(node.path); else setContextTarget(null) }}>
         <ContextMenuTrigger asChild>
           <CollapsibleTrigger asChild>
@@ -674,6 +705,7 @@ export function FileTreeSidebar({
   notebookPermission = 'write',
 }: FileTreeSidebarProps) {
   const { toast } = useToast()
+  const { confirm, dialogProps } = useConfirmDialog()
   const notebookCanWrite = mode !== 'notebook' || notebookPermission === 'write'
   const workspaceName = mode === "notebook" ? "Cangjie Notebook" : (workspacePath.split("/").filter(Boolean).pop() || "Workspace")
   const [renamingPath, setRenamingPath] = React.useState<string | null>(null)
@@ -726,7 +758,7 @@ export function FileTreeSidebar({
   const isCreatingAtRoot = creatingIn?.dir === ""
 
   return (
-    <TreeContext.Provider value={{ workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, onDeletedPath, contextTarget, setContextTarget, notebookScope, notebookShareToken, notebookPermission, notebookCanWrite, toast }}>
+    <TreeContext.Provider value={{ workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, onDeletedPath, contextTarget, setContextTarget, notebookScope, notebookShareToken, notebookPermission, notebookCanWrite, toast, confirm }}>
       <div className="flex flex-col h-full bg-card">
         <div className="flex items-center gap-2 px-3 py-2 border-b shrink-0">
           <img src={`${FILE_TYPE_ICON_DIR}/folder.svg`} alt="" aria-hidden className="h-4 w-4 shrink-0" />
@@ -782,6 +814,7 @@ export function FileTreeSidebar({
           </ContextMenuContent>
         </ContextMenu>
       </div>
+      {dialogProps && <ConfirmDialog {...dialogProps} />}
     </TreeContext.Provider>
   )
 }

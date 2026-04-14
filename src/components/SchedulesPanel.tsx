@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { SingleCombobox, ComboboxPortalProvider } from '@/components/ui/combobox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -174,7 +174,9 @@ export default function SchedulesPanel({ configFile }: { configFile?: string }) 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <ComboboxPortalProvider>
-          <h2 className="text-lg font-semibold mb-4">{editingJob ? t('schedules.dialog.editTitle') : t('schedules.dialog.createTitle')}</h2>
+          <DialogHeader className="mb-2">
+            <DialogTitle>{editingJob ? t('schedules.dialog.editTitle') : t('schedules.dialog.createTitle')}</DialogTitle>
+          </DialogHeader>
           <div className="space-y-4">
             <div><Label>{t('schedules.dialog.name')}</Label><Input value={formName} onChange={e => setFormName(e.target.value)} placeholder={t('schedules.dialog.namePlaceholder')} /></div>
             <div><Label>{t('schedules.dialog.configFile')}</Label>

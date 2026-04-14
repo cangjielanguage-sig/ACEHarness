@@ -17,6 +17,8 @@ import {
 import AvatarPicker from '@/components/AvatarPicker';
 import AuthGuard from '@/components/AuthGuard';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import { ArrowLeft, Plus, Search, MoreHorizontal } from 'lucide-react';
 
 interface UserInfo {
@@ -49,6 +51,7 @@ function UsersContent() {
   const [resetUserId, setResetUserId] = useState('');
   const [resetPwd, setResetPwd] = useState('');
   const [resetError, setResetError] = useState('');
+  const { confirm, dialogProps } = useConfirmDialog();
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('auth-token') : null;
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
@@ -118,7 +121,13 @@ function UsersContent() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确定要删除该用户吗？')) return;
+    const ok = await confirm({
+      title: '删除用户',
+      description: '确定要删除该用户吗？',
+      confirmLabel: '删除',
+      variant: 'destructive',
+    });
+    if (!ok) return;
     await fetch(`/api/users/${id}`, { method: 'DELETE', headers });
     loadUsers();
   };
@@ -267,6 +276,7 @@ function UsersContent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {dialogProps && <ConfirmDialog {...dialogProps} />}
     </div>
   );
 }

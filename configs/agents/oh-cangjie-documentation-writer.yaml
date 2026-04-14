@@ -116,5 +116,5 @@ iterationPrompt: |
   - 包含所有必要的内容和示例
   - 结构清晰，易于阅读和维护
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

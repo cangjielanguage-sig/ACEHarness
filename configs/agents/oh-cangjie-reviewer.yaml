@@ -67,5 +67,5 @@ constraints:
   - 不得无依据给出"已对齐/已通过"结论
 _file: oh-cangjie-reviewer.yaml
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

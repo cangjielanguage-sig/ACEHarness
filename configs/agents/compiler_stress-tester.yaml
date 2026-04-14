@@ -101,5 +101,5 @@ iterationPrompt: |
   - 系统稳定性评估
   - 容量规划建议更新
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

@@ -376,7 +376,10 @@ export const runsApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'delete', runIds, cleanWorkDir }),
     });
-    if (!response.ok) throw new Error('批量删除运行记录失败');
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || '批量删除运行记录失败');
+    }
     return response.json();
   },
 };
@@ -787,6 +790,23 @@ export interface TreeNode {
 export type WorkspaceMode = 'default' | 'notebook';
 export type NotebookScope = 'personal' | 'global';
 export type NotebookSharePermission = 'read' | 'write';
+export type NotebookSnapshotSource = 'manual' | 'auto' | 'system';
+
+export interface NotebookSnapshotSummary {
+  id: string;
+  scope: NotebookScope;
+  ownerId: string;
+  file: string;
+  contentSize: number;
+  createdAt: number;
+  createdBy: string;
+  createdByName: string;
+  source: NotebookSnapshotSource;
+}
+
+export interface NotebookSnapshotDetail extends NotebookSnapshotSummary {
+  content: string;
+}
 
 export const workspaceApi = {
   async getNotebookTree(depth = 2, options?: { scope?: NotebookScope; shareToken?: string }): Promise<{ tree: TreeNode[]; rootPath: string }> {
@@ -883,6 +903,69 @@ export const workspaceApi = {
       throw new Error(data.error || '解析分享链接失败');
     }
     return res.json() as Promise<{ scope: NotebookScope; path: string; permission: NotebookSharePermission }>;
+  },
+  async listNotebookSnapshots(file: string, options?: { scope?: NotebookScope; shareToken?: string }) {
+    const params = new URLSearchParams();
+    params.set('file', file);
+    if (options?.scope) params.set('scope', options.scope);
+    if (options?.shareToken) params.set('shareToken', options.shareToken);
+    const res = await authFetch(`${API_BASE}/notebook/snapshots?${params.toString()}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '获取快照列表失败');
+    }
+    return res.json() as Promise<{ rows: NotebookSnapshotSummary[] }>;
+  },
+  async createNotebookSnapshot(
+    file: string,
+    options?: { scope?: NotebookScope; shareToken?: string; source?: NotebookSnapshotSource; content?: string },
+  ) {
+    const res = await authFetch(`${API_BASE}/notebook/snapshots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file,
+        scope: options?.scope,
+        shareToken: options?.shareToken,
+        source: options?.source || 'manual',
+        content: options?.content,
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '创建快照失败');
+    }
+    return res.json() as Promise<{ created: boolean; snapshot: NotebookSnapshotSummary }>;
+  },
+  async restoreNotebookSnapshot(file: string, snapshotId: string, options?: { scope?: NotebookScope; shareToken?: string }) {
+    const res = await authFetch(`${API_BASE}/notebook/snapshots`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file,
+        snapshotId,
+        scope: options?.scope,
+        shareToken: options?.shareToken,
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '恢复快照失败');
+    }
+    return res.json() as Promise<{ success: boolean; restoredSnapshotId: string }>;
+  },
+  async getNotebookSnapshotDetail(file: string, snapshotId: string, options?: { scope?: NotebookScope; shareToken?: string }) {
+    const params = new URLSearchParams();
+    params.set('file', file);
+    params.set('snapshotId', snapshotId);
+    if (options?.scope) params.set('scope', options.scope);
+    if (options?.shareToken) params.set('shareToken', options.shareToken);
+    const res = await authFetch(`${API_BASE}/notebook/snapshots?${params.toString()}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '获取快照详情失败');
+    }
+    return res.json() as Promise<{ snapshot: NotebookSnapshotDetail }>;
   },
   async runCangjie(code: string, sourceName?: string, origin: 'markdown' | 'workspace' = 'workspace'): Promise<RunCangjieResponse> {
     const res = await authFetch(`${API_BASE}/cangjie/run`, {

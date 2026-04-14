@@ -100,5 +100,5 @@ iterationPrompt: |
   - 修改的文件列表和变更内容
   - 测试验证结果
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

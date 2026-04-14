@@ -63,5 +63,5 @@ constraints:
   - 使用 harmonyos-build skill 进行构建验证时，必须先复制 build.py 脚本
   - 构建日志必须落盘到文件后再读取分析
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

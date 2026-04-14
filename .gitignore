@@ -63,3 +63,6 @@ configs/unreachable.yaml
 
 # Temp files
 .tmp/
+
+# Runtime uploaded assets
+/public/uploads/

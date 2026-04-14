@@ -39,5 +39,5 @@ constraints:
   - 信息不确定时必须明确标注“未定位/不确定”，不要猜测
 _file: oh-cangjie-analyst.yaml
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

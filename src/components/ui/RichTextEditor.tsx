@@ -5,12 +5,14 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import CharacterCount from '@tiptap/extension-character-count';
 import { ListKit } from '@tiptap/extension-list';
+import Image from '@tiptap/extension-image';
 import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
 import { Extension } from '@tiptap/core';
 import { useEffect, forwardRef, useImperativeHandle, useRef, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { createPortal } from 'react-dom';
+import { uploadImageFile } from '@/lib/client-image-upload';
 
 export interface RichTextEditorHandle {
   clear: () => void;
@@ -130,9 +132,61 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
   showToolbar = false,
 }, ref) => {
   const editorContainerRef = useRef<HTMLDivElement>(null);
+  const editorRuntimeRef = useRef<ReturnType<typeof useEditor> | null>(null);
   const onEnterRef = useRef(onEnter);
   onEnterRef.current = onEnter;
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(0);
+
+  const getMarkdownWithImageLocalPaths = useCallback(() => {
+    if (!editorRuntimeRef.current) return '';
+    const editor = editorRuntimeRef.current;
+    const markdown = editor.getMarkdown();
+    const localPathLines: string[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name !== 'image') return true;
+      const title = String((node.attrs as any)?.title || '');
+      const prefix = 'local-path::';
+      if (title.startsWith(prefix)) {
+        const localPath = title.slice(prefix.length).trim();
+        if (localPath) localPathLines.push(`[image_local_path]: ${localPath}`);
+      }
+      return true;
+    });
+    if (localPathLines.length === 0) return markdown;
+    const uniqueLines = Array.from(new Set(localPathLines));
+    return `${markdown.trimEnd()}\n\n${uniqueLines.join('\n')}`;
+  }, []);
+
+  const insertUploadedImage = useCallback(async (file: File, atPos?: number) => {
+    setUploadingImages((prev) => prev + 1);
+    try {
+      const uploaded = await uploadImageFile(file);
+      const safeName = uploaded.fileName?.replace(/\]/g, '') || 'image';
+      const chain = editorRuntimeRef.current?.chain().focus();
+      if (!chain) return;
+      const nodes = [
+        {
+          type: 'image' as const,
+          attrs: {
+            src: uploaded.url,
+            alt: safeName,
+            title: `local-path::${uploaded.absolutePath}`,
+          },
+        },
+        { type: 'paragraph' as const },
+      ];
+      if (typeof atPos === 'number' && Number.isFinite(atPos)) {
+        chain.insertContentAt(atPos, nodes).run();
+      } else {
+        chain.insertContent(nodes).run();
+      }
+    } catch (error) {
+      console.error('[RichTextEditor] 图片上传失败', error);
+    } finally {
+      setUploadingImages((prev) => Math.max(0, prev - 1));
+    }
+  }, []);
 
   const editor = useEditor({
     extensions: [
@@ -144,6 +198,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
       }),
       Markdown,
       Typography,
+      Image,
       Placeholder.configure({
         placeholder,
         emptyEditorClass: 'is-editor-empty',
@@ -164,6 +219,32 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
       attributes: {
         class: 'outline-none prose prose-sm max-w-none',
       },
+      handlePaste: (_view, event) => {
+        const clipboard = event.clipboardData;
+        if (!clipboard) return false;
+        const files = Array.from(clipboard.files || []).filter((file) => file.type?.startsWith('image/'));
+        if (files.length === 0) return false;
+        event.preventDefault();
+        files.forEach((file) => {
+          void insertUploadedImage(file);
+        });
+        return true;
+      },
+      handleDrop: (_view, event, _slice, moved) => {
+        if (moved) return false;
+        const dt = event.dataTransfer;
+        if (!dt) return false;
+        const files = Array.from(dt.files || []).filter((file) => file.type?.startsWith('image/'));
+        if (files.length === 0) return false;
+        event.preventDefault();
+        const pos = typeof (_view as any)?.posAtCoords === 'function'
+          ? (_view as any).posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+          : undefined;
+        files.forEach((file) => {
+          void insertUploadedImage(file, pos);
+        });
+        return true;
+      },
     },
     onUpdate: ({ editor }) => {
       const markdown = editor.getMarkdown();
@@ -171,6 +252,10 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
       onChange?.(markdown, text);
     },
   });
+
+  useEffect(() => {
+    editorRuntimeRef.current = editor || null;
+  }, [editor]);
 
   const safeFocus = useCallback((delayMs = 0) => {
     if (!editor) return;
@@ -209,7 +294,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
     },
     getText: () => editor?.getText() || '',
     getHTML: () => editor?.getHTML() || '',
-    getMarkdown: () => editor?.getMarkdown() || '',
+    getMarkdown: () => getMarkdownWithImageLocalPaths(),
     focus: () => {
       safeFocus();
     },
@@ -245,17 +330,18 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
         if (isFullscreen) {
           if (event.shiftKey) {
             const markdown = editor.getMarkdown().trim();
-            if (markdown && onEnterRef.current) {
-              onEnterRef.current(markdown);
+            const markdownWithPaths = getMarkdownWithImageLocalPaths().trim();
+            if (markdownWithPaths && onEnterRef.current) {
+              onEnterRef.current(markdownWithPaths);
             }
           } else {
             editor.commands.insertContent('\n', { contentType: 'markdown' });
           }
         } else {
           if (!event.shiftKey) {
-            const markdown = editor.getMarkdown().trim();
-            if (markdown && onEnterRef.current) {
-              onEnterRef.current(markdown);
+            const markdownWithPaths = getMarkdownWithImageLocalPaths().trim();
+            if (markdownWithPaths && onEnterRef.current) {
+              onEnterRef.current(markdownWithPaths);
             }
           } else {
             editor.commands.insertContent('\n', { contentType: 'markdown' });
@@ -267,7 +353,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
 
     wrapper.addEventListener('keydown', handleKeyDown);
     return () => wrapper.removeEventListener('keydown', handleKeyDown);
-  }, [editor, isFullscreen]);
+  }, [editor, getMarkdownWithImageLocalPaths, isFullscreen]);
 
   useEffect(() => {
     if (editor) {
@@ -317,7 +403,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
             </div>
             <div className="flex-1 overflow-hidden p-4 md:p-6">
               {showToolbar && <MenuBar editor={editor} />}
-              <EditorContent editor={editor} className="outline-none h-full [&_.ProseMirror]:!outline-none [&_.ProseMirror]:!min-h-[300px] [&_.ProseMirror]:focus:!outline-none [&_.ProseMirror_h1]:text-2xl [&_.ProseMirror_h1]:font-bold [&_.ProseMirror_h1]:my-3 [&_.ProseMirror_h2]:text-xl [&_.ProseMirror_h2]:font-semibold [&_.ProseMirror_h2]:my-3 [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-primary/50 [&_.ProseMirror_blockquote]:pl-3 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_hr]:my-4 [&_.ProseMirror_hr]:border-border" />
+              <EditorContent editor={editor} className="outline-none h-full [&_.ProseMirror]:!outline-none [&_.ProseMirror]:!min-h-[300px] [&_.ProseMirror]:focus:!outline-none [&_.ProseMirror_h1]:text-2xl [&_.ProseMirror_h1]:font-bold [&_.ProseMirror_h1]:my-3 [&_.ProseMirror_h2]:text-xl [&_.ProseMirror_h2]:font-semibold [&_.ProseMirror_h2]:my-3 [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-primary/50 [&_.ProseMirror_blockquote]:pl-3 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_hr]:my-4 [&_.ProseMirror_hr]:border-border [&_.ProseMirror_img]:my-3 [&_.ProseMirror_img]:max-h-[300px] [&_.ProseMirror_img]:max-w-full [&_.ProseMirror_img]:rounded-md [&_.ProseMirror_img]:border [&_.ProseMirror_img]:border-border [&_.ProseMirror_img]:object-contain" />
             </div>
           </div>
         </div>
@@ -335,7 +421,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
         <div className="px-2 py-1.5 flex items-start gap-1">
           <div className="flex-1 min-h-[32px] overflow-y-auto">
             {showToolbar && <MenuBar editor={editor} />}
-            <EditorContent editor={editor} className="outline-none [&_.ProseMirror]:!outline-none [&_.ProseMirror:focus]:!outline-none [&_.ProseMirror_h1]:text-lg [&_.ProseMirror_h1]:font-bold [&_.ProseMirror_h1]:my-2 [&_.ProseMirror_h2]:text-base [&_.ProseMirror_h2]:font-semibold [&_.ProseMirror_h2]:my-2 [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-primary/50 [&_.ProseMirror_blockquote]:pl-3 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-5 [&_.ProseMirror_hr]:my-3 [&_.ProseMirror_hr]:border-border" style={{ maxHeight: `${maxHeight - 16}px` }} />
+            <EditorContent editor={editor} className="outline-none [&_.ProseMirror]:!outline-none [&_.ProseMirror:focus]:!outline-none [&_.ProseMirror_h1]:text-lg [&_.ProseMirror_h1]:font-bold [&_.ProseMirror_h1]:my-2 [&_.ProseMirror_h2]:text-base [&_.ProseMirror_h2]:font-semibold [&_.ProseMirror_h2]:my-2 [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-primary/50 [&_.ProseMirror_blockquote]:pl-3 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-5 [&_.ProseMirror_hr]:my-3 [&_.ProseMirror_hr]:border-border [&_.ProseMirror_img]:my-2 [&_.ProseMirror_img]:max-h-36 [&_.ProseMirror_img]:max-w-[260px] [&_.ProseMirror_img]:rounded-md [&_.ProseMirror_img]:border [&_.ProseMirror_img]:border-border [&_.ProseMirror_img]:object-contain" style={{ maxHeight: `${maxHeight - 16}px` }} />
           </div>
           {showFullscreenToggle && (
             <Button size="sm" variant="ghost" className="h-6 w-6 p-0 shrink-0 opacity-50 hover:opacity-100" onClick={() => setIsFullscreen(true)} title="全屏编辑">
@@ -345,6 +431,9 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
         </div>
       </div>
       <div className="flex items-center justify-end mt-0.5 px-1">
+        {uploadingImages > 0 && (
+          <span className="mr-auto text-[10px] text-muted-foreground">图片上传中...</span>
+        )}
         {maxLength < 50000 && (
           <span className={`text-[10px] ${isNearLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
             {charCount}/{maxLength}

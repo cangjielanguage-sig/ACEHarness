@@ -96,5 +96,5 @@ systemPrompt: >
 
   - Evolution.md 更新（如有）
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

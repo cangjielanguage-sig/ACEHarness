@@ -124,5 +124,5 @@ iterationPrompt: |
   - 架构改进建议（按优先级排序）
   - 人工反馈响应（如有）
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

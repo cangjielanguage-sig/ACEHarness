@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { runsApi } from '@/lib/api';
+import { runsApi, workspaceApi, type NotebookScope } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import Markdown from '@/components/Markdown';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useToast } from '@/components/ui/toast';
 import styles from '@/app/workbench/[config]/page.module.css';
 
 interface DocFile {
@@ -66,6 +67,7 @@ function getFileGroup(filename: string): string {
 }
 
 export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
+  const { toast } = useToast();
   const [files, setFiles] = useState<DocFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -92,6 +94,7 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
 
   // Delete confirm
   const [deleteTarget, setDeleteTarget] = useState<string[] | null>(null);
+  const [savingNotebookFile, setSavingNotebookFile] = useState<string | null>(null);
 
   // Fullscreen sidebar controls
   const FOLDER_TREE_WIDTH_KEY = 'doc-folder-tree-width';
@@ -287,6 +290,36 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
     URL.revokeObjectURL(url);
   };
 
+  const sanitizeNotebookName = (name: string) => {
+    return name
+      .trim()
+      .replace(/[\\/:*?"<>|]/g, '-')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+  };
+
+  const saveDocToNotebook = useCallback(async (file: DocFile, scope: NotebookScope = 'personal') => {
+    if (!runId) return;
+    setSavingNotebookFile(file.filename);
+    try {
+      const content = (previewFile?.filename === file.filename && previewContent)
+        ? previewContent
+        : (await runsApi.getDocumentContent(runId, file.filename)).content;
+      const base = sanitizeNotebookName(file.baseName.replace(/\.md$/i, '') || 'workflow-doc');
+      const ts = new Date();
+      const stamp = `${ts.getFullYear()}${String(ts.getMonth() + 1).padStart(2, '0')}${String(ts.getDate()).padStart(2, '0')}-${String(ts.getHours()).padStart(2, '0')}${String(ts.getMinutes()).padStart(2, '0')}${String(ts.getSeconds()).padStart(2, '0')}`;
+      const notebookPath = `${base}-${stamp}.cj.md`;
+      await workspaceApi.manageNotebook('create-file', { path: notebookPath }, { scope });
+      await workspaceApi.saveNotebookFile(notebookPath, content, { scope });
+      toast('success', `已保存到 Notebook：${notebookPath}`);
+    } catch (error: any) {
+      toast('error', error?.message || '保存到 Notebook 失败');
+    } finally {
+      setSavingNotebookFile((prev) => (prev === file.filename ? null : prev));
+    }
+  }, [previewContent, previewFile?.filename, runId, toast]);
+
   if (!runId) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -465,6 +498,18 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
             <DropdownMenuItem onClick={e => { e.stopPropagation(); downloadFile(file); }}>
               <span className="material-symbols-outlined text-sm mr-2">download</span>下载
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={e => { e.stopPropagation(); void saveDocToNotebook(file, 'personal'); }}
+              disabled={savingNotebookFile === file.filename}
+            >
+              <span className="material-symbols-outlined text-sm mr-2">person</span>保存到 Notebook（个人）
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={e => { e.stopPropagation(); void saveDocToNotebook(file, 'global'); }}
+              disabled={savingNotebookFile === file.filename}
+            >
+              <span className="material-symbols-outlined text-sm mr-2">groups</span>保存到 Notebook（团队）
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive" onClick={e => { e.stopPropagation(); setDeleteTarget([file.filename]); }}>
               <span className="material-symbols-outlined text-sm mr-2">delete</span>删除
@@ -531,6 +576,27 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
             <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => downloadFile(previewFile)}>
               <span className="material-symbols-outlined text-sm">download</span>
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0"
+                  title="保存到Notebook"
+                  disabled={savingNotebookFile === previewFile.filename}
+                >
+                  <span className="material-symbols-outlined text-sm">note_add</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem onClick={() => void saveDocToNotebook(previewFile, 'personal')}>
+                  <span className="material-symbols-outlined text-sm mr-2">person</span>保存到 Notebook（个人）
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void saveDocToNotebook(previewFile, 'global')}>
+                  <span className="material-symbols-outlined text-sm mr-2">groups</span>保存到 Notebook（团队）
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => { setPreviewFile(null); setPreviewContent(''); }}>
               <span className="material-symbols-outlined text-sm">close</span>
             </Button>

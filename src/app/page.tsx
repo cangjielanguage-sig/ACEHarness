@@ -573,6 +573,7 @@ function ChatPageContent() {
             <div className="min-h-[200px]">
               <RichTextEditor
                 ref={editEditorRef}
+                content={editContent}
                 onChange={(markdown) => setEditContent(markdown)}
                 placeholder="输入消息内容..."
                 minHeight={200}

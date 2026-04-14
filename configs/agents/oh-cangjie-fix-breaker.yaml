@@ -134,5 +134,5 @@ iterationPrompt: |
   - 整体风险评估更新
   - 人工反馈响应（如有）
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""

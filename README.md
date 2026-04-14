@@ -3,8 +3,8 @@
 # ACE Harness (Agent Centric Engineering Harness)
 
 <picture>
-    <source media="(prefers-color-scheme: light)" srcset="./public/logo.png">
-    <img src="./public/logo.png" alt="OpenClaw" width="300">
+    <source media="(prefers-color-scheme: dark)" srcset="./public/logo.png">
+    <img src="./public/logo.png" alt="ACEHarness" width="300">
 </picture>
 
 ***仓颉团队出品***
@@ -19,58 +19,13 @@
 
 Your team of AIs, collaborating to get work done.
 
-<table>
-<tr>
-<td align="center"><b>17+</b><br/>专业 Agent</td>
-<td align="center"><b>70+</b><br/>对话指令</td>
-<td align="center"><b>50+</b><br/>API 端点</td>
-<td align="center"><b>3</b><br/>执行引擎</td>
-<td align="center"><b>6</b><br/>可视化视图</td>
-</tr>
-</table>
 
-<table>
-<tr>
-<td width="33%" valign="top">
 
-### 对抗式迭代
-蓝军(Defender)实现、红军(Attacker)挑战、裁判(Judge)仲裁。结构化判决驱动自动收敛，避免一次误判固化进代码。
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./public/images/features-overview.svg">
+    <img src="./public/images/features-overview.svg" alt="ACEHarness">
+</picture>
 
-</td>
-<td width="33%" valign="top">
-
-### 状态机引擎
-不是线性流水线。支持条件跳转、自动回退、最大转移保护、崩溃恢复。实测修复编译器 ICE 时自动回退 3 次后收敛。
-
-</td>
-<td width="33%" valign="top">
-
-### Supervisor 路由
-Agent 只声明"我缺什么"，Supervisor 做零成本关键词路由 + 轻量 LLM 语义匹配，打破线性信息流。
-
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-
-### Human-in-the-Loop
-关键节点设人工审批门。支持反馈注入、强制跳转，在自动化和可控性之间取得平衡。
-
-</td>
-<td width="33%" valign="top">
-
-### 对话式创建
-"帮我创建一个修复 Issue #701 的工作流" —— 70+ 种指令覆盖全生命周期，按风险等级分级确认。
-
-</td>
-<td width="33%" valign="top">
-
-### 智能分析
-回归测试判定（O0/O1/O2）、回退热点分析、Token 成本追踪、Prompt 质量评估 —— 不只跑任务，还能分析结果。
-
-</td>
-</tr>
-</table>
 
 </div>
 

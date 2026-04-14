@@ -78,5 +78,5 @@ iterationPrompt: |
   - 修复实施顺序更新
   - 整体风险评估更新
 engineModels:
-  "": gpt-5.3-codex
+  "": glm-5
 activeEngine: ""
