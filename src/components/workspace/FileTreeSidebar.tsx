@@ -109,6 +109,23 @@ function getParentDir(filePath: string): string {
   return parts.length > 1 ? parts.slice(0, -1).join("/") : ""
 }
 
+function stripNotebookSuffix(name: string): string {
+  if (name.toLowerCase().endsWith(".cj.md")) {
+    return name.slice(0, -6)
+  }
+  if (name.toLowerCase().endsWith(".md")) {
+    return name.slice(0, -3)
+  }
+  return name
+}
+
+function ensureNotebookFileName(name: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) return trimmed
+  if (trimmed.toLowerCase().endsWith(".cj.md")) return trimmed
+  return `${trimmed}.cj.md`
+}
+
 const FILE_TYPE_ICON_DIR = "/file_type"
 
 const FILE_EXT_ALIAS_ICON_MAP: Record<string, string> = {
@@ -327,8 +344,9 @@ function TreeFileItem({
   } = useTreeCtx()
 
   const handleRename = async (newName: string) => {
+    const normalizedName = mode === "notebook" ? ensureNotebookFileName(newName) : newName
     const parent = getParentDir(node.path)
-    const newPath = parent ? `${parent}/${newName}` : newName
+    const newPath = parent ? `${parent}/${normalizedName}` : normalizedName
     try {
       if (mode === "notebook") {
         if (!notebookCanWrite) return
@@ -381,7 +399,11 @@ function TreeFileItem({
   if (renamingPath === node.path) {
     return (
       <div style={{ paddingLeft: `${depth * 12 + 8}px` }} className="px-2 py-0.5">
-        <InlineRenameInput defaultValue={node.name} onConfirm={handleRename} onCancel={() => setRenamingPath(null)} />
+        <InlineRenameInput
+          defaultValue={mode === "notebook" ? stripNotebookSuffix(node.name) : node.name}
+          onConfirm={handleRename}
+          onCancel={() => setRenamingPath(null)}
+        />
       </div>
     )
   }
@@ -402,7 +424,7 @@ function TreeFileItem({
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
         >
           <FileTypeIcon node={node} className="h-4 w-4 shrink-0" />
-          <span className="truncate">{node.name}</span>
+          <span className="truncate">{mode === "notebook" ? stripNotebookSuffix(node.name) : node.name}</span>
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent>
@@ -536,7 +558,8 @@ function TreeDirItem({
 
   const handleCreateConfirm = async (name: string) => {
     if (!creatingIn) return
-    const newPath = `${creatingIn.dir}/${mode === "notebook" && creatingIn.type === "file" && !name.endsWith('.cj.md') ? `${name}.cj.md` : name}`
+    const finalName = mode === "notebook" && creatingIn.type === "file" ? ensureNotebookFileName(name) : name
+    const newPath = `${creatingIn.dir}/${finalName}`
     try {
       if (mode === "notebook") {
         if (!notebookCanWrite) return
@@ -688,7 +711,7 @@ export function FileTreeSidebar({
     try {
       if (mode === "notebook") {
         if (!notebookCanWrite) return
-        const normalizedName = creatingIn.type === "file" && !name.endsWith('.cj.md') ? `${name}.cj.md` : name
+        const normalizedName = creatingIn.type === "file" ? ensureNotebookFileName(name) : name
         await workspaceApi.manageNotebook(creatingIn.type === "file" ? "create-file" : "create-folder", { path: normalizedName }, { scope: notebookScope, shareToken: notebookShareToken })
       } else {
         await workspaceApi.manage(workspacePath, creatingIn.type === "file" ? "create-file" : "create-folder", { path: name })
