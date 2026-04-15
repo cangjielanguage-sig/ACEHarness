@@ -3,8 +3,8 @@
  * Aceharness 工作流配置验证脚本
  * 用法: node validate-workflow.mjs <config.yaml>
  */
-import { readFileSync, readdirSync, existsSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
+import { resolve, dirname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { parse } from 'yaml';
 import { z } from 'zod';
@@ -182,6 +182,27 @@ function validate(configPath) {
   const availableAgents = getAvailableAgents();
   const referencedAgents = new Set();
   const mode = config?.workflow?.mode;
+
+  // 3.1 projectRoot / 工作目录校验（强制）
+  const projectRoot = typeof config?.context?.projectRoot === 'string'
+    ? config.context.projectRoot.trim()
+    : '';
+  if (!projectRoot) {
+    errors.push('context.projectRoot 不能为空（必须填写工作目录）');
+  } else if (!isAbsolute(projectRoot)) {
+    errors.push(`context.projectRoot 必须是绝对路径: "${projectRoot}"`);
+  } else if (!existsSync(projectRoot)) {
+    errors.push(`context.projectRoot 指向的目录不存在: "${projectRoot}"`);
+  } else {
+    try {
+      const st = statSync(projectRoot);
+      if (!st.isDirectory()) {
+        errors.push(`context.projectRoot 必须是目录: "${projectRoot}"`);
+      }
+    } catch (e) {
+      errors.push(`无法访问 context.projectRoot: "${projectRoot}"`);
+    }
+  }
 
   if (mode === 'state-machine' && config?.workflow?.states) {
     for (const state of config.workflow.states) {

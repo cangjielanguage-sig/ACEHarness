@@ -1,0 +1,46 @@
+'use client';
+
+import { useCallback } from 'react';
+import { workspaceApi, type NotebookScope, type TreeNode } from '@/lib/api';
+import DirectoryTreePicker from '@/components/common/DirectoryTreePicker';
+
+interface NotebookDirectoryPickerProps {
+  scope: NotebookScope;
+  value: string;
+  onChange: (path: string) => void;
+  shareToken?: string;
+  disabled?: boolean;
+  className?: string;
+}
+
+export default function NotebookDirectoryPicker({
+  scope,
+  value,
+  onChange,
+  shareToken,
+  disabled = false,
+  className,
+}: NotebookDirectoryPickerProps) {
+  const loadRoot = useCallback(async (): Promise<TreeNode[]> => {
+    const result = await workspaceApi.getNotebookTree(2, { scope, shareToken });
+    return result.tree || [];
+  }, [scope, shareToken]);
+
+  const loadChildren = useCallback(async (path: string): Promise<TreeNode[]> => {
+    const result = await workspaceApi.getNotebookSubTree(path, 2, { scope, shareToken });
+    return result.tree || [];
+  }, [scope, shareToken]);
+
+  return (
+    <DirectoryTreePicker
+      value={value}
+      onChange={onChange}
+      loadRoot={loadRoot}
+      loadChildren={loadChildren}
+      rootLabel="根目录 /"
+      disabled={disabled}
+      className={className}
+    />
+  );
+}
+

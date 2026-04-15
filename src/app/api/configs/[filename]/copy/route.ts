@@ -3,18 +3,28 @@ import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 import { parse, stringify } from 'yaml';
+import { requireAuth } from '@/lib/auth-middleware';
+import { getConfigMeta, setConfigMeta } from '@/lib/config-metadata';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
+    const auth = await requireAuth(request);
+    if (auth instanceof NextResponse) return auth;
+
     const { newFilename, workflowName } = await request.json();
     if (!newFilename || !/^[a-zA-Z0-9_-]+\.yaml$/.test(newFilename)) {
       return NextResponse.json({ error: '无效的文件名' }, { status: 400 });
     }
 
     const filename = (await params).filename;
+    const sourceMeta = await getConfigMeta(filename, 'workflow');
+    if (sourceMeta?.visibility === 'private' && sourceMeta.createdBy && sourceMeta.createdBy !== auth.id && auth.role !== 'admin') {
+      return NextResponse.json({ error: '无权限访问该工作流' }, { status: 403 });
+    }
+
     const sourcePath = resolve(process.cwd(), 'configs', filename);
     const destPath = resolve(process.cwd(), 'configs', newFilename);
 
@@ -26,6 +36,11 @@ export async function POST(
     const config = parse(content);
     config.workflow.name = workflowName || (config.workflow.name + ' (副本)');
     await writeFile(destPath, stringify(config), 'utf-8');
+    await setConfigMeta(newFilename, {
+      createdBy: auth.id,
+      visibility: 'private',
+      createdAt: Date.now(),
+    }, 'workflow');
 
     return NextResponse.json({ success: true, filename: newFilename });
   } catch (error: any) {

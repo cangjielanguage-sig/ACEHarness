@@ -69,7 +69,7 @@ engineStreamEvents.setMaxListeners(200);
 
 export async function POST(request: NextRequest) {
   try {
-    const { message, model, engine: perChatEngine, sessionId, frontendSessionId, mode } = await request.json();
+    const { message, model, engine: perChatEngine, sessionId, frontendSessionId, mode, workingDirectory } = await request.json();
     if (!message?.trim()) {
       return NextResponse.json({ error: '消息不能为空' }, { status: 400 });
     }
@@ -107,12 +107,23 @@ export async function POST(request: NextRequest) {
     }
 
     const chatSettings = mode === 'dashboard' ? await loadChatSettings() : null;
+    const requestedWorkingDirectory = typeof workingDirectory === 'string' ? workingDirectory.trim() : '';
+    const resolvedWorkingDirectory = requestedWorkingDirectory || chatSettings?.workingDirectory || process.cwd();
+    const engineRuntimeDirectory = process.cwd();
+    const runtimeEnvPrompt = [
+      '## 运行目录信息',
+      `ACEFlow 根目录: ${process.cwd()}`,
+      `当前工作目录(用户语义目录): ${resolvedWorkingDirectory}`,
+      `AI 运行目录(实际 cwd): ${engineRuntimeDirectory}`,
+      '执行文件读写/命令时，请优先基于“当前工作目录(用户语义目录)”使用绝对路径。',
+    ].join('\n');
+    systemPrompt = `${systemPrompt}\n\n${runtimeEnvPrompt}`.trim();
     const configuredEngine = perChatEngine || await getConfiguredEngine();
     const engine = await getOrCreateEngine(configuredEngine, frontendSessionId);
 
     // Ensure engine config dir + skills symlink exists in working directory
     if (engine) {
-      const workDir = chatSettings?.workingDirectory || process.cwd();
+      const workDir = engineRuntimeDirectory;
       try {
         const { existsSync, mkdirSync, symlinkSync } = await import('fs');
         const { join, resolve } = await import('path');
@@ -146,7 +157,7 @@ export async function POST(request: NextRequest) {
         } else if (evt?.type === 'thought' && evt.content) {
           engineStreamEvents.emit(chatId, { type: 'thinking', content: evt.content });
         } else if (evt?.type === 'error' && evt.content) {
-          engineStreamEvents.emit(chatId, { type: 'error', content: evt.content });
+          engineStreamEvents.emit(chatId, { type: 'engine_error', content: evt.content });
         }
       };
 
@@ -159,7 +170,7 @@ export async function POST(request: NextRequest) {
         prompt: message,
         systemPrompt,
         model: useModel,
-        workingDirectory: chatSettings?.workingDirectory || process.cwd(),
+        workingDirectory: engineRuntimeDirectory,
         sessionId: validResumeSid,
         appendSystemPrompt: !!validResumeSid && !!systemPrompt,
       }).then((result) => {
@@ -188,6 +199,7 @@ export async function POST(request: NextRequest) {
           duration_ms: Date.now() - startedAt,
           usage: undefined,
           is_error: !result.success,
+          error: result.error || undefined,
         };
       }).finally(() => {
         engine.off('stream', onEngineStream);
@@ -291,8 +303,8 @@ export async function GET(request: NextRequest) {
           send('delta', { content: evt.content });
         } else if (evt.type === 'thinking') {
           send('thinking', { content: evt.content });
-        } else if (evt.type === 'error') {
-          send('error', { message: evt.content || '执行失败' });
+        } else if (evt.type === 'engine_error') {
+          send('engine_error', { message: evt.content || '执行失败' });
         }
       };
 
@@ -317,7 +329,7 @@ export async function GET(request: NextRequest) {
           });
         })
         .catch((err: any) => {
-          send('error', { message: err.message || '执行失败' });
+          send('failed', { message: err.message || '执行失败' });
         })
         .finally(() => {
           cleanup();

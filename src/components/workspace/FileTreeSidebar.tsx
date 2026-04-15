@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/toast"
 import { useConfirmDialog } from "@/hooks/useConfirmDialog"
 import ConfirmDialog from "@/components/ConfirmDialog"
+import NotebookSaveDialog, { type NotebookDirectoryOption } from "@/components/notebook/NotebookSaveDialog"
 
 export interface ClipboardItem {
   path: string
@@ -97,6 +98,7 @@ const TreeContext = React.createContext<{
   notebookShareToken?: string
   notebookPermission: 'read' | 'write'
   notebookCanWrite: boolean
+  requestCopyBetween: (source: { path: string; type: "file" | "directory"; name: string }) => void
   toast: (type: "success" | "error" | "info" | "warning", message: string) => void
   confirm: (options: {
     title: string
@@ -116,6 +118,23 @@ function useTreeCtx() {
 function getParentDir(filePath: string): string {
   const parts = filePath.split("/")
   return parts.length > 1 ? parts.slice(0, -1).join("/") : ""
+}
+
+function collectNotebookDirectories(tree: TreeNode[]): NotebookDirectoryOption[] {
+  const dirs = new Set<string>([""])
+  const walk = (nodes: TreeNode[]) => {
+    nodes.forEach((node) => {
+      if (node.type !== "directory") return
+      dirs.add(node.path || "")
+      if (node.children && node.children.length > 0) {
+        walk(node.children)
+      }
+    })
+  }
+  walk(tree)
+  return Array.from(dirs)
+    .sort((a, b) => a.localeCompare(b))
+    .map((path) => ({ path, label: path || "根目录 /" }))
 }
 
 function stripNotebookSuffix(name: string): string {
@@ -349,6 +368,7 @@ function TreeFileItem({
     notebookScope,
     notebookShareToken,
     notebookCanWrite,
+    requestCopyBetween,
     toast,
     confirm,
   } = useTreeCtx()
@@ -393,25 +413,6 @@ function TreeFileItem({
     }
   }
 
-  const handleCopyBetweenScopes = async () => {
-    if (mode !== "notebook") return
-    const targetScope = notebookScope === 'personal' ? 'global' : 'personal'
-    try {
-      await workspaceApi.manageNotebook(
-        "copy-between",
-        {
-          srcScope: notebookScope,
-          destScope: targetScope,
-          srcPath: node.path,
-          destPath: node.path,
-        },
-        { scope: notebookScope }
-      )
-    } catch (error) {
-      toast("error", formatErrorMessage(error, "跨空间复制失败"))
-    }
-  }
-
   if (renamingPath === node.path) {
     return (
       <div style={{ paddingLeft: `${depth * 12 + 8}px` }} className="px-2 py-0.5">
@@ -448,7 +449,7 @@ function TreeFileItem({
         <ContextMenuItem onClick={() => setClipboard({ path: node.path, type: "file", action: "copy" })}><Copy className="h-3.5 w-3.5 mr-2" />复制</ContextMenuItem>
         <ContextMenuItem onClick={() => setClipboard({ path: node.path, type: "file", action: "cut" })}><Scissors className="h-3.5 w-3.5 mr-2" />剪切</ContextMenuItem>
         {mode === "notebook" && (
-          <ContextMenuItem onClick={handleCopyBetweenScopes}>
+          <ContextMenuItem onClick={() => requestCopyBetween({ path: node.path, type: "file", name: node.name })}>
             <Copy className="h-3.5 w-3.5 mr-2" />
             {notebookScope === 'personal' ? '复制到团队空间' : '复制到个人空间'}
           </ContextMenuItem>
@@ -483,6 +484,7 @@ function TreeDirItem({
     notebookScope,
     notebookShareToken,
     notebookCanWrite,
+    requestCopyBetween,
     toast,
     confirm,
   } = useTreeCtx()
@@ -606,25 +608,6 @@ function TreeDirItem({
     setCreatingIn(null)
   }
 
-  const handleCopyBetweenScopes = async () => {
-    if (mode !== "notebook") return
-    const targetScope = notebookScope === 'personal' ? 'global' : 'personal'
-    try {
-      await workspaceApi.manageNotebook(
-        "copy-between",
-        {
-          srcScope: notebookScope,
-          destScope: targetScope,
-          srcPath: node.path,
-          destPath: node.path,
-        },
-        { scope: notebookScope }
-      )
-    } catch (error) {
-      toast("error", formatErrorMessage(error, "跨空间复制失败"))
-    }
-  }
-
   if (renamingPath === node.path) {
     return (
       <div style={{ paddingLeft: `${depth * 12 + 8}px` }} className="px-2 py-0.5">
@@ -661,7 +644,7 @@ function TreeDirItem({
           <ContextMenuItem onClick={() => setClipboard({ path: node.path, type: "directory", action: "copy" })}><Copy className="h-3.5 w-3.5 mr-2" />复制</ContextMenuItem>
           <ContextMenuItem onClick={() => setClipboard({ path: node.path, type: "directory", action: "cut" })}><Scissors className="h-3.5 w-3.5 mr-2" />剪切</ContextMenuItem>
           {mode === "notebook" && (
-            <ContextMenuItem onClick={handleCopyBetweenScopes}>
+            <ContextMenuItem onClick={() => requestCopyBetween({ path: node.path, type: "directory", name: node.name })}>
               <Copy className="h-3.5 w-3.5 mr-2" />
               {notebookScope === 'personal' ? '复制到团队空间' : '复制到个人空间'}
             </ContextMenuItem>
@@ -711,6 +694,72 @@ export function FileTreeSidebar({
   const [renamingPath, setRenamingPath] = React.useState<string | null>(null)
   const [creatingIn, setCreatingIn] = React.useState<{ dir: string; type: "file" | "folder" } | null>(null)
   const [contextTarget, setContextTarget] = React.useState<string | null>(null)
+  const [copyBetweenDialogOpen, setCopyBetweenDialogOpen] = React.useState(false)
+  const [copyBetweenSource, setCopyBetweenSource] = React.useState<{ path: string; type: "file" | "directory"; name: string } | null>(null)
+  const [copyBetweenScope, setCopyBetweenScope] = React.useState<NotebookScope>(notebookScope === "personal" ? "global" : "personal")
+  const [copyBetweenDirectory, setCopyBetweenDirectory] = React.useState("")
+  const [copyBetweenDirs, setCopyBetweenDirs] = React.useState<NotebookDirectoryOption[]>([{ path: "", label: "根目录 /" }])
+  const [copyBetweenDirsLoading, setCopyBetweenDirsLoading] = React.useState(false)
+  const [copyBetweenSaving, setCopyBetweenSaving] = React.useState(false)
+
+  const loadCopyBetweenDirectories = React.useCallback(async (scope: NotebookScope) => {
+    setCopyBetweenDirsLoading(true)
+    try {
+      const result = await workspaceApi.getNotebookTree(8, { scope })
+      const dirs = collectNotebookDirectories(result.tree || [])
+      const options = dirs.length > 0 ? dirs : [{ path: "", label: "根目录 /" }]
+      setCopyBetweenDirs(options)
+      setCopyBetweenDirectory((prev) => {
+        if (prev && options.some((option) => option.path === prev)) return prev
+        return options[0]?.path ?? ""
+      })
+    } catch (error) {
+      setCopyBetweenDirs([{ path: "", label: "根目录 /" }])
+      setCopyBetweenDirectory("")
+      toast("error", formatErrorMessage(error, "加载目标目录失败"))
+    } finally {
+      setCopyBetweenDirsLoading(false)
+    }
+  }, [toast])
+
+  const requestCopyBetween = React.useCallback((source: { path: string; type: "file" | "directory"; name: string }) => {
+    if (mode !== "notebook" || !notebookCanWrite) return
+    const targetScope: NotebookScope = notebookScope === "personal" ? "global" : "personal"
+    setCopyBetweenSource(source)
+    setCopyBetweenScope(targetScope)
+    setCopyBetweenDirectory("")
+    setCopyBetweenDialogOpen(true)
+    void loadCopyBetweenDirectories(targetScope)
+  }, [loadCopyBetweenDirectories, mode, notebookCanWrite, notebookScope])
+
+  const handleConfirmCopyBetween = React.useCallback(async () => {
+    if (!copyBetweenSource || mode !== "notebook") return
+    const baseName = copyBetweenSource.path.split("/").pop() || copyBetweenSource.name
+    const normalizedDir = copyBetweenDirectory.replace(/^\/+|\/+$/g, "")
+    const destPath = normalizedDir ? `${normalizedDir}/${baseName}` : baseName
+
+    setCopyBetweenSaving(true)
+    try {
+      await workspaceApi.manageNotebook(
+        "copy-between",
+        {
+          srcScope: notebookScope,
+          destScope: copyBetweenScope,
+          srcPath: copyBetweenSource.path,
+          destPath,
+        },
+        { scope: notebookScope, shareToken: notebookShareToken }
+      )
+      toast("success", `已复制到${copyBetweenScope === "global" ? "团队" : "个人"}空间：${destPath}`)
+      setCopyBetweenDialogOpen(false)
+      setCopyBetweenSource(null)
+      onRefresh()
+    } catch (error) {
+      toast("error", formatErrorMessage(error, "跨空间复制失败"))
+    } finally {
+      setCopyBetweenSaving(false)
+    }
+  }, [copyBetweenDirectory, copyBetweenScope, copyBetweenSource, mode, notebookScope, notebookShareToken, onRefresh, toast])
 
   const handleRootPaste = async () => {
     if (!clipboard) return
@@ -758,7 +807,7 @@ export function FileTreeSidebar({
   const isCreatingAtRoot = creatingIn?.dir === ""
 
   return (
-    <TreeContext.Provider value={{ workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, onDeletedPath, contextTarget, setContextTarget, notebookScope, notebookShareToken, notebookPermission, notebookCanWrite, toast, confirm }}>
+    <TreeContext.Provider value={{ workspacePath, mode, clipboard, setClipboard, onRefresh, renamingPath, setRenamingPath, creatingIn, setCreatingIn, onSelectFile, onDeletedPath, contextTarget, setContextTarget, notebookScope, notebookShareToken, notebookPermission, notebookCanWrite, requestCopyBetween, toast, confirm }}>
       <div className="flex flex-col h-full bg-card">
         <div className="flex items-center gap-2 px-3 py-2 border-b shrink-0">
           <img src={`${FILE_TYPE_ICON_DIR}/folder.svg`} alt="" aria-hidden className="h-4 w-4 shrink-0" />
@@ -814,6 +863,34 @@ export function FileTreeSidebar({
           </ContextMenuContent>
         </ContextMenu>
       </div>
+      <NotebookSaveDialog
+        open={copyBetweenDialogOpen}
+        onOpenChange={(open) => {
+          setCopyBetweenDialogOpen(open)
+          if (!open) setCopyBetweenSource(null)
+        }}
+        title={copyBetweenScope === "global" ? "复制到团队空间" : "复制到个人空间"}
+        confirmLabel="复制"
+        scope={copyBetweenScope}
+        onScopeChange={(scope) => {
+          setCopyBetweenScope(scope)
+          setCopyBetweenDirectory("")
+          void loadCopyBetweenDirectories(scope)
+        }}
+        scopeOptions={[{ value: copyBetweenScope, label: copyBetweenScope === "global" ? "团队" : "个人" }]}
+        showScopeSelect={false}
+        directory={copyBetweenDirectory}
+        onDirectoryChange={setCopyBetweenDirectory}
+        directories={copyBetweenDirs}
+        loadingDirectories={copyBetweenDirsLoading}
+        saving={copyBetweenSaving}
+        previewText={
+          copyBetweenSource
+            ? `源路径：${copyBetweenSource.path}\n目标路径：${copyBetweenDirectory ? `${copyBetweenDirectory}/` : ""}${copyBetweenSource.path.split("/").pop() || copyBetweenSource.name}`
+            : undefined
+        }
+        onConfirm={handleConfirmCopyBetween}
+      />
       {dialogProps && <ConfirmDialog {...dialogProps} />}
     </TreeContext.Provider>
   )

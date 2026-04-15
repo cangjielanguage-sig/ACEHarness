@@ -19,6 +19,7 @@ import AuthGuard from '@/components/AuthGuard';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import WorkspaceDirectoryPicker from '@/components/common/WorkspaceDirectoryPicker';
 import { ArrowLeft, Plus, Search, MoreHorizontal } from 'lucide-react';
 
 interface UserInfo {
@@ -249,6 +250,12 @@ function UsersContent() {
               </select>
             </div>
             <Input placeholder="个人目录（可选）" value={form.personalDir} onChange={e => setForm(f => ({ ...f, personalDir: e.target.value }))} />
+            <WorkspaceDirectoryPicker
+              workspaceRoot="/"
+              value={form.personalDir}
+              onChange={(path) => setForm((f) => ({ ...f, personalDir: path }))}
+              className="h-64"
+            />
             <div>
               <label className="text-sm mb-2 block">选择头像：</label>
               <AvatarPicker value={form.avatar} onChange={avatar => setForm(f => ({ ...f, avatar }))} />

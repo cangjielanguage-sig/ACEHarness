@@ -349,12 +349,17 @@ export default function StateMachineDesignPanel({
 
   const handleSaveStep = (data: any) => {
     if (!selectedState || editingStep === null) return;
+    const normalizedConstraints = Array.isArray(data.constraints)
+      ? data.constraints.filter((c: string) => typeof c === 'string' && c.trim())
+      : typeof data.constraints === 'string'
+        ? data.constraints.split('\n').filter((c: string) => c.trim())
+        : undefined;
     const newStep: WorkflowStep = {
       name: data.name,
       agent: data.agent,
       task: data.task,
       role: data.role,
-      constraints: data.constraints ? data.constraints.split('\n').filter(Boolean) : undefined,
+      constraints: normalizedConstraints,
       skills: data.skills,
     };
     const steps = [...selectedState.steps];

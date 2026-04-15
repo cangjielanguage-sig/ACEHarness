@@ -11,6 +11,7 @@ import { EngineModelSelect } from '@/components/EngineModelSelect';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import { workspaceApi, type NotebookScope } from '@/lib/api';
+import NotebookSaveDialog from '@/components/notebook/NotebookSaveDialog';
 import { buildNotebookFromConversation, buildNotebookFromAssistantMessage, createDefaultNotebookFileName } from '@/lib/chat-notebook';
 import { useToast } from '@/components/ui/toast';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
@@ -65,6 +66,7 @@ function ChatPageContent() {
   const [pendingExport, setPendingExport] = useState<{ type: 'conversation' } | { type: 'assistant'; messageId: string } | null>(null);
   const [exportFileName, setExportFileName] = useState('');
   const [exportScope, setExportScope] = useState<NotebookScope>('personal');
+  const [exportDirectory, setExportDirectory] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
@@ -205,12 +207,17 @@ function ChatPageContent() {
     return trimmed.endsWith('.cj.md') ? trimmed : `${trimmed}.cj.md`;
   }, []);
 
+  const createDefaultNotebookBaseName = useCallback(() => {
+    return createDefaultNotebookFileName().replace(/\.cj\.md$/i, '');
+  }, []);
+
   const openNotebookExportDialog = useCallback((target: { type: 'conversation' } | { type: 'assistant'; messageId: string }) => {
     setPendingExport(target);
-    setExportFileName(createDefaultNotebookFileName());
+    setExportFileName(createDefaultNotebookBaseName());
     setExportScope('personal');
+    setExportDirectory('');
     setExportDialogOpen(true);
-  }, []);
+  }, [createDefaultNotebookBaseName]);
 
   const closeNotebookExportDialog = useCallback(() => {
     if (notebookExporting) return;
@@ -218,6 +225,7 @@ function ChatPageContent() {
     setPendingExport(null);
     setExportFileName('');
     setExportScope('personal');
+    setExportDirectory('');
   }, [notebookExporting]);
 
   const saveNotebookFile = useCallback(async (filePath: string, content: string, scope: NotebookScope) => {
@@ -229,20 +237,19 @@ function ChatPageContent() {
   const handleConfirmNotebookExport = useCallback(async () => {
     if (!pendingExport) return;
 
-    const normalizedFileName = normalizeNotebookFileName(exportFileName);
-    if (!normalizedFileName) {
-      toast('warning', '请输入 Notebook 文件名');
-      return;
-    }
+    const normalizedFileName = normalizeNotebookFileName(exportFileName) || normalizeNotebookFileName(createDefaultNotebookBaseName());
+    if (!normalizedFileName) return;
+    const normalizedDir = exportDirectory.replace(/^\/+|\/+$/g, '');
+    const finalFilePath = normalizedDir ? `${normalizedDir}/${normalizedFileName}` : normalizedFileName;
 
     const exportPayload = pendingExport.type === 'conversation'
-      ? (activeSession ? { filePath: normalizedFileName, content: buildNotebookFromConversation(activeSession) } : null)
+      ? (activeSession ? { filePath: finalFilePath, content: buildNotebookFromConversation(activeSession) } : null)
       : (() => {
           const message = activeSession?.messages.find((item) => item.id === pendingExport.messageId && item.role === 'assistant');
           if (!message) return null;
           const contentText = (message.rawContent || message.content || '').trim();
           if (!contentText) return null;
-          return { filePath: normalizedFileName, content: buildNotebookFromAssistantMessage(message) };
+          return { filePath: finalFilePath, content: buildNotebookFromAssistantMessage(message) };
         })();
 
     if (!exportPayload) {
@@ -257,12 +264,13 @@ function ChatPageContent() {
       setExportDialogOpen(false);
       setPendingExport(null);
       setExportFileName('');
+      setExportDirectory('');
     } catch (error: any) {
       toast('error', error?.message || '保存 Notebook 失败');
     } finally {
       setNotebookExporting(false);
     }
-  }, [pendingExport, normalizeNotebookFileName, exportFileName, toast, activeSession, saveNotebookFile, exportScope]);
+  }, [pendingExport, normalizeNotebookFileName, exportFileName, exportDirectory, toast, activeSession, saveNotebookFile, exportScope, createDefaultNotebookBaseName]);
 
   const handleSaveConversationAsNotebook = useCallback(async () => {
     if (!activeSession) return;
@@ -590,50 +598,37 @@ function ChatPageContent() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={exportDialogOpen} onOpenChange={(open) => {
-          if (!open) {
-            closeNotebookExportDialog();
-            return;
-          }
-          setExportDialogOpen(true);
-        }}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>保存为 Notebook</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
+        <NotebookSaveDialog
+          open={exportDialogOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeNotebookExportDialog();
+              return;
+            }
+            setExportDialogOpen(true);
+          }}
+          title="保存为 Notebook"
+          confirmLabel="创建"
+          scope={exportScope}
+          onScopeChange={setExportScope}
+          directory={exportDirectory}
+          onDirectoryChange={setExportDirectory}
+          directories={[]}
+          saving={notebookExporting}
+          previewText={`将保存到：${exportDirectory ? `${exportDirectory}/` : ''}${normalizeNotebookFileName(exportFileName) || normalizeNotebookFileName(createDefaultNotebookBaseName())}`}
+          extraContent={(
+            <div className="space-y-2">
               <Input
                 value={exportFileName}
                 onChange={(e) => setExportFileName(e.target.value)}
-                placeholder="请输入文件名"
+                placeholder="可选：输入文件名（无需 .cj.md）"
                 disabled={notebookExporting}
               />
-              <div className="flex items-center gap-2">
-                <Button
-                  variant={exportScope === 'personal' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setExportScope('personal')}
-                  disabled={notebookExporting}
-                >
-                  保存至 Notebook（个人）
-                </Button>
-                <Button
-                  variant={exportScope === 'global' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setExportScope('global')}
-                  disabled={notebookExporting}
-                >
-                  保存至 Notebook（团队）
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">默认文件名为当前日期时间，你可以在保存前修改。</p>
+              <p className="text-xs text-muted-foreground">可不填文件名；系统会自动使用当前时间。你输入时也无需带 .cj.md 后缀。</p>
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={closeNotebookExportDialog} disabled={notebookExporting}>取消</Button>
-              <Button onClick={handleConfirmNotebookExport} disabled={notebookExporting}>创建</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          )}
+          onConfirm={handleConfirmNotebookExport}
+        />
       </div>
     </div>
   );

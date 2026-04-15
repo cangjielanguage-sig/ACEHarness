@@ -4,6 +4,8 @@ import { resolve } from 'path';
 import { stringify } from 'yaml';
 import { newConfigFormSchema } from '@/lib/schemas';
 import { ZodError } from 'zod';
+import { requireAuth } from '@/lib/auth-middleware';
+import { setConfigMeta } from '@/lib/config-metadata';
 
 function createPhaseBasedConfig(workflowName: string, workingDirectory: string, description?: string) {
   return {
@@ -116,6 +118,9 @@ function createStateMachineConfig(workflowName: string, workingDirectory: string
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireAuth(request);
+    if (auth instanceof NextResponse) return auth;
+
     const body = await request.json();
 
     // 验证表单
@@ -176,6 +181,11 @@ export async function POST(request: NextRequest) {
 
     const yamlContent = stringify(defaultConfig);
     await writeFile(filepath, yamlContent, 'utf-8');
+    await setConfigMeta(filename, {
+      createdBy: auth.id,
+      visibility: 'private',
+      createdAt: Date.now(),
+    }, 'workflow');
 
     // Determine the generated mode for the response message
     const generatedMode = defaultConfig?.workflow?.mode === 'state-machine' ? 'state-machine' : 'phase-based';

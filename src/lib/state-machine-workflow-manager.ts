@@ -187,12 +187,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
             this.agentConfigs.push(config);
           }
         } catch (e) {
-          console.warn(`[StateMachineWorkflowManager] 加载 agent 配置失败: ${file}`, e);
         }
       }
-      console.log(`[StateMachineWorkflowManager] 加载了 ${this.agentConfigs.length} 个 agent 配置`);
     } catch {
-      console.warn('[StateMachineWorkflowManager] configs/agents 目录不存在');
     }
   }
 
@@ -781,7 +778,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
     if (this.status !== 'running') {
       throw new Error('工作流未在运行中');
     }
-    console.log('[StateMachine] forceTransition called, targetState:', targetState, 'instruction:', instruction, 'currentState:', this.currentState);
     this.pendingForceTransition = targetState;
     if (instruction) {
       this.pendingForceInstruction = instruction;
@@ -800,7 +796,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
         )
       );
       if (running) {
-        console.log(`[StateMachine] forceTransition: killing process ${running.id}`);
         if (!processManager.killProcess(running.id) && this.currentEngine) {
           this.currentEngine.cancel();
           const rawProc = processManager.getProcessRaw(running.id);
@@ -828,11 +823,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
   private async waitForHumanApproval(): Promise<void> {
     // Wait for human to call forceTransition
-    console.log('[StateMachine] Entering waitForHumanApproval, pendingForceTransition:', this.pendingForceTransition);
     return new Promise((resolve) => {
       const checkInterval = setInterval(() => {
         if (this.pendingForceTransition || this.shouldStop) {
-          console.log('[StateMachine] waitForHumanApproval resolved, pendingForceTransition:', this.pendingForceTransition, 'shouldStop:', this.shouldStop);
           clearInterval(checkInterval);
           resolve();
         }
@@ -858,7 +851,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       await this.persistState(status);
     } catch (err) {
-      console.error('[StateMachine] finalizeRun persistState failed:', err);
     }
 
     this.status = 'idle';
@@ -924,7 +916,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
         workingDirectory: this.isolatedDir || undefined,
       });
     } catch (err) {
-      console.error('[StateMachine] persistState failed:', err);
     }
   }
 
@@ -934,22 +925,23 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private async initializeEngine(): Promise<void> {
     try {
       this.engineType = await getConfiguredEngine();
-      console.log(`[StateMachineWorkflowManager] 使用引擎: ${this.engineType} (from ${resolve(process.cwd(), '.engine.json')})`);
       this.emit('log', `使用引擎: ${this.engineType}`);
 
-      if (this.engineType !== 'claude-code') {
-        this.currentEngine = await createEngine(this.engineType);
-        if (!this.currentEngine) {
-          console.log(`[StateMachineWorkflowManager] 引擎 ${this.engineType} 不可用，回退到 Claude Code`);
+      // Always initialize currentEngine for the selected engine, including claude-code.
+      this.currentEngine = await createEngine(this.engineType);
+      if (!this.currentEngine) {
+        if (this.engineType !== 'claude-code') {
           this.engineType = 'claude-code';
-        } else {
-          console.log(`[StateMachineWorkflowManager] 引擎 ${this.engineType} 初始化成功`);
+          this.currentEngine = await createEngine('claude-code');
         }
       }
+
+      if (!this.currentEngine) {
+        throw new Error(`引擎初始化失败: ${this.engineType} 不可用`);
+      }
     } catch (error) {
-      console.log(`[StateMachineWorkflowManager] 引擎初始化失败: ${error}, 使用 Claude Code`);
-      this.engineType = 'claude-code';
-      this.currentEngine = null;
+      const msg = error instanceof Error ? error.message : String(error);
+      throw error;
     }
   }
 
@@ -970,7 +962,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
     }
 
     // Use alternative engine (Kiro CLI, etc.)
-    console.log(`[StateMachineWorkflowManager] 使用 ${this.engineType} 引擎执行: ${step}`);
 
     const displayStep =
       options.streamStepName || options.streamStepLabel || step;
@@ -1045,7 +1036,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
       // If engine reports failure, throw so the step is marked as failed
       if (!result.success) {
         const errorMsg = result.error || '引擎执行失败（无输出）';
-        console.error(`[StateMachineWorkflowManager] ${this.engineType} 引擎执行失败: ${errorMsg}`);
         if (rawProc) { rawProc.status = 'failed'; rawProc.error = errorMsg; }
         throw new Error(`${this.engineType} 引擎执行失败: ${errorMsg}`);
       }
@@ -1370,7 +1360,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       // Delay between steps when using non-claude engines to avoid throttling
       if (i > 0 && this.engineType !== 'claude-code') {
-        console.log(`[StateMachineWorkflowManager] 步骤间延时 30s (防限流)`);
         await new Promise(r => setTimeout(r, 30000));
       }
 
@@ -1400,7 +1389,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
         }
       } catch (stepError: any) {
         const errorMsg = stepError.message || String(stepError);
-        console.error(`[StateMachineWorkflowManager] Step "${step.name}" in state "${state.name}" failed: ${errorMsg}`);
         stepOutputs.push(`ERROR: ${errorMsg}`);
         const isEngineLevelFailure =
           /acp\s+connection\s+closed/i.test(errorMsg)
@@ -1947,7 +1935,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
           };
         }
         // If interrupted with feedback, resume with feedback
-        console.log(`[SM-Feedback] catch 块: interruptFlag=${this.interruptFlag}, feedbackCount=${this.liveFeedback.length}, err=${(err as Error).message?.substring(0, 100)}`);
         if (this.interruptFlag && this.liveFeedback.length > 0) {
           const isFeedbackOnly = this.feedbackInterrupt;
           this.interruptFlag = false;
@@ -2261,11 +2248,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
     if (!runningRuns) return;
 
     if (runningRuns.status === 'running' && runningRuns.mode === 'state-machine') {
-      console.log(`[StateMachineWorkflowManager] Detected crashed run: ${runningRuns.runId}`);
       try {
         await this.resume(runningRuns.runId);
       } catch (error) {
-        console.error('[StateMachineWorkflowManager] Failed to recover from crash:', error);
       }
     }
   }
@@ -2344,7 +2329,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     // If resuming from __human_approval__, restore the approval wait flow
     if (this.currentState === '__human_approval__') {
-      console.log('[StateMachine] Resuming from __human_approval__');
       const availableStates = workflowConfig.workflow.states.map(s => s.name);
       // Infer suggested next state from the last transition's "to" before __human_approval__
       const lastTransition = this.stateHistory.filter(h => h.to === '__human_approval__').pop();
@@ -2511,7 +2495,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
   interruptWithFeedback(message: string): boolean {
     if (this.status !== 'running' || !this.currentState) {
-      console.log(`[SM-Feedback] interruptWithFeedback 失败: status=${this.status}, currentState=${this.currentState}`);
       return false;
     }
 
@@ -2523,7 +2506,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const currentProcId = this.currentProcesses?.[0]?.id;
     const currentStepId = this.currentProcesses?.[0]?.stepId;
     const allProcs = processManager.getAllProcesses();
-    console.log(`[SM-Feedback] 查找进程: procId=${currentProcId}, stepId=${currentStepId}, allProcs=${allProcs.length}, running=${allProcs.filter((p: any) => p.status === 'running').length}`);
     const running = allProcs.find(
       (p: any) => (p.status === 'running' || p.status === 'queued') && (
         (currentStepId && p.stepId === currentStepId) ||
@@ -2532,12 +2514,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
     );
 
     if (running) {
-      console.log(`[SM-Feedback] 找到进程 ${running.id} (status=${running.status}), 正在 kill...`);
       const killed = processManager.killProcess(running.id);
-      console.log(`[SM-Feedback] kill 结果: ${killed}`);
       // For non-claude engines, also cancel via engine API
       if (!killed && this.currentEngine) {
-        console.log(`[SM-Feedback] processManager.killProcess 失败，使用引擎 cancel`);
         this.currentEngine.cancel();
         // Mark external process as killed so executeWithEngine can detect it
         const rawProc = processManager.getProcessRaw(running.id);
@@ -2549,8 +2528,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.emit('feedback-injected', { message, timestamp: new Date().toISOString() });
       return true;
     }
-
-    console.log(`[SM-Feedback] 未找到匹配的运行中进程`);
     return false;
   }
 
@@ -2707,18 +2684,13 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     while (round < maxRounds) {
       const output = await this.executeStep(step, state, config, requirements, extraContext);
-
-      console.log(`[StateMachineWorkflowManager] Step ${step.name} 原始输出:`, output.slice(0, 500));
       const infoRequests = parseNeedInfo(step,output);
-      console.log(`[StateMachineWorkflowManager] Step ${step.name} 解析到 ${infoRequests.length} 个信息请求:`, infoRequests);
       
       if (infoRequests.length === 0) {
-        console.log(`[StateMachineWorkflowManager] Step ${step.name} 没有信息请求，结束`);
         return output;
       }
 
       if (isPlanDone(output)) {
-        console.log(`[StateMachineWorkflowManager] Step ${step.name} 已 PLAN_DONE，继续执行任务`);
         return output;
       }
 
@@ -2762,7 +2734,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
           this.emit('agent-flow', { agentFlow: this.agentFlow });
           const answer = await this.waitForUserAnswer(req.question, step.agent, round);
           extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
-          console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
         } else {
           const agentSummaries = this.buildAgentSummaries();
           const decision = await routeInfoRequest(
@@ -2773,7 +2744,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
           );
 
           if (!decision) {
-            console.log(`[StateMachineWorkflowManager] 无法路由，fallback 到用户回答`);
             this.emit('plan-question', { question: req.question, fromAgent: step.agent, round });
             this.supervisorFlow.push({
               type: 'question',
@@ -2810,7 +2780,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
             });
             this.emit('agent-flow', { agentFlow: this.agentFlow });
             const answer = await this.waitForUserAnswer(req.question, step.agent, round);
-            console.log(`[StateMachineWorkflowManager] 用户回答: ${answer}`);
             extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
           } else {
             this.emit('route-decision', { ...decision, round, fromAgent: step.agent });
@@ -2851,7 +2820,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
             this.emit('agent-flow', { agentFlow: this.agentFlow });
             
             const answer = await this.queryAgent(decision.route_to, decision.question, config);
-            console.log(`[StateMachineWorkflowManager] ${decision.route_to} 回答: ${answer}`);
             extraContext += `\n\n[${decision.route_to} 回答] ${decision.question}\n${answer}`;
             
             this.addAgentResponseFlow(decision.route_to, step.agent, answer, state.name, step.name, round);
@@ -2981,9 +2949,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this._sdkPlanAvailable = false;
     }
     if (!this._sdkPlanAvailable) {
-      console.warn(
-        '[StateMachineWorkflowManager] Claude SDK Plan 不可用（缺少 @anthropic-ai/claude-agent-sdk 或 ANTHROPIC_API_KEY），将降级'
-      );
     }
     return this._sdkPlanAvailable;
   }
@@ -3220,7 +3185,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
       return finalOutput;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn('[StateMachineWorkflowManager] SDK Plan 步骤失败，降级:', msg);
       this.pendingSdkPlanQuestionPayload = null;
       this.currentStep = stepKey;
       if (step.enablePlanLoop) {

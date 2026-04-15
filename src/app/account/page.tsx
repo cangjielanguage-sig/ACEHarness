@@ -11,6 +11,7 @@ import AvatarPicker from '@/components/AvatarPicker';
 import AuthGuard from '@/components/AuthGuard';
 import { WorkspaceEditor } from '@/components/workspace/WorkspaceEditor';
 import EnvVarsDialog from '@/components/EnvVarsDialog';
+import WorkspaceDirectoryPicker from '@/components/common/WorkspaceDirectoryPicker';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { ArrowLeft, FolderOpen, NotebookTabs } from 'lucide-react';
 import { workspaceApi, type NotebookScope } from '@/lib/api';
@@ -267,14 +268,23 @@ function AccountContent() {
               <span className="material-symbols-outlined text-muted-foreground">lock</span>
               <span>修改密码</span>
             </div>
-            <span className="material-symbols-outlined text-muted-foreground text-sm">chevron_right</span>
+            <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+              <span>编辑</span>
+              <span className="material-symbols-outlined text-sm">chevron_right</span>
+            </span>
           </button>
           <button onClick={() => { setNewEmail(user.email); setEmailError(''); setEmailSuccess(''); setEmailOpen(true); }} className="w-full px-6 py-4 flex items-center justify-between hover:bg-muted/50 transition-colors">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-muted-foreground">mail</span>
               <span>修改邮箱</span>
             </div>
-            <span className="text-sm text-muted-foreground">{user.email}</span>
+            <span className="inline-flex items-center gap-3 text-sm text-muted-foreground">
+              <span>{user.email}</span>
+              <span className="inline-flex items-center gap-1">
+                <span>编辑</span>
+                <span className="material-symbols-outlined text-sm">chevron_right</span>
+              </span>
+            </span>
           </button>
           <div className="w-full px-6 py-4 flex items-center justify-between hover:bg-muted/50 transition-colors">
             <button onClick={() => { setNewDir(user.personalDir || ''); setDirError(''); setDirSuccess(''); setDirOpen(true); }} className="flex items-center gap-3">
@@ -288,8 +298,9 @@ function AccountContent() {
                   <FolderOpen className="w-3.5 h-3.5 mr-1" />打开
                 </Button>
               )}
-              <button onClick={() => { setNewDir(user.personalDir || ''); setDirError(''); setDirSuccess(''); setDirOpen(true); }}>
-                <span className="material-symbols-outlined text-muted-foreground text-sm">chevron_right</span>
+              <button onClick={() => { setNewDir(user.personalDir || ''); setDirError(''); setDirSuccess(''); setDirOpen(true); }} className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+                <span>编辑</span>
+                <span className="material-symbols-outlined text-sm">chevron_right</span>
               </button>
             </div>
           </div>
@@ -362,6 +373,12 @@ function AccountContent() {
           <DialogHeader><DialogTitle>修改个人目录</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <Input placeholder="个人目录路径，如 /data/users/alice" value={newDir} onChange={e => setNewDir(e.target.value)} />
+            <WorkspaceDirectoryPicker
+              workspaceRoot="/"
+              value={newDir}
+              onChange={setNewDir}
+              className="h-64"
+            />
             <p className="text-xs text-muted-foreground">工作流执行时将在此目录下创建隔离的运行环境</p>
             {dirError && <p className="text-sm text-destructive">{dirError}</p>}
             {dirSuccess && <p className="text-sm text-green-500">{dirSuccess}</p>}

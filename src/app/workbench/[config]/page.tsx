@@ -34,6 +34,7 @@ import { WorkspaceEditor } from '@/components/workspace/WorkspaceEditor';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Switch } from '@/components/ui/switch';
 import { EngineSelect } from '@/components/EngineSelect';
+import WorkspaceDirectoryPicker from '@/components/common/WorkspaceDirectoryPicker';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useToast } from '@/components/ui/toast';
@@ -227,6 +228,7 @@ export default function WorkbenchPage() {
   }, [projectRoot]);
 
   const isRunning = workflowStatus === 'running' || workflowStatus === 'preparing';
+  const canStartWorkflow = isRunMode && !starting && !isRunning;
   const preparingProgress = useMemo(() => {
     if (workflowStatus !== 'preparing') return null;
     const text = currentStep || '';
@@ -982,6 +984,18 @@ export default function WorkbenchPage() {
   };
 
   const startWorkflow = async () => {
+    const normalizedProjectRoot = (projectRoot || '').trim();
+    if (!normalizedProjectRoot) {
+      toast('error', '项目根目录不能为空');
+      addLog('system', 'error', '启动失败: 项目根目录不能为空');
+      return;
+    }
+    if (!normalizedProjectRoot.startsWith('/')) {
+      toast('error', '项目根目录必须为绝对路径');
+      addLog('system', 'error', `启动失败: 项目根目录必须为绝对路径（当前: ${normalizedProjectRoot}）`);
+      return;
+    }
+
     setStarting(true);
     try {
       setViewingHistoryRun(false);
@@ -1021,6 +1035,18 @@ export default function WorkbenchPage() {
     } catch (error: any) {
       addLog('system', 'error', `停止失败: ${error.message}`);
     }
+  };
+
+  const requestStopWorkflow = async () => {
+    const ok = await confirm({
+      title: '确认停止工作流',
+      description: '停止后当前运行将中断。是否继续？',
+      confirmLabel: '确认停止',
+      cancelLabel: '取消',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    await stopWorkflow();
   };
 
   const handleForceTransition = (targetState: string) => {
@@ -1139,6 +1165,14 @@ export default function WorkbenchPage() {
   };
 
   const rejectCheckpoint = async () => {
+    const ok = await confirm({
+      title: '确认拒绝并停止',
+      description: '拒绝后将停止当前工作流运行。是否继续？',
+      confirmLabel: '拒绝并停止',
+      cancelLabel: '取消',
+      variant: 'destructive',
+    });
+    if (!ok) return;
     dispatch({ type: 'SET_SHOW_CHECKPOINT', payload: false });
     setIterationFeedback(''); // 清空反馈
     setPendingCheckpointPhase(null);
@@ -2112,7 +2146,12 @@ export default function WorkbenchPage() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {isRunMode && (<>
-            <Button size="sm" className="h-7 text-xs" onClick={startWorkflow} disabled={starting || isRunning}>
+            <Button
+              size="sm"
+              className={`h-7 text-xs ${canStartWorkflow ? styles.startWorkflowGlow : ''}`}
+              onClick={startWorkflow}
+              disabled={starting || isRunning}
+            >
               {starting ? (
                 <ClipLoader color="currentColor" size={14} className="mr-1" />
               ) : (
@@ -2121,7 +2160,7 @@ export default function WorkbenchPage() {
               <span className="hidden sm:inline">{starting ? '启动中...' : '启动工作流'}</span>
               <span className="sm:hidden">{starting ? '...' : '启动'}</span>
             </Button>
-            <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={stopWorkflow} disabled={!isRunning && workflowStatus !== 'running'}>
+            <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={requestStopWorkflow} disabled={!isRunning && workflowStatus !== 'running'}>
               <span className="material-symbols-outlined" style={{ fontSize: 14 }}>stop</span><span className="hidden sm:inline">停止</span>
             </Button>
             <ButtonGroup>
@@ -2776,6 +2815,12 @@ export default function WorkbenchPage() {
                             type="text"
                             placeholder="../cangjie_compiler"
                             className="mt-2"
+                          />
+                          <WorkspaceDirectoryPicker
+                            workspaceRoot="/"
+                            value={projectRoot}
+                            onChange={(path) => dispatch({ type: 'SET_PROJECT_ROOT', payload: path })}
+                            className="mt-2 h-60"
                           />
                           <p className="text-xs text-muted-foreground mt-1.5">工作流执行时的项目根目录路径</p>
                         </div>

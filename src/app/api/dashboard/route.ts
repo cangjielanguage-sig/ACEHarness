@@ -1,8 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { parse } from 'yaml';
+import { requireAuth } from '@/lib/auth-middleware';
+import { listConfigsWithMeta } from '@/lib/config-metadata';
 
 const RUNS_DIR = resolve(process.cwd(), 'runs');
 const CONFIGS_DIR = resolve(process.cwd(), 'configs');
@@ -15,9 +17,9 @@ const CACHE_TTL = 10_000; // 10s — background refresh interval
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let isRefreshing = false;
 
-async function computeDashboardData() {
+async function computeDashboardData(userId = '', role: 'admin' | 'user' = 'admin') {
   const [configResult, agentCount, runsResult] = await Promise.all([
-    readConfigsSummary(),
+    readConfigsSummary(userId, role),
     readAgentCount(),
     readAllRunsSummary(),
   ]);
@@ -109,31 +111,12 @@ if (!refreshTimer) {
   refreshCache().catch(() => {});
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    // If cache is warm, return instantly
-    if (cachedResult && Date.now() - cacheTimestamp < CACHE_TTL * 3) {
-      return NextResponse.json(cachedResult);
-    }
-    // Cold start — compute synchronously once
-    await refreshCache();
-    
-    // Ensure we never return null
-    if (!cachedResult) {
-      return NextResponse.json({
-        stats: {
-          totalRuns: 0, successRate: 0, avgDuration: 0,
-          activeWorkflows: 0, totalAgents: 0, runningProcesses: 0,
-        },
-        configs: [],
-        recentRuns: [],
-        runningRuns: [],
-        agentUsageData: [],
-        activityData: [],
-      });
-    }
-    
-    return NextResponse.json(cachedResult);
+    const auth = await requireAuth(request);
+    if (auth instanceof NextResponse) return auth;
+    const result = await computeDashboardData(auth.id, auth.role);
+    return NextResponse.json(result);
   } catch (error: any) {
     return NextResponse.json(
       { error: 'Dashboard data load failed', message: error.message },
@@ -144,14 +127,19 @@ export async function GET() {
 
 // ── Data readers (unchanged logic, parallel I/O) ──
 
-async function readConfigsSummary() {
+async function readConfigsSummary(userId: string, role: 'admin' | 'user') {
   const configNameMap: Record<string, string> = {};
   const configs: any[] = [];
+  const metaMap = await listConfigsWithMeta('workflow');
   try {
     const entries = await readdir(CONFIGS_DIR, { withFileTypes: true });
     const yamlFiles = entries.filter(e => e.isFile() && (e.name.endsWith('.yaml') || e.name.endsWith('.yml')));
     const results = await Promise.all(
       yamlFiles.map(async (entry) => {
+        const meta = metaMap[entry.name];
+        if (meta?.visibility === 'private' && meta.createdBy && meta.createdBy !== userId && role !== 'admin') {
+          return null;
+        }
         try {
           const content = await readFile(resolve(CONFIGS_DIR, entry.name), 'utf-8');
           const config = parse(content);
@@ -171,7 +159,7 @@ async function readConfigsSummary() {
         }
       })
     );
-    configs.push(...results);
+    configs.push(...results.filter(Boolean));
   } catch {}
   return { configs, configNameMap };
 }

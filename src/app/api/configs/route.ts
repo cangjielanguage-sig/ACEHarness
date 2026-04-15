@@ -2,16 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdir, readFile, stat } from 'fs/promises';
 import { resolve } from 'path';
 import { parse } from 'yaml';
+import { requireAuth } from '@/lib/auth-middleware';
+import { listConfigsWithMeta } from '@/lib/config-metadata';
 
 export async function GET(request: NextRequest) {
   try {
+    const auth = await requireAuth(request);
+    if (auth instanceof NextResponse) return auth;
+
     const configsDir = resolve(process.cwd(), 'configs');
     const entries = await readdir(configsDir, { withFileTypes: true });
+    const metaMap = await listConfigsWithMeta('workflow');
 
     // Filter only workflow YAML files (not directories, not settings)
     const yamlFiles: string[] = [];
     for (const entry of entries) {
       if (entry.isFile() && (entry.name.endsWith('.yaml') || entry.name.endsWith('.yml'))) {
+        const meta = metaMap[entry.name];
+        if (meta?.visibility === 'private' && meta.createdBy && meta.createdBy !== auth.id && auth.role !== 'admin') {
+          continue;
+        }
         yamlFiles.push(entry.name);
       }
     }

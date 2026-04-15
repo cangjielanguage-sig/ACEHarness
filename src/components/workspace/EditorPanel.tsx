@@ -84,6 +84,57 @@ interface EditorPanelProps {
   notebookScope?: NotebookScope
   notebookShareToken?: string
   notebookPermission?: 'read' | 'write'
+  onAskAIFromFile?: () => void
+  onAskAIFromSelection?: (payload: {
+    text: string
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+  }) => void
+  onAskAIAction?: (action: 'explain' | 'review' | 'fixError' | 'addComment', payload: {
+    text: string
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+  }) => void
+  applyAiSuggestion?: {
+    id: string
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+    targetText: string
+  } | null
+  onApplyAiSuggestionDone?: (id: string) => void
+  aiSuggestions?: Array<{
+    id: string
+    action: 'review' | 'fixError' | 'addComment'
+    sourceText: string
+    targetText: string
+    oldLineCount: number
+    newLineCount: number
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+    decorateRange: {
+      startLineNumber: number
+      endLineNumber: number
+    }
+    insertBefore: boolean
+  }>
+  onAcceptAiSuggestion?: (id: string) => void
+  onRejectAiSuggestion?: (id: string) => void
 }
 
 interface RunCangjieResult {
@@ -125,6 +176,41 @@ function isNotebookFile(filePath: string | null) {
   return !!filePath && filePath.endsWith('.cj.md')
 }
 
+type DiffLine = { type: 'equal' | 'delete' | 'add'; text: string }
+
+function buildLineDiff(beforeText: string, afterText: string): DiffLine[] {
+  const before = (beforeText || '').replace(/\r\n/g, '\n').split('\n')
+  const after = (afterText || '').replace(/\r\n/g, '\n').split('\n')
+  // Ignore pure EOF newline differences to avoid trailing blank-line suggestions.
+  if (before.length > 1 && before[before.length - 1] === '') before.pop()
+  if (after.length > 1 && after[after.length - 1] === '') after.pop()
+  const dp: number[][] = Array.from({ length: before.length + 1 }, () => Array(after.length + 1).fill(0))
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    for (let j = after.length - 1; j >= 0; j -= 1) {
+      dp[i][j] = before[i] === after[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+  const lines: DiffLine[] = []
+  let i = 0
+  let j = 0
+  while (i < before.length || j < after.length) {
+    if (i < before.length && j < after.length && before[i] === after[j]) {
+      lines.push({ type: 'equal', text: before[i] })
+      i += 1
+      j += 1
+      continue
+    }
+    if (j >= after.length || (i < before.length && dp[i + 1][j] > dp[i][j + 1])) {
+      lines.push({ type: 'delete', text: before[i] ?? '' })
+      i += 1
+      continue
+    }
+    lines.push({ type: 'add', text: after[j] ?? '' })
+    j += 1
+  }
+  return lines
+}
+
 export function EditorPanel({
   filePath,
   content,
@@ -138,10 +224,19 @@ export function EditorPanel({
   notebookScope = 'personal',
   notebookShareToken,
   notebookPermission = 'write',
+  onAskAIFromFile,
+  onAskAIFromSelection,
+  onAskAIAction,
+  applyAiSuggestion,
+  onApplyAiSuggestionDone,
+  aiSuggestions = [],
+  onAcceptAiSuggestion,
+  onRejectAiSuggestion,
 }: EditorPanelProps) {
   const { resolvedTheme } = useTheme()
   const { toast } = useToast()
   const editorRef = React.useRef<any>(null)
+  const monacoRef = React.useRef<any>(null)
   const [wordWrap, setWordWrap] = React.useState<"on" | "off">("off")
   const [saving, setSaving] = React.useState(false)
   const [editorContent, setEditorContent] = React.useState<string | null>(null)
@@ -152,10 +247,200 @@ export function EditorPanel({
   const [notebookDependencyGraphOpen, setNotebookDependencyGraphOpen] = React.useState(false)
   const cangjieRegistered = React.useRef(false)
   const cmakeRegistered = React.useRef(false)
+  const suggestionDecorationIdsRef = React.useRef<string[]>([])
+  const suggestionZoneIdsRef = React.useRef<string[]>([])
 
   React.useEffect(() => {
     setEditorContent(content)
   }, [content])
+
+  React.useEffect(() => {
+    if (!applyAiSuggestion) return
+    const editor = editorRef.current
+    if (!editor) return
+    editor.executeEdits('ai-suggestion', [
+      {
+        range: applyAiSuggestion.range,
+        text: applyAiSuggestion.targetText,
+        forceMoveMarkers: true,
+      },
+    ])
+    const next = editor.getValue()
+    setEditorContent(next)
+    onApplyAiSuggestionDone?.(applyAiSuggestion.id)
+  }, [applyAiSuggestion, onApplyAiSuggestionDone])
+
+  React.useEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    const monacoGlobal = monacoRef.current
+    const model = editor.getModel?.()
+    if (!model || !monacoGlobal) return
+    let styleEl = document.getElementById('ai-suggestion-inline-style') as HTMLStyleElement | null
+    if (!styleEl) {
+      styleEl = document.createElement('style')
+      styleEl.id = 'ai-suggestion-inline-style'
+      styleEl.textContent = `
+        .ai-suggestion-delete-line { background: rgba(239,68,68,0.18); }
+        .ai-suggestion-zone {
+          border-left: 2px solid rgba(34,197,94,0.85);
+          background: linear-gradient(90deg, rgba(34,197,94,0.18), rgba(34,197,94,0.08));
+          padding: 2px 8px;
+          position: relative;
+          overflow: hidden;
+          box-shadow: inset 0 0 0 1px rgba(34,197,94,0.18);
+          animation: ai-zone-pulse 2.8s ease-in-out infinite;
+        }
+        .ai-suggestion-zone::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          transform: translateX(-120%);
+          background: linear-gradient(110deg, transparent 20%, rgba(255,255,255,0.35) 50%, transparent 80%);
+          animation: ai-zone-scan 2.2s ease-in-out infinite;
+          pointer-events: none;
+        }
+        .ai-suggestion-actions { position: absolute; top: 4px; right: 6px; display: flex; gap: 6px; z-index: 5; }
+        .ai-suggestion-action-btn {
+          font-size: 12px;
+          line-height: 1;
+          border: 1px solid rgba(148,163,184,0.45);
+          border-radius: 6px;
+          padding: 3px 8px;
+          cursor: pointer;
+          color: #0f172a;
+          transition: transform .14s ease, box-shadow .2s ease, background .2s ease;
+          backdrop-filter: blur(4px);
+        }
+        .ai-suggestion-action-btn:hover { transform: translateY(-1px); }
+        .ai-suggestion-action-btn:active { transform: translateY(0) scale(0.98); }
+        .ai-suggestion-action-btn--accept { background: rgba(34,197,94,0.18); border-color: rgba(22,163,74,0.45); }
+        .ai-suggestion-action-btn--accept:hover { background: rgba(34,197,94,0.28); box-shadow: 0 0 0 1px rgba(34,197,94,0.25), 0 0 14px rgba(34,197,94,0.35); }
+        .ai-suggestion-action-btn--reject { background: rgba(239,68,68,0.16); border-color: rgba(220,38,38,0.4); }
+        .ai-suggestion-action-btn--reject:hover { background: rgba(239,68,68,0.26); box-shadow: 0 0 0 1px rgba(239,68,68,0.22), 0 0 12px rgba(239,68,68,0.32); }
+        @keyframes ai-zone-scan {
+          0% { transform: translateX(-120%); }
+          100% { transform: translateX(130%); }
+        }
+        @keyframes ai-zone-pulse {
+          0%, 100% { box-shadow: inset 0 0 0 1px rgba(34,197,94,0.16), 0 0 0 rgba(34,197,94,0); }
+          50% { box-shadow: inset 0 0 0 1px rgba(34,197,94,0.28), 0 0 10px rgba(34,197,94,0.22); }
+        }
+      `
+      document.head.appendChild(styleEl)
+    }
+
+    suggestionDecorationIdsRef.current = editor.deltaDecorations(
+      suggestionDecorationIdsRef.current,
+      aiSuggestions
+        .filter((item) => (item.oldLineCount ?? 0) > 0)
+        .map((item) => {
+          const fallbackEndLine = Math.max(item.range.startLineNumber, item.range.endLineNumber - 1)
+          const decorateStart = item.decorateRange?.startLineNumber ?? item.range.startLineNumber
+          const decorateEnd = item.decorateRange?.endLineNumber ?? fallbackEndLine
+          return {
+            range: new monacoGlobal.Range(
+              decorateStart,
+              1,
+              decorateEnd + 1,
+              1,
+            ),
+            options: {
+              isWholeLine: true,
+              className: 'ai-suggestion-delete-line',
+            },
+          }
+        }),
+    )
+
+    editor.changeViewZones((accessor: any) => {
+      suggestionZoneIdsRef.current.forEach((zoneId) => {
+        try { accessor.removeZone(zoneId) } catch {}
+      })
+      suggestionZoneIdsRef.current = []
+      aiSuggestions.forEach((item) => {
+        const zoneNode = document.createElement('div')
+        zoneNode.className = 'ai-suggestion-zone'
+        zoneNode.style.pointerEvents = 'auto'
+        zoneNode.style.userSelect = 'text'
+        zoneNode.style.zIndex = '4'
+        const diffLines = buildLineDiff(item.sourceText, item.targetText)
+          .filter((line) => line.type === 'add')
+          .map((line) => line.text)
+        const contentText = diffLines.join('\n') || item.targetText
+        const pre = document.createElement('pre')
+        pre.textContent = contentText
+        pre.style.whiteSpace = 'pre-wrap'
+        pre.style.margin = '0'
+        pre.style.fontSize = '12px'
+        pre.style.lineHeight = '1.35'
+        pre.style.userSelect = 'text'
+        zoneNode.appendChild(pre)
+        const actions = document.createElement('div')
+        actions.className = 'ai-suggestion-actions'
+        actions.style.pointerEvents = 'auto'
+        const acceptBtn = document.createElement('button')
+        acceptBtn.type = 'button'
+        acceptBtn.className = 'ai-suggestion-action-btn ai-suggestion-action-btn--accept'
+        acceptBtn.style.pointerEvents = 'auto'
+        acceptBtn.style.cursor = 'pointer'
+        acceptBtn.textContent = '应用建议'
+        acceptBtn.onmousedown = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+        acceptBtn.onclick = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onAcceptAiSuggestion?.(item.id)
+        }
+        const rejectBtn = document.createElement('button')
+        rejectBtn.type = 'button'
+        rejectBtn.className = 'ai-suggestion-action-btn ai-suggestion-action-btn--reject'
+        rejectBtn.style.pointerEvents = 'auto'
+        rejectBtn.style.cursor = 'pointer'
+        rejectBtn.textContent = '忽略建议'
+        rejectBtn.onmousedown = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+        rejectBtn.onclick = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onRejectAiSuggestion?.(item.id)
+        }
+        actions.appendChild(acceptBtn)
+        actions.appendChild(rejectBtn)
+        zoneNode.appendChild(actions)
+        const lineCount = Math.max(1, contentText.split('\n').length)
+        const zoneId = accessor.addZone({
+          afterLineNumber: item.insertBefore
+            ? Math.max(0, item.range.startLineNumber - 1)
+            : item.range.endLineNumber,
+          heightInLines: Math.min(14, lineCount + 1),
+          domNode: zoneNode,
+          suppressMouseDown: true,
+        })
+        suggestionZoneIdsRef.current.push(zoneId)
+      })
+    })
+
+    aiSuggestions.forEach((item) => {
+      void item
+    })
+
+    return () => {
+      const currentEditor = editorRef.current
+      if (!currentEditor) return
+      currentEditor.changeViewZones((accessor: any) => {
+        suggestionZoneIdsRef.current.forEach((zoneId) => {
+          try { accessor.removeZone(zoneId) } catch {}
+        })
+      })
+      suggestionZoneIdsRef.current = []
+      suggestionDecorationIdsRef.current = currentEditor.deltaDecorations(suggestionDecorationIdsRef.current, [])
+    }
+  }, [aiSuggestions, onAcceptAiSuggestion, onRejectAiSuggestion])
 
   const handleSave = React.useCallback(async () => {
     if (!editorContent || saving) return
@@ -350,6 +635,7 @@ export function EditorPanel({
               onChange={(value) => setEditorContent(value ?? "")}
               onMount={(editor, monaco) => {
                 editorRef.current = editor
+                monacoRef.current = monaco
                 if (!cangjieRegistered.current) {
                   registerCangjieLanguage(monaco)
                   cangjieRegistered.current = true
@@ -358,6 +644,117 @@ export function EditorPanel({
                   registerCMakeLanguage(monaco)
                   cmakeRegistered.current = true
                 }
+
+                editor.addAction({
+                  id: "ask-ai-current-file",
+                  label: "解释当前文件",
+                  precondition: "!editorHasSelection",
+                  contextMenuGroupId: "navigation",
+                  contextMenuOrder: 1.4,
+                  run: () => {
+                    onAskAIFromFile?.()
+                  },
+                })
+
+                editor.addAction({
+                  id: "ask-ai-selection",
+                  label: "解释选中内容",
+                  precondition: "editorHasSelection",
+                  contextMenuGroupId: "navigation",
+                  contextMenuOrder: 1.5,
+                  run: () => {
+                    if (!onAskAIFromSelection) return
+                    const model = editor.getModel()
+                    const selection = editor.getSelection()
+                    if (!model || !selection) return
+                    const selectedText = model.getValueInRange(selection)
+                    if (!selectedText.trim()) return
+                    onAskAIFromSelection({
+                      text: selectedText,
+                      range: {
+                        startLineNumber: selection.startLineNumber,
+                        startColumn: selection.startColumn,
+                        endLineNumber: selection.endLineNumber,
+                        endColumn: selection.endColumn,
+                      },
+                    })
+                  },
+                })
+
+                editor.addAction({
+                  id: "ask-ai-review-selection",
+                  label: "检视意见",
+                  precondition: "editorHasSelection",
+                  contextMenuGroupId: "navigation",
+                  contextMenuOrder: 1.6,
+                  run: () => {
+                    if (!onAskAIAction) return
+                    const model = editor.getModel()
+                    const selection = editor.getSelection()
+                    if (!model || !selection) return
+                    const selectedText = model.getValueInRange(selection)
+                    if (!selectedText.trim()) return
+                    onAskAIAction('review', {
+                      text: selectedText,
+                      range: {
+                        startLineNumber: selection.startLineNumber,
+                        startColumn: selection.startColumn,
+                        endLineNumber: selection.endLineNumber,
+                        endColumn: selection.endColumn,
+                      },
+                    })
+                  },
+                })
+
+                editor.addAction({
+                  id: "ask-ai-fix-error-selection",
+                  label: "解决错误",
+                  precondition: "editorHasSelection",
+                  contextMenuGroupId: "navigation",
+                  contextMenuOrder: 1.7,
+                  run: () => {
+                    if (!onAskAIAction) return
+                    const model = editor.getModel()
+                    const selection = editor.getSelection()
+                    if (!model || !selection) return
+                    const selectedText = model.getValueInRange(selection)
+                    if (!selectedText.trim()) return
+                    onAskAIAction('fixError', {
+                      text: selectedText,
+                      range: {
+                        startLineNumber: selection.startLineNumber,
+                        startColumn: selection.startColumn,
+                        endLineNumber: selection.endLineNumber,
+                        endColumn: selection.endColumn,
+                      },
+                    })
+                  },
+                })
+
+                editor.addAction({
+                  id: "ask-ai-add-comment-selection",
+                  label: "添加注释",
+                  precondition: "editorHasSelection",
+                  contextMenuGroupId: "navigation",
+                  contextMenuOrder: 1.8,
+                  run: () => {
+                    if (!onAskAIAction) return
+                    const model = editor.getModel()
+                    const selection = editor.getSelection()
+                    if (!model || !selection) return
+                    const selectedText = model.getValueInRange(selection)
+                    if (!selectedText.trim()) return
+                    onAskAIAction('addComment', {
+                      text: selectedText,
+                      range: {
+                        startLineNumber: selection.startLineNumber,
+                        startColumn: selection.startColumn,
+                        endLineNumber: selection.endLineNumber,
+                        endColumn: selection.endColumn,
+                      },
+                    })
+                  },
+                })
               }}
               options={{
                 minimap: { enabled: false },

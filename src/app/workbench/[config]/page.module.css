@@ -235,3 +235,18 @@
   0%, 100% { opacity: 0.2; }
   50% { opacity: 1; }
 }
+
+.startWorkflowGlow {
+  border: 1px solid rgba(56, 189, 248, 0.7);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.25), 0 0 10px rgba(56, 189, 248, 0.35);
+  animation: start-workflow-glow 1.9s ease-in-out infinite;
+}
+
+@keyframes start-workflow-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2), 0 0 8px rgba(56, 189, 248, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35), 0 0 14px rgba(56, 189, 248, 0.5);
+  }
+}
