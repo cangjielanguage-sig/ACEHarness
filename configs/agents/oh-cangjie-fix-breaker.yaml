@@ -133,4 +133,6 @@ iterationPrompt: |
   - 修复方案改进评估
   - 整体风险评估更新
   - 人工反馈响应（如有）
+engineModels:
+  "": glm-5
 activeEngine: ""

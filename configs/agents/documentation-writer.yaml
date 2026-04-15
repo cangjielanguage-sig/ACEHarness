@@ -78,4 +78,6 @@ iterationPrompt: |
   - 包含所有必要的内容和示例
   - 结构清晰，易于阅读和维护
 _file: documentation-writer.yaml
+engineModels:
+  "": glm-5
 activeEngine: ""

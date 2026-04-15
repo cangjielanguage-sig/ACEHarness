@@ -95,4 +95,6 @@ iterationPrompt: |
   - 实现完备性评估（未到位的实现点）
   - 安全风险评估更新
   - 人工反馈响应（如有）
+engineModels:
+  "": glm-5
 activeEngine: ""

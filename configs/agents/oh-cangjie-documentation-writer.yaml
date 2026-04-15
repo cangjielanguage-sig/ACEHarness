@@ -115,4 +115,6 @@ iterationPrompt: |
   - 完整的、可直接使用的文档
   - 包含所有必要的内容和示例
   - 结构清晰，易于阅读和维护
+engineModels:
+  "": glm-5
 activeEngine: ""

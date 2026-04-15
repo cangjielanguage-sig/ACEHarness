@@ -43,4 +43,6 @@ constraints:
   - 文档路径与命令参数必须可复现
   - 完整输出文件必须覆盖本次生成的全部 Markdown 文档
 _file: oh-cangjie-md-writer.yaml
+engineModels:
+  "": glm-5
 activeEngine: ""

@@ -95,4 +95,6 @@ systemPrompt: >
   - 进度跟踪（当前阶段、已完成、进行中）
 
   - Evolution.md 更新（如有）
+engineModels:
+  "": glm-5
 activeEngine: ""

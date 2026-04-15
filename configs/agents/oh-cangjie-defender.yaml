@@ -100,4 +100,6 @@ systemPrompt: >
   - 如有错误：按优先级流程处理的过程
 
   - 最终状态（成功/失败 + 原因）
+engineModels:
+  "": glm-5
 activeEngine: ""

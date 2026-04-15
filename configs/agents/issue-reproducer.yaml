@@ -114,4 +114,6 @@ iterationPrompt: |
 
   重要：不要省略命令输出，不要用"结果同上"代替实际数据。每个实验都是独立的证据，必须完整记录。
 _file: issue-reproducer.yaml
+engineModels:
+  "": glm-5
 activeEngine: ""

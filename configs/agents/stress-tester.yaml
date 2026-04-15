@@ -100,4 +100,6 @@ iterationPrompt: |
   - 测试结果对比表（修复前 vs 修复后）
   - 系统稳定性评估
   - 容量规划建议更新
+engineModels:
+  "": glm-5
 activeEngine: ""

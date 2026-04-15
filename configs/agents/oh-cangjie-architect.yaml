@@ -50,4 +50,6 @@ constraints:
   - 架构文档必须可被 Coder 逐条实施（可操作、可追溯）
   - syscap/since 等元信息必须来自 ArkTS 声明或前序报告，禁止编造
 _file: oh-cangjie-architect.yaml
+engineModels:
+  "": glm-5
 activeEngine: ""

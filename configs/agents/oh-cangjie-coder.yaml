@@ -39,4 +39,6 @@ constraints:
   - C++ FFI 业务逻辑必须严格对齐对应 NAPI 源码，不得“合理化改写”
   - 必须保持 FFI 导出层薄、Impl 层厚的分层原则
 _file: oh-cangjie-coder.yaml
+engineModels:
+  "": glm-5
 activeEngine: ""
