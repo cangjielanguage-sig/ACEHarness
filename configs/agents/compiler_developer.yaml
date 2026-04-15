@@ -100,6 +100,4 @@ iterationPrompt: |
   - 修复方案说明
   - 修改的文件列表和变更内容
   - 测试验证结果
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""

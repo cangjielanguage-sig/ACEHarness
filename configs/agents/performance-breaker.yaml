@@ -95,6 +95,4 @@ iterationPrompt: |
   - 优化完备性评估（未到位的优化点）
   - 性能风险更新
   - 人工反馈响应（如有）
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""

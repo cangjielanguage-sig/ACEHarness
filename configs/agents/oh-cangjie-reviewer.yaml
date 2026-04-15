@@ -66,6 +66,4 @@ constraints:
   - 发现必须有证据：文件/行范围/引用 NAPI 对比点
   - 不得无依据给出"已对齐/已通过"结论
 _file: oh-cangjie-reviewer.yaml
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""

@@ -106,6 +106,4 @@ iterationPrompt: |
   - 新增测试用例列表（含测试目标和覆盖场景）
   - 测试执行结果
   - 覆盖率改进报告
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""

@@ -123,6 +123,4 @@ iterationPrompt: |
   - 设计完备性评估（未到位的设计点）
   - 架构改进建议（按优先级排序）
   - 人工反馈响应（如有）
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""

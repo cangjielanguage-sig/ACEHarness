@@ -130,6 +130,4 @@ reviewPanel:
         - Glob
         - Grep
       model: claude-sonnet-4-6
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""

@@ -132,6 +132,4 @@ reviewPanel:
         - Grep
         - Bash
       model: claude-sonnet-4-6
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""

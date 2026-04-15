@@ -62,6 +62,4 @@ constraints:
   - 优先报告会导致崩溃或未定义行为的问题
   - 使用 harmonyos-build skill 进行构建验证时，必须先复制 build.py 脚本
   - 构建日志必须落盘到文件后再读取分析
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""

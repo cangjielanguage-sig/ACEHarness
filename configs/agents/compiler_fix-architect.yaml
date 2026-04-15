@@ -96,6 +96,4 @@ iterationPrompt: |
   - 新增缺陷的修复方案
   - 修复实施顺序更新
   - 整体风险评估更新
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""

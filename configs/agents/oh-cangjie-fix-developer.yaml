@@ -124,6 +124,4 @@ iterationPrompt: |
   - 修正后的修复详情
   - 新增/修改的测试用例
   - 构建和测试验证结果
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""

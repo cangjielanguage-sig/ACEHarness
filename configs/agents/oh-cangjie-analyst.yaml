@@ -38,6 +38,4 @@ constraints:
   - 禁止越界：不做架构设计、不做编码
   - 信息不确定时必须明确标注“未定位/不确定”，不要猜测
 _file: oh-cangjie-analyst.yaml
-engineModels:
-  "": claude-sonnet-4-6
 activeEngine: ""
