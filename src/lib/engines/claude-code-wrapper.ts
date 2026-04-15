@@ -12,6 +12,7 @@ import { readdir, readFile, stat, mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { loadEnvVars, buildEnvObject } from '../env-manager';
+import { fenced } from '../markdown-utils';
 import type { Engine, EngineOptions, EngineResult, EngineStreamEvent } from './engine-interface';
 
 export type SdkPlanCapturedVia =
@@ -46,10 +47,6 @@ function shortTaskId(id: string): string {
 }
 function clip(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max) + '…';
-}
-function fenced(content: string, lang = ''): string {
-  const normalized = String(content || '').replace(/\r\n?/g, '\n');
-  return `\`\`\`${lang}\n${normalized}\n\`\`\``;
 }
 function parseToolJson(inputJson: string): Record<string, unknown> | null {
   if (!inputJson.trim()) return null;
