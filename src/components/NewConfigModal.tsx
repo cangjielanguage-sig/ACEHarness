@@ -21,6 +21,7 @@ import { ComboboxPortalProvider } from './ui/combobox';
 import Markdown from './Markdown';
 import UniversalCard from './chat/cards/UniversalCard';
 import { parseActions } from '@/lib/chat-actions';
+import WorkspaceDirectoryPicker from './common/WorkspaceDirectoryPicker';
 
 interface NewConfigModalProps {
   isOpen: boolean;
@@ -75,6 +76,25 @@ export default function NewConfigModal({
       workingDirectory: '',
     },
   });
+  const workingDirectoryValue = watch('workingDirectory');
+
+  const generateDefaultFilename = useCallback(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const rand = Math.random().toString(36).slice(2, 6);
+    return `workflow-${y}${m}${d}-${hh}${mm}-${rand}.yaml`;
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const current = (getValues('filename') || '').trim();
+    if (current) return;
+    setValue('filename', generateDefaultFilename(), { shouldDirty: false, shouldValidate: true });
+  }, [generateDefaultFilename, getValues, isOpen, setValue]);
 
   const applySchemaIssues = useCallback((issues: Array<{ path?: (string | number)[]; message?: string }>) => {
     const supported = ['filename', 'workflowName', 'workingDirectory', 'description', 'requirements', 'mode'];
@@ -702,8 +722,17 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
             <Input
               id="workingDirectory"
               placeholder="/path/to/your/project"
-              {...register('workingDirectory')}
+              value={workingDirectoryValue || ''}
+              onChange={(event) => {
+                setValue('workingDirectory', event.target.value, { shouldDirty: true, shouldValidate: true });
+              }}
               className={errors.workingDirectory ? 'border-destructive' : ''}
+            />
+            <WorkspaceDirectoryPicker
+              workspaceRoot="/"
+              value={workingDirectoryValue || ''}
+              onChange={(path) => setValue('workingDirectory', path, { shouldDirty: true, shouldValidate: true })}
+              className="h-60"
             />
             {errors.workingDirectory && (
               <p className="text-sm text-destructive">{errors.workingDirectory.message}</p>

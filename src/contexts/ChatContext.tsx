@@ -53,7 +53,7 @@ interface DashboardChatContextType {
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
   setActiveSessionId: (id: string) => void;
-  sendMessage: (text: string) => Promise<void>;
+  sendMessage: (text: string, options?: { displayText?: string }) => Promise<void>;
   stopStreaming: () => void;
   deleteMessage: (messageId: string) => void;
   retryFromMessage: (messageId: string) => void;
@@ -143,6 +143,18 @@ async function apiDeleteSession(id: string): Promise<void> {
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {
+  const getWorkingDirStorageKey = useCallback(() => {
+    if (typeof window === 'undefined') return 'chat-working-directory';
+    try {
+      const raw = localStorage.getItem('auth-user');
+      if (!raw) return 'chat-working-directory';
+      const user = JSON.parse(raw);
+      const uid = user?.id || user?.username || '';
+      return uid ? `chat-working-directory:${uid}` : 'chat-working-directory';
+    } catch {
+      return 'chat-working-directory';
+    }
+  }, []);
   // Legacy modal state
   const [isOpen, setIsOpen] = useState(false);
   const openChat = useCallback(() => setIsOpen(true), []);
@@ -221,20 +233,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     fetch('/api/chat/settings').then(r => r.json()).then(data => {
       if (data.skills) setSkillSettings(data.skills);
       if (data.discoveredSkills) setDiscoveredSkills(data.discoveredSkills);
+      const wdKey = getWorkingDirStorageKey();
+      const localDir = localStorage.getItem(wdKey);
+      if (localDir) {
+        setWorkingDirectoryState(localDir);
+        return;
+      }
       if (data.workingDirectory) {
         setWorkingDirectoryState(data.workingDirectory);
-      } else {
-        // Default to user's personalDir if no workingDirectory is set
-        try {
-          const stored = localStorage.getItem('auth-user');
-          if (stored) {
-            const user = JSON.parse(stored);
-            if (user.personalDir) setWorkingDirectoryState(user.personalDir);
-          }
-        } catch {}
+        localStorage.setItem(wdKey, data.workingDirectory);
+        return;
       }
+      try {
+        const stored = localStorage.getItem('auth-user');
+        if (stored) {
+          const user = JSON.parse(stored);
+          if (user.personalDir) {
+            setWorkingDirectoryState(user.personalDir);
+            localStorage.setItem(wdKey, user.personalDir);
+          }
+        }
+      } catch {}
     }).catch(() => {});
-  }, []);
+  }, [getWorkingDirStorageKey]);
 
   const toggleSkill = useCallback((skill: string) => {
     setSkillSettings(prev => {
@@ -242,20 +263,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       fetch('/api/chat/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skills: next, workingDirectory: workingDirectory || undefined }),
+        body: JSON.stringify({ skills: next }),
       }).catch(() => {});
       return next;
     });
-  }, [workingDirectory]);
+  }, []);
 
   const setWorkingDirectory = useCallback((dir: string) => {
     setWorkingDirectoryState(dir);
-    fetch('/api/chat/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skills: skillSettings, workingDirectory: dir || undefined }),
-    }).catch(() => {});
-  }, [skillSettings]);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(getWorkingDirStorageKey(), dir || '');
+    }
+  }, [getWorkingDirStorageKey]);
 
   // Debounced save ref
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -263,7 +282,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const activeEventSourceRef = useRef<EventSource | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
   const skillSettingsRef = useRef(skillSettings);
-  const sendMessageRef = useRef<((text: string) => Promise<void>) | null>(null);
+  const sendMessageRef = useRef<((text: string, options?: { displayText?: string }) => Promise<void>) | null>(null);
   activeSessionRef.current = activeSession;
   skillSettingsRef.current = skillSettings;
 
@@ -594,7 +613,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const startRes = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: followUpPrompt, model, engine: followUpEngine || undefined, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard' }),
+          body: JSON.stringify({ message: followUpPrompt, model, engine: followUpEngine || undefined, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard', workingDirectory: workingDirectory || undefined }),
         });
         const { chatId } = await startRes.json();
         if (!chatId) throw new Error('Failed to start stream');
@@ -705,11 +724,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [updateAction, model, updateActiveSession]);
 
   // --- Send message (streaming) ---
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, options?: { displayText?: string }) => {
     let sid = activeSessionId;
     if (!sid) { sid = createSession(); }
 
-    const userMsg: ChatMessage = { id: genId(), role: 'user', content: text, timestamp: Date.now() };
+    const userMsg: ChatMessage = { id: genId(), role: 'user', content: options?.displayText ?? text, timestamp: Date.now() };
     updateActiveSession(s => ({
       ...s,
       updatedAt: Date.now(),
@@ -733,11 +752,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const backendSid = activeSessionRef.current?.backendSessionId;
       const frontendSid = activeSessionRef.current?.id;
-      console.log('[ChatSend] backendSessionId:', backendSid, 'frontendSessionId:', frontendSid, 'model:', model, 'engine:', resolvedEngine);
       const startRes = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, model, engine: resolvedEngine || undefined, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard' }),
+        body: JSON.stringify({ message: text, model, engine: resolvedEngine || undefined, sessionId: backendSid || undefined, frontendSessionId: frontendSid || undefined, mode: 'dashboard', workingDirectory: workingDirectory || undefined }),
       });
       const startData = await startRes.json();
       if (!startRes.ok || startData.error) {
@@ -807,12 +825,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           es.addEventListener('done', (e) => {
             if (inactivityTimer) clearTimeout(inactivityTimer);
             const data = JSON.parse(e.data);
-            console.log('[ChatSend] done event, sessionId:', data.sessionId, 'isError:', data.isError);
             es.close();
             activeEventSourceRef.current = null;
             activeChatIdRef.current = null;
             if (data.sessionId) {
               updateActiveSession(s => ({ ...s, backendSessionId: data.sessionId }));
+            }
+            if (data.isError) {
+              const partial = String(data.result || accumulated || '').trim();
+              const message = String(data.error || '请求失败，请稍后重试');
+              const content = partial
+                ? `请求失败：${message}\n\n已返回部分内容：\n${partial}`
+                : `请求失败：${message}`;
+              updateActiveSession(s => ({
+                ...s,
+                updatedAt: Date.now(),
+                messages: s.messages.map(m => m.id === assistantMsgId
+                  ? { ...m, role: 'error' as const, content }
+                  : m),
+              }));
+              setLoading(false);
+              setStreamingMessageId(null);
+              resolve();
+              return;
             }
             const fullText = data.result || accumulated;
             const streamText = accumulated || fullText;
@@ -839,6 +874,44 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               setStreamingMessageId(null);
               resolve();
             }
+          });
+
+          es.addEventListener('engine_error', (e) => {
+            if (inactivityTimer) clearTimeout(inactivityTimer);
+            const data = JSON.parse(e.data || '{}');
+            const message = String(data?.message || '执行失败，请稍后重试');
+            updateActiveSession(s => ({
+              ...s,
+              updatedAt: Date.now(),
+              messages: s.messages.map(m => m.id === assistantMsgId
+                ? { ...m, role: 'error' as const, content: `请求失败：${message}` }
+                : m),
+            }));
+            es.close();
+            activeEventSourceRef.current = null;
+            activeChatIdRef.current = null;
+            setLoading(false);
+            setStreamingMessageId(null);
+            resolve();
+          });
+
+          es.addEventListener('failed', (e) => {
+            if (inactivityTimer) clearTimeout(inactivityTimer);
+            const data = JSON.parse(e.data || '{}');
+            const message = String(data?.message || '执行失败，请稍后重试');
+            updateActiveSession(s => ({
+              ...s,
+              updatedAt: Date.now(),
+              messages: s.messages.map(m => m.id === assistantMsgId
+                ? { ...m, role: 'error' as const, content: `请求失败：${message}` }
+                : m),
+            }));
+            es.close();
+            activeEventSourceRef.current = null;
+            activeChatIdRef.current = null;
+            setLoading(false);
+            setStreamingMessageId(null);
+            resolve();
           });
 
           es.addEventListener('error', () => {
@@ -921,7 +994,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     // Note: setLoading(false) is called inside the Promise's done/error handlers
     // to properly handle autoExecuteSafeActions
-  }, [activeSessionId, createSession, model, effectiveEngine, engine, updateActiveSession, autoExecuteSafeActions]);
+  }, [activeSessionId, createSession, model, effectiveEngine, engine, updateActiveSession, autoExecuteSafeActions, workingDirectory]);
   sendMessageRef.current = sendMessage;
   const confirmAction = useCallback(async (messageId: string, actionId: string) => {
     const msg = activeSession?.messages.find(m => m.id === messageId);

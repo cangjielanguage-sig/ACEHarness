@@ -101,5 +101,5 @@ systemPrompt: >
 
   - 最终状态（成功/失败 + 原因）
 engineModels:
-  "": glm-5
+  "": claude-sonnet-4-6
 activeEngine: ""

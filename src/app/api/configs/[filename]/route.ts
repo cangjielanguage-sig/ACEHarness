@@ -3,13 +3,30 @@ import { readFile, readdir, writeFile, unlink } from 'fs/promises';
 import { resolve } from 'path';
 import { parse, stringify } from 'yaml';
 import { unifiedWorkflowConfigSchema } from '@/lib/schemas';
+import { requireAuth } from '@/lib/auth-middleware';
+import { getConfigMeta, deleteConfigMeta } from '@/lib/config-metadata';
+
+async function canAccessWorkflow(filename: string, userId: string, role: 'admin' | 'user') {
+  const meta = await getConfigMeta(filename, 'workflow');
+  if (!meta) return true;
+  if (meta.visibility === 'public') return true;
+  if (role === 'admin') return true;
+  return !meta.createdBy || meta.createdBy === userId;
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
+    const auth = await requireAuth(request);
+    if (auth instanceof NextResponse) return auth;
+
     const filename = (await params).filename;
+    if (!(await canAccessWorkflow(filename, auth.id, auth.role))) {
+      return NextResponse.json({ error: '无权限访问该工作流' }, { status: 403 });
+    }
+
     const filepath = resolve(process.cwd(), 'configs', filename);
     const content = await readFile(filepath, 'utf-8');
     const config = parse(content);
@@ -54,7 +71,14 @@ export async function POST(
   { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
+    const auth = await requireAuth(request);
+    if (auth instanceof NextResponse) return auth;
+
     const filename = (await params).filename;
+    if (!(await canAccessWorkflow(filename, auth.id, auth.role))) {
+      return NextResponse.json({ error: '无权限修改该工作流' }, { status: 403 });
+    }
+
     const body = await request.json();
     const { config } = body;
 
@@ -91,12 +115,19 @@ export async function DELETE(
   { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
+    const auth = await requireAuth(request);
+    if (auth instanceof NextResponse) return auth;
+
     const filename = (await params).filename;
     if (filename.includes('..') || filename.includes('/')) {
       return NextResponse.json({ error: '无效文件名' }, { status: 400 });
     }
+    if (!(await canAccessWorkflow(filename, auth.id, auth.role))) {
+      return NextResponse.json({ error: '无权限删除该工作流' }, { status: 403 });
+    }
     const filepath = resolve(process.cwd(), 'configs', filename);
     await unlink(filepath);
+    await deleteConfigMeta(filename, 'workflow');
     return NextResponse.json({ success: true, message: '配置已删除' });
   } catch (error: any) {
     return NextResponse.json(

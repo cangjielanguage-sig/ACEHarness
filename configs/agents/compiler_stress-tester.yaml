@@ -101,5 +101,5 @@ iterationPrompt: |
   - 系统稳定性评估
   - 容量规划建议更新
 engineModels:
-  "": glm-5
+  "": claude-sonnet-4-6
 activeEngine: ""

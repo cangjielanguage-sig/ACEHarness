@@ -90,5 +90,5 @@ iterationPrompt: |
   - 整体风险评估更新
   - 人工反馈响应（如有）
 engineModels:
-  "": glm-5
+  "": claude-sonnet-4-6
 activeEngine: ""

@@ -11,6 +11,7 @@ import Typography from '@tiptap/extension-typography';
 import { ListKit } from '@tiptap/extension-list';
 import { TableKit } from '@tiptap/extension-table';
 import Image from '@tiptap/extension-image';
+import Link from '@tiptap/extension-link';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { BlockMath, InlineMath } from '@tiptap/extension-mathematics';
 import { TrailingNode } from '@tiptap/extensions/trailing-node';
@@ -36,6 +37,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { ImperativePanelHandle, ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useToast } from '@/components/ui/toast';
 import { createLowlight } from 'lowlight';
@@ -576,6 +578,22 @@ export function RichNotebookEditor({
   const [dependencyPanelPercent, setDependencyPanelPercent] = useState(30);
   const [tocItems, setTocItems] = useState<Array<{ id: string; text: string; level: number; pos: number }>>([]);
   const [activeTocId, setActiveTocId] = useState<string | null>(null);
+  const [inlineMathEditOpen, setInlineMathEditOpen] = useState(false);
+  const [inlineMathEditPos, setInlineMathEditPos] = useState<number | null>(null);
+  const [inlineMathEditLatex, setInlineMathEditLatex] = useState('');
+  const [inlineMathEditAnchor, setInlineMathEditAnchor] = useState<{ top: number; left: number } | null>(null);
+  const [linkEditorOpen, setLinkEditorOpen] = useState(false);
+  const [linkEditRange, setLinkEditRange] = useState<{ from: number; to: number } | null>(null);
+  const [linkDraftText, setLinkDraftText] = useState('');
+  const [linkDraftUrl, setLinkDraftUrl] = useState('');
+  const [linkDraftTitle, setLinkDraftTitle] = useState('');
+  const [linkEditorAnchor, setLinkEditorAnchor] = useState<{ top: number; left: number } | null>(null);
+  const [imageEditorOpen, setImageEditorOpen] = useState(false);
+  const [imageEditorPos, setImageEditorPos] = useState<number | null>(null);
+  const [imageEditorAnchor, setImageEditorAnchor] = useState<{ top: number; left: number } | null>(null);
+  const [imageDraftSrc, setImageDraftSrc] = useState('');
+  const [imageDraftAlt, setImageDraftAlt] = useState('');
+  const [imageDraftTitle, setImageDraftTitle] = useState('');
   const setCellRunStateWithRef = useCallback((updater: (prev: Record<string, 'idle' | 'running' | 'success' | 'failed'>) => Record<string, 'idle' | 'running' | 'success' | 'failed'>) => {
     setCellRunState((prev) => {
       const next = updater(prev);
@@ -713,10 +731,202 @@ export function RichNotebookEditor({
     toast('success', mode === 'accept' ? `已接受全部建议（${targets.length} 条）` : `已拒绝全部建议（${targets.length} 条）`);
   }, [replaceSuggestionNodeWithText, toast]);
 
+  const applyInlineMathEdit = useCallback(() => {
+    const targetEditor = editorRef.current;
+    if (!targetEditor || inlineMathEditPos === null) return;
+    try {
+      (targetEditor.chain().focus() as any)
+        .setNodeSelection(inlineMathEditPos)
+        .updateInlineMath({ latex: inlineMathEditLatex })
+        .run();
+      setInlineMathEditOpen(false);
+      setInlineMathEditPos(null);
+      setInlineMathEditAnchor(null);
+    } catch {
+      toast('error', '行内公式更新失败，请重试');
+    }
+  }, [inlineMathEditLatex, inlineMathEditPos, toast]);
+
+  const toSafeAnchor = useCallback((left: number, top: number) => ({
+    left: Math.max(16, Math.min(window.innerWidth - 16, left)),
+    top: Math.max(16, Math.min(window.innerHeight - 16, top)),
+  }), []);
+
+  const getSelectionAnchor = useCallback((targetEditor: Editor, range: { from: number; to: number } | null) => {
+    try {
+      const from = range ? range.from : targetEditor.state.selection.from;
+      const to = range ? range.to : targetEditor.state.selection.to;
+      const maxPos = Math.max(1, targetEditor.state.doc.content.size);
+      const anchorPos = Math.max(1, Math.min(maxPos, Math.floor((from + to) / 2)));
+      const coords = targetEditor.view.coordsAtPos(anchorPos);
+      return toSafeAnchor(coords.left, coords.bottom + 6);
+    } catch {
+      const rect = targetEditor.view.dom.getBoundingClientRect();
+      return toSafeAnchor(rect.left + rect.width / 2, rect.top + 40);
+    }
+  }, [toSafeAnchor]);
+
+  const openLinkEditor = useCallback(() => {
+    const targetEditor = editorRef.current;
+    if (!targetEditor) return;
+    if (targetEditor.isActive('link')) {
+      (targetEditor.chain().focus() as any).extendMarkRange('link').run();
+    } else {
+      targetEditor.chain().focus().run();
+    }
+    const { from, to, empty } = targetEditor.state.selection;
+    const selectedText = empty ? '' : targetEditor.state.doc.textBetween(from, to, ' ');
+    const currentHref = String(targetEditor.getAttributes('link').href || '');
+    const currentTitle = String(targetEditor.getAttributes('link').title || '');
+    const anchor = getSelectionAnchor(targetEditor, empty ? null : { from, to });
+    setLinkEditorAnchor(anchor);
+    setLinkEditRange(empty ? null : { from, to });
+    setLinkDraftText(selectedText || currentHref || '');
+    setLinkDraftUrl(currentHref);
+    setLinkDraftTitle(currentTitle);
+    setLinkEditorOpen(true);
+  }, [getSelectionAnchor]);
+
+  const openImageEditor = useCallback((pos?: number, anchor?: { top: number; left: number }) => {
+    const targetEditor = editorRef.current;
+    if (!targetEditor) return;
+    let resolvedPos = typeof pos === 'number' ? pos : -1;
+    if (resolvedPos < 0) {
+      const from = targetEditor.state.selection.from;
+      const direct = targetEditor.state.doc.nodeAt(from);
+      const prev = from > 1 ? targetEditor.state.doc.nodeAt(from - 1) : null;
+      if (direct?.type.name === 'image') resolvedPos = from;
+      else if (prev?.type.name === 'image') resolvedPos = from - 1;
+    }
+    const node = resolvedPos >= 0 ? targetEditor.state.doc.nodeAt(resolvedPos) : null;
+    if (!node || node.type.name !== 'image') return;
+    setImageEditorPos(resolvedPos);
+    setImageDraftSrc(String(node.attrs.src || ''));
+    setImageDraftAlt(String(node.attrs.alt || ''));
+    setImageDraftTitle(String(node.attrs.title || ''));
+    if (anchor) {
+      setImageEditorAnchor(anchor);
+    } else {
+      const dom = targetEditor.view.nodeDOM(resolvedPos) as HTMLElement | null;
+      if (dom) {
+        const rect = dom.getBoundingClientRect();
+        setImageEditorAnchor({
+          left: Math.max(16, Math.min(window.innerWidth - 16, rect.left + rect.width / 2)),
+          top: Math.max(16, Math.min(window.innerHeight - 16, rect.bottom + 6)),
+        });
+      } else {
+        setImageEditorAnchor(null);
+      }
+    }
+    setImageEditorOpen(true);
+  }, []);
+
+  const applyImageEdit = useCallback(() => {
+    const targetEditor = editorRef.current;
+    if (!targetEditor || imageEditorPos === null) return;
+    const src = imageDraftSrc.trim();
+    if (!src) {
+      toast('warning', '图片地址不能为空');
+      return;
+    }
+    targetEditor
+      .chain()
+      .focus()
+      .command(({ tr }) => {
+        const node = tr.doc.nodeAt(imageEditorPos);
+        if (!node || node.type.name !== 'image') return false;
+        tr.setNodeMarkup(imageEditorPos, undefined, {
+          ...node.attrs,
+          src,
+          alt: imageDraftAlt.trim(),
+          title: imageDraftTitle.trim(),
+        });
+        return true;
+      })
+      .run();
+    setImageEditorOpen(false);
+    setImageEditorPos(null);
+    setImageEditorAnchor(null);
+  }, [imageDraftAlt, imageDraftSrc, imageDraftTitle, imageEditorPos, toast]);
+
+  const applyLinkEdit = useCallback(() => {
+    const targetEditor = editorRef.current;
+    if (!targetEditor) return;
+    const text = linkDraftText.trim();
+    const rawUrl = linkDraftUrl.trim();
+    if (!text) {
+      toast('warning', '请输入链接文本');
+      return;
+    }
+
+    if (!rawUrl) {
+      if (linkEditRange) {
+        targetEditor.chain().focus().insertContentAt(linkEditRange, text).run();
+      } else {
+        targetEditor.chain().focus().insertContent(text).run();
+      }
+      setLinkEditorOpen(false);
+      setLinkEditorAnchor(null);
+      return;
+    }
+
+    const href = /^(https?:\/\/|mailto:|tel:|\/|#)/i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+    const safeText = text.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+    const safeHref = href.replace(/\)/g, '%29');
+    const titlePart = linkDraftTitle.trim() ? ` "${linkDraftTitle.trim().replace(/"/g, '\\"')}"` : '';
+    const snippet = `[${safeText}](${safeHref}${titlePart})`;
+    if (linkEditRange) {
+      targetEditor
+        .chain()
+        .focus()
+        .insertContentAt(linkEditRange, snippet, { contentType: 'markdown' })
+        .run();
+    } else {
+      targetEditor.chain().focus().insertContent(snippet, { contentType: 'markdown' }).run();
+    }
+    setLinkEditorOpen(false);
+    setLinkEditorAnchor(null);
+  }, [linkDraftText, linkDraftTitle, linkDraftUrl, linkEditRange, toast]);
+
+  const removeLink = useCallback(() => {
+    const targetEditor = editorRef.current;
+    if (!targetEditor) return;
+    if (linkEditRange) {
+      const plain = linkDraftText.trim() || targetEditor.state.doc.textBetween(linkEditRange.from, linkEditRange.to, ' ');
+      targetEditor.chain().focus().insertContentAt(linkEditRange, plain).run();
+    } else {
+      (targetEditor.chain().focus() as any).extendMarkRange('link').unsetLink().run();
+    }
+    setLinkEditorOpen(false);
+    setLinkEditorAnchor(null);
+  }, [linkDraftText, linkEditRange]);
+
+  const openDraftLink = useCallback(() => {
+    const raw = linkDraftUrl.trim();
+    if (!raw) return;
+    const href = /^(https?:\/\/|mailto:|tel:|\/|#)/i.test(raw) ? raw : `https://${raw}`;
+    if (typeof window !== 'undefined') window.open(href, '_blank', 'noopener,noreferrer');
+  }, [linkDraftUrl]);
+
+  const renderLinkEditor = (dense = false) => (
+    <button
+      type="button"
+      className={`rounded px-2 py-1 hover:bg-accent ${dense ? 'text-xs' : 'text-sm'} ${editor?.isActive('link') ? 'bg-accent' : ''}`}
+      title="插入/编辑链接"
+      onMouseDown={(event) => {
+        event.preventDefault();
+        openLinkEditor();
+      }}
+    >
+      <span className="material-symbols-outlined text-base">link</span>
+    </button>
+  );
+
   const notebookExtensions = useMemo(() => {
     const base: any[] = [
       StarterKit.configure({
         codeBlock: false,
+        link: false,
         undoRedo: false,
         bulletList: false,
         orderedList: false,
@@ -724,14 +934,28 @@ export function RichNotebookEditor({
       }),
       Markdown,
       Image,
+      Link.configure({
+        autolink: true,
+        openOnClick: false,
+        enableClickSelection: true,
+        protocols: ['http', 'https', 'mailto', 'tel'],
+      }),
       InlineMath.configure({
         onClick: (node, pos) => {
           const current = String((node as any)?.attrs?.latex || '');
-          const next = window.prompt('编辑行内公式（LaTeX）', current);
-          if (next === null) return;
-          const chain = editorRef.current?.chain().focus();
-          if (!chain) return;
-          (chain as any).setNodeSelection(pos).updateInlineMath({ latex: next }).run();
+          setInlineMathEditLatex(current);
+          setInlineMathEditPos(pos);
+          const dom = editorRef.current?.view.nodeDOM(pos) as HTMLElement | null;
+          if (dom) {
+            const rect = dom.getBoundingClientRect();
+            setInlineMathEditAnchor({
+              left: Math.max(16, Math.min(window.innerWidth - 16, rect.left + rect.width / 2)),
+              top: Math.max(16, Math.min(window.innerHeight - 16, rect.bottom + 6)),
+            });
+          } else {
+            setInlineMathEditAnchor(null);
+          }
+          setInlineMathEditOpen(true);
         },
         katexOptions: {
           throwOnError: false,
@@ -893,6 +1117,40 @@ export function RichNotebookEditor({
       attributes: {
         class: 'tiptap prose prose-invert max-w-none min-h-full px-10 md:px-12 py-5 focus:outline-none [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-3 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/50 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_hr]:my-4 [&_hr]:border-border [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:rounded-md [&_table]:overflow-hidden [&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_img]:my-3 [&_img]:max-h-[420px] [&_img]:max-w-full [&_img]:rounded-md [&_img]:border [&_img]:border-border [&_img]:object-contain',
       },
+      handleDOMEvents: {
+        mousedown: (_view, event) => {
+          const target = event.target as HTMLElement | null;
+          const imageEl = target?.closest?.('img');
+          if (imageEl) {
+            event.preventDefault();
+            event.stopPropagation();
+            const pos = _view.posAtDOM(imageEl, 0);
+            const rect = imageEl.getBoundingClientRect();
+            openImageEditor(pos, {
+              left: Math.max(16, Math.min(window.innerWidth - 16, rect.left + rect.width / 2)),
+              top: Math.max(16, Math.min(window.innerHeight - 16, rect.bottom + 6)),
+            });
+            return true;
+          }
+          return false;
+        },
+        click: (_view, event) => {
+          const target = event.target as HTMLElement | null;
+          const imageEl = target?.closest?.('img');
+          if (imageEl) {
+            event.preventDefault();
+            event.stopPropagation();
+            const pos = _view.posAtDOM(imageEl, 0);
+            const rect = imageEl.getBoundingClientRect();
+            openImageEditor(pos, {
+              left: Math.max(16, Math.min(window.innerWidth - 16, rect.left + rect.width / 2)),
+              top: Math.max(16, Math.min(window.innerHeight - 16, rect.bottom + 6)),
+            });
+            return true;
+          }
+          return false;
+        },
+      },
       handlePaste: (_view, event) => {
         const clipboard = event.clipboardData;
         if (!clipboard) return false;
@@ -950,6 +1208,74 @@ export function RichNotebookEditor({
     editorRef.current = editor || null;
     return () => {
       editorRef.current = null;
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    let root: HTMLElement | null = null;
+    let rafId = 0;
+    let disposed = false;
+    const interceptLinkNavigation = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      const linkEl = target?.closest?.('a');
+      if (!root || !linkEl || !root.contains(linkEl)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const targetEditor = editorRef.current;
+      if (!targetEditor) return;
+      const href = String(linkEl.getAttribute('href') || '');
+      const title = String(linkEl.getAttribute('title') || '');
+      const text = String(linkEl.textContent || '').trim();
+      let pos = 1;
+      try {
+        pos = Math.max(1, targetEditor.view.posAtDOM(linkEl, 0));
+      } catch {
+        pos = Math.max(1, targetEditor.state.selection.from);
+      }
+      const from = pos;
+      const to = Math.max(from, from + Math.max(1, text.length));
+      targetEditor.chain().focus().setTextSelection({ from, to }).run();
+      if (targetEditor.isActive('link')) {
+        (targetEditor.chain().focus() as any).extendMarkRange('link').run();
+      }
+      const sel = targetEditor.state.selection;
+      const rect = linkEl.getBoundingClientRect();
+      setLinkEditorAnchor(toSafeAnchor(rect.left + rect.width / 2, rect.bottom + 6));
+      setLinkEditRange(sel.empty ? null : { from: sel.from, to: sel.to });
+      setLinkDraftText(targetEditor.state.doc.textBetween(sel.from, sel.to, ' ') || text || href);
+      setLinkDraftUrl(String(targetEditor.getAttributes('link').href || href));
+      setLinkDraftTitle(String(targetEditor.getAttributes('link').title || title));
+      window.requestAnimationFrame(() => setLinkEditorOpen(true));
+    };
+
+    const bind = () => {
+      if (disposed) return false;
+      try {
+        const dom = editor.view?.dom as HTMLElement | undefined;
+        if (!dom) return false;
+        root = dom;
+      } catch {
+        return false;
+      }
+      root.addEventListener('pointerdown', interceptLinkNavigation, true);
+      return true;
+    };
+
+    if (!bind()) {
+      const retry = () => {
+        if (disposed) return;
+        if (bind()) return;
+        rafId = window.requestAnimationFrame(retry);
+      };
+      rafId = window.requestAnimationFrame(retry);
+    }
+
+    return () => {
+      disposed = true;
+      if (rafId) window.cancelAnimationFrame(rafId);
+      if (!root) return;
+      root.removeEventListener('pointerdown', interceptLinkNavigation, true);
     };
   }, [editor]);
 
@@ -1174,6 +1500,7 @@ export function RichNotebookEditor({
   const [askAITask, setAskAITask] = useState<{ id: string; displayText: string; prompt: string } | null>(null);
   const [askAIInsertRange, setAskAIInsertRange] = useState<{ from: number; to: number } | null>(null);
   const [askAIApplyMode, setAskAIApplyMode] = useState<'insert' | 'optimize'>('insert');
+  const [askAIInsertBehavior, setAskAIInsertBehavior] = useState<'replace' | 'appendAfter'>('replace');
   const [askAIOptimizeMeta, setAskAIOptimizeMeta] = useState<{ scope: 'selection' | 'document'; range: { from: number; to: number }; sourceText: string } | null>(null);
   const [translateTarget, setTranslateTarget] = useState<'en' | 'zh' | 'ja' | 'ko'>('en');
   const [bubbleAiMenuOpen, setBubbleAiMenuOpen] = useState(false);
@@ -1188,6 +1515,11 @@ export function RichNotebookEditor({
   const slashItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const bubbleAiMenuRef = useRef<HTMLDivElement | null>(null);
   const bubbleAiTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const getEditorScrollContainer = useCallback((): HTMLElement | null => {
+    const viewDom = editorRef.current?.view?.dom as HTMLElement | undefined;
+    if (!viewDom) return null;
+    return viewDom.closest('.notebook-editor-scroll') as HTMLElement | null;
+  }, []);
 
   const getCurrentNodeRange = useCallback(() => {
     if (!editor || currentNodePos < 0 || !currentNode) return;
@@ -1330,35 +1662,78 @@ export function RichNotebookEditor({
   }, [editor, getCurrentNodeRange, getRangeWithLinkedOutput]);
 
   const handleAskAI = useCallback(() => {
-    const range = getCurrentNodeRange();
-    const blockText = range && editor ? editor.state.doc.textBetween(range.from, range.to, '\n\n').trim() : '';
+    if (!editor) return;
+    const { selection } = editor.state;
+    let targetRange: { from: number; to: number } | null = null;
+    let contextText = '';
+
+    if (!selection.empty) {
+      const selectedText = editor.state.doc.textBetween(selection.from, selection.to, '\n\n').trim();
+      if (selectedText) {
+        targetRange = { from: selection.from, to: selection.to };
+        contextText = selectedText;
+      }
+    }
+
+    if (!contextText) {
+      const range = getCurrentNodeRange();
+      if (range) {
+        const node = editor.state.doc.nodeAt(range.from);
+        if (node) {
+          contextText = editor.markdown?.serialize(node.toJSON())?.trim() || '';
+          if (contextText) {
+            targetRange = range;
+          }
+        }
+      }
+    }
+
+    if (!contextText) {
+      toast('warning', '请先选中内容，或将光标置于一个块内');
+      return;
+    }
+
     setAskAIApplyMode('insert');
+    setAskAIInsertBehavior('replace');
     setAskAIOptimizeMeta(null);
-    setAskAIContext(blockText || '');
+    setAskAIContext(contextText);
     setAskAITask(null);
-    setAskAIInsertRange(range || null);
+    setAskAIInsertRange(targetRange);
     setAskAIOpen(true);
     setMenuOpen(false);
-  }, [editor, getCurrentNodeRange]);
+  }, [editor, getCurrentNodeRange, toast]);
 
   const handleAskAIFromSelection = useCallback(() => {
     if (!editor) return;
-    const { from, to } = editor.state.selection;
-    const contextText = editor.state.doc.textBetween(from, to, '\n\n').trim()
-      || editor.state.doc.textBetween(Math.max(0, from - 200), Math.min(editor.state.doc.content.size, to + 200), '\n').trim();
+    const { from, to, empty } = editor.state.selection;
+    if (empty) {
+      toast('warning', '请先选中文本');
+      return;
+    }
+    const contextText = editor.state.doc.textBetween(from, to, '\n\n').trim();
+    if (!contextText) {
+      toast('warning', '选中内容为空');
+      return;
+    }
     setAskAIApplyMode('insert');
+    setAskAIInsertBehavior('replace');
     setAskAIOptimizeMeta(null);
-    setAskAIContext(contextText || '');
+    setAskAIContext(contextText);
     setAskAITask(null);
     setAskAIInsertRange({ from, to });
     setAskAIOpen(true);
-  }, [editor]);
+  }, [editor, toast]);
 
   const getSelectionText = useCallback(() => {
     if (!editor) return null as { range: { from: number; to: number }; text: string } | null;
     const { from, to, empty } = editor.state.selection;
     if (empty) return null;
-    const text = editor.state.doc.textBetween(from, to, '\n\n').trim();
+    const textBetween = editor.state.doc.textBetween(from, to, '\n\n').trim();
+    const serialized = editor.markdown?.serialize({
+      type: 'doc',
+      content: editor.state.doc.slice(from, to).content.toJSON(),
+    })?.trim() || '';
+    const text = textBetween || serialized;
     if (!text) return null;
     return { range: { from, to }, text };
   }, [editor]);
@@ -1396,6 +1771,7 @@ export function RichNotebookEditor({
     ].join('\n');
 
     setAskAIApplyMode('insert');
+    setAskAIInsertBehavior('replace');
     setAskAIOptimizeMeta(null);
     setAskAIContext(target.text);
     setAskAIInsertRange(replaceSelection ? target.range : null);
@@ -1411,15 +1787,18 @@ export function RichNotebookEditor({
   const getCurrentNodeText = useCallback(() => {
     const range = getCurrentNodeRange();
     if (!range || !editor) return null;
-    const text = editor.state.doc.textBetween(range.from, range.to, '\n\n').trim();
+    const node = editor.state.doc.nodeAt(range.from);
+    const textBetween = editor.state.doc.textBetween(range.from, range.to, '\n\n').trim();
+    const serialized = node ? (editor.markdown?.serialize(node.toJSON())?.trim() || '') : '';
+    const text = textBetween || serialized;
     if (!text) return null;
     return { range, text };
   }, [editor, getCurrentNodeRange]);
 
   const openAiActionDialog = useCallback((actionName: string, instruction: string) => {
-    const target = getCurrentNodeText();
+    const target = getSelectionText() || getCurrentNodeText();
     if (!target) {
-      toast('warning', '当前块没有可处理文本');
+      toast('warning', '请先选中要处理的内容，或将光标置于一个块内');
       return;
     }
     const prompt = [
@@ -1440,6 +1819,7 @@ export function RichNotebookEditor({
     ].join('\n');
 
     setAskAIApplyMode('insert');
+    setAskAIInsertBehavior(actionName === '总结内容' ? 'appendAfter' : 'replace');
     setAskAIOptimizeMeta(null);
     setAskAIContext(target.text);
     setAskAIInsertRange(target.range);
@@ -1450,7 +1830,7 @@ export function RichNotebookEditor({
     });
     setAskAIOpen(true);
     setMenuOpen(false);
-  }, [getCurrentNodeText, toast]);
+  }, [getCurrentNodeText, getSelectionText, toast]);
 
   const openAiOptimizeTask = useCallback((scope: 'selection' | 'document') => {
     if (!editor) return;
@@ -1496,6 +1876,7 @@ export function RichNotebookEditor({
         targetText,
       ].join('\n');
       setAskAIApplyMode('optimize');
+      setAskAIInsertBehavior('replace');
       setAskAIOptimizeMeta({ scope: 'selection', range: targetRange, sourceText: targetText });
       setAskAIContext(targetText);
       setAskAIInsertRange(targetRange);
@@ -1530,6 +1911,7 @@ export function RichNotebookEditor({
       sourceText,
     ].join('\n');
     setAskAIApplyMode('optimize');
+    setAskAIInsertBehavior('replace');
     setAskAIOptimizeMeta({ scope: 'document', range: { from: 1, to: docTo }, sourceText });
     setAskAIContext(sourceText.length > 5000 ? `${sourceText.slice(0, 5000)}\n\n...（全文较长，已截断预览）` : sourceText);
     setAskAIInsertRange({ from: 1, to: docTo });
@@ -1541,6 +1923,12 @@ export function RichNotebookEditor({
     setAskAIOpen(true);
     setMenuOpen(false);
   }, [editor, getCurrentNodeRange, getSelectionText, toast]);
+
+  const buildTrackedSuggestionCount = useCallback((sourceText: string, optimizedText: string) => {
+    const draftCore = buildAiOptimizationDraft(sourceText, optimizedText);
+    if (draftCore.items.length === 0) return { count: 0, nodes: null as any };
+    return { count: draftCore.items.length, nodes: buildAiSuggestionNodes(draftCore) };
+  }, []);
 
   const insertAiResultBack = useCallback((result: string) => {
     if (!editor) return;
@@ -1561,43 +1949,85 @@ export function RichNotebookEditor({
         setAskAIOpen(false);
         return;
       }
-      const draftCore = buildAiOptimizationDraft(sourceText, text);
-      if (draftCore.items.length === 0) {
+      const tracked = buildTrackedSuggestionCount(sourceText, text);
+      if (tracked.count === 0 || !tracked.nodes) {
         toast('info', '未检测到可审阅的差异');
         setAskAIOpen(false);
         return;
       }
-      const suggestionNodes = buildAiSuggestionNodes(draftCore);
       if (askAIOptimizeMeta.scope === 'document') {
-        editor.commands.setContent(suggestionNodes);
+        editor.commands.setContent(tracked.nodes);
       } else {
         editor
           .chain()
           .focus()
           .deleteRange(askAIOptimizeMeta.range)
           .setTextSelection(askAIOptimizeMeta.range.from)
-          .insertContent(suggestionNodes)
+          .insertContent(tracked.nodes)
           .run();
       }
       setAskAIOpen(false);
-      toast('success', `已生成 ${draftCore.items.length} 条可接受/拒绝建议`);
+      toast('success', `已生成 ${tracked.count} 条可接受/拒绝建议`);
       return;
     }
 
     if (askAIInsertRange) {
+      if (askAIInsertBehavior === 'appendAfter') {
+        editor
+          .chain()
+          .focus()
+          .setTextSelection(askAIInsertRange.to)
+          .insertContent({
+            type: 'notebookAiSuggestion',
+            attrs: {
+              original: '',
+              optimized: text,
+            },
+          })
+          .run();
+        setAskAIOpen(false);
+        toast('success', '已生成 1 条可接受/拒绝建议');
+        return;
+      }
+
+      const sourceTextBetween = editor.state.doc.textBetween(askAIInsertRange.from, askAIInsertRange.to, '\n\n').trim();
+      const sourceSerialized = editor.markdown?.serialize({
+        type: 'doc',
+        content: editor.state.doc.slice(askAIInsertRange.from, askAIInsertRange.to).content.toJSON(),
+      })?.trim() || '';
+      const sourceText = sourceTextBetween || sourceSerialized;
+      const tracked = buildTrackedSuggestionCount(sourceText, text);
+      if (tracked.count === 0 || !tracked.nodes) {
+        toast('info', '未检测到可审阅的差异');
+        setAskAIOpen(false);
+        return;
+      }
       editor
         .chain()
         .focus()
         .deleteRange(askAIInsertRange)
         .setTextSelection(askAIInsertRange.from)
-        .insertContent(text, { contentType: 'markdown' })
+        .insertContent(tracked.nodes)
         .run();
-    } else {
-      editor.chain().focus().insertContent(text, { contentType: 'markdown' }).run();
+      setAskAIOpen(false);
+      toast('success', `已生成 ${tracked.count} 条可接受/拒绝建议`);
+      return;
     }
+
+    editor
+      .chain()
+      .focus()
+      .insertContent({
+        type: 'notebookAiSuggestion',
+        attrs: {
+          original: '',
+          optimized: text,
+        },
+      })
+      .run();
     setAskAIOpen(false);
-    toast('success', '已插入回原文');
-  }, [askAIApplyMode, askAIInsertRange, askAIOptimizeMeta, editor, toast]);
+    toast('success', '已生成 1 条可接受/拒绝建议');
+  }, [askAIApplyMode, askAIInsertBehavior, askAIInsertRange, askAIOptimizeMeta, buildTrackedSuggestionCount, editor, toast]);
 
   const translateTargetLabel = translateTarget === 'en'
     ? '英语'
@@ -1649,12 +2079,96 @@ export function RichNotebookEditor({
     window.addEventListener('mousedown', onDocDown, true);
     window.addEventListener('resize', recalcPosition, true);
     window.addEventListener('scroll', recalcPosition, true);
+    const scroller = getEditorScrollContainer();
+    if (scroller) scroller.addEventListener('scroll', recalcPosition, true);
     return () => {
       window.removeEventListener('mousedown', onDocDown, true);
       window.removeEventListener('resize', recalcPosition, true);
       window.removeEventListener('scroll', recalcPosition, true);
+      if (scroller) scroller.removeEventListener('scroll', recalcPosition, true);
     };
-  }, [bubbleAiMenuOpen]);
+  }, [bubbleAiMenuOpen, getEditorScrollContainer]);
+
+  useEffect(() => {
+    if (!inlineMathEditOpen || inlineMathEditPos === null) return;
+    const recalc = () => {
+      const targetEditor = editorRef.current;
+      if (!targetEditor) return;
+      const dom = targetEditor.view.nodeDOM(inlineMathEditPos) as HTMLElement | null;
+      if (!dom) return;
+      const rect = dom.getBoundingClientRect();
+      setInlineMathEditAnchor({
+        left: Math.max(16, Math.min(window.innerWidth - 16, rect.left + rect.width / 2)),
+        top: Math.max(16, Math.min(window.innerHeight - 16, rect.bottom + 6)),
+      });
+    };
+    recalc();
+    window.addEventListener('resize', recalc, true);
+    window.addEventListener('scroll', recalc, true);
+    const scroller = getEditorScrollContainer();
+    if (scroller) scroller.addEventListener('scroll', recalc, true);
+    return () => {
+      window.removeEventListener('resize', recalc, true);
+      window.removeEventListener('scroll', recalc, true);
+      if (scroller) scroller.removeEventListener('scroll', recalc, true);
+    };
+  }, [getEditorScrollContainer, inlineMathEditOpen, inlineMathEditPos]);
+
+  useEffect(() => {
+    if (!linkEditorOpen || !linkEditRange) return;
+    const recalc = () => {
+      const targetEditor = editorRef.current;
+      if (!targetEditor) return;
+      setLinkEditorAnchor(getSelectionAnchor(targetEditor, linkEditRange));
+    };
+    recalc();
+    window.addEventListener('resize', recalc, true);
+    window.addEventListener('scroll', recalc, true);
+    const scroller = getEditorScrollContainer();
+    if (scroller) scroller.addEventListener('scroll', recalc, true);
+    return () => {
+      window.removeEventListener('resize', recalc, true);
+      window.removeEventListener('scroll', recalc, true);
+      if (scroller) scroller.removeEventListener('scroll', recalc, true);
+    };
+  }, [getEditorScrollContainer, getSelectionAnchor, linkEditorOpen, linkEditRange]);
+
+  useEffect(() => {
+    if (!imageEditorOpen || imageEditorPos === null) return;
+    const recalc = () => {
+      const targetEditor = editorRef.current;
+      if (!targetEditor) return;
+      const dom = targetEditor.view.nodeDOM(imageEditorPos) as HTMLElement | null;
+      if (!dom) return;
+      const rect = dom.getBoundingClientRect();
+      setImageEditorAnchor({
+        left: Math.max(16, Math.min(window.innerWidth - 16, rect.left + rect.width / 2)),
+        top: Math.max(16, Math.min(window.innerHeight - 16, rect.bottom + 6)),
+      });
+    };
+    recalc();
+    window.addEventListener('resize', recalc, true);
+    window.addEventListener('scroll', recalc, true);
+    const scroller = getEditorScrollContainer();
+    if (scroller) scroller.addEventListener('scroll', recalc, true);
+    return () => {
+      window.removeEventListener('resize', recalc, true);
+      window.removeEventListener('scroll', recalc, true);
+      if (scroller) scroller.removeEventListener('scroll', recalc, true);
+    };
+  }, [getEditorScrollContainer, imageEditorOpen, imageEditorPos]);
+
+  useEffect(() => {
+    const scroller = getEditorScrollContainer();
+    if (!scroller) return;
+    const onScroll = () => {
+      window.dispatchEvent(new Event('scroll'));
+    };
+    scroller.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => {
+      scroller.removeEventListener('scroll', onScroll, true);
+    };
+  }, [getEditorScrollContainer]);
 
   const setTranslateTargetAndPersist = useCallback((target: 'en' | 'zh' | 'ja' | 'ko') => {
     setTranslateTarget(target);
@@ -1698,6 +2212,9 @@ export function RichNotebookEditor({
   const hasTextSelection = editor ? !editor.state.selection.empty : false;
   const isCodeSelectionMode = isCodeContext || isCodeNodeContext || domCodeContext;
   const showContextToolbar = editor ? editor.isFocused : false;
+  const linkPopoverOpen = linkEditorOpen && Boolean(linkEditorAnchor);
+  const imagePopoverOpen = imageEditorOpen && Boolean(imageEditorAnchor);
+  const inlineMathPopoverOpen = inlineMathEditOpen && Boolean(inlineMathEditAnchor);
 
   useEffect(() => {
     if (!isOutputNodeContext) return;
@@ -1715,7 +2232,10 @@ export function RichNotebookEditor({
             ref={bubbleAiTriggerRef}
             className={`rounded px-2 py-1 hover:bg-accent ${dense ? 'text-xs' : 'text-sm'}`}
             title="AI 助手"
-            onClick={() => setBubbleAiMenuOpen((v) => !v)}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setBubbleAiMenuOpen((v) => !v);
+            }}
           >
             <span className="material-symbols-outlined text-base">smart_toy</span>
           </button>
@@ -1797,7 +2317,7 @@ export function RichNotebookEditor({
           {isCodeSelectionMode ? (
             <>
               <DropdownMenuLabel>代码块 AI</DropdownMenuLabel>
-              <DropdownMenuItem onClick={handleAskAIFromSelection}>
+              <DropdownMenuItem onClick={() => handleAskAIFromSelection()}>
                 <span className="material-symbols-outlined mr-2 text-base">forum</span>
                 问AI
               </DropdownMenuItem>
@@ -2357,6 +2877,7 @@ export function RichNotebookEditor({
               <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('strike') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleStrike().run()} title="删除线">
                 <span className="material-symbols-outlined text-base">strikethrough_s</span>
               </button>
+              {renderLinkEditor(true)}
               <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => editor.chain().focus().toggleBulletList().run()} title="无序列表">
                 <span className="material-symbols-outlined text-base">format_list_bulleted</span>
               </button>
@@ -2392,15 +2913,22 @@ export function RichNotebookEditor({
               <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteColumn().run()} title="删除列">
                 <span className="material-symbols-outlined text-base" style={{ color: '#ef4444' }}>view_column_2</span>
               </button>
-              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => (editor.chain().focus() as any).deleteTable().run()} title="删除表格">
-                <span className="material-symbols-outlined text-base">table_view</span>
-              </button>
             </>
           )}
           {isImageContext && (
-            <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => editor.chain().focus().deleteSelection().run()} title="删除图片">
-              <span className="material-symbols-outlined text-base">delete</span>
-            </button>
+            <>
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-xs hover:bg-accent"
+                onClick={() => openImageEditor()}
+                title="编辑图片"
+              >
+                <span className="material-symbols-outlined text-base">image</span>
+              </button>
+              <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => editor.chain().focus().deleteSelection().run()} title="删除图片">
+                <span className="material-symbols-outlined text-base">delete</span>
+              </button>
+            </>
           )}
           {!isCodeContext && <TableSizeMenuButton dense onInsert={insertTableWithSize} />}
           {renderAiActionMenu(true)}
@@ -2487,6 +3015,7 @@ export function RichNotebookEditor({
               <button type="button" className={`rounded px-2 py-1 text-xs hover:bg-accent ${editor.isActive('strike') ? 'bg-accent' : ''}`} onClick={() => editor.chain().focus().toggleStrike().run()} title="删除线">
                 <span className="material-symbols-outlined text-base">strikethrough_s</span>
               </button>
+              {renderLinkEditor(true)}
             </>
           )}
           {isCodeContext && (
@@ -2524,7 +3053,6 @@ export function RichNotebookEditor({
               <span className="material-symbols-outlined text-base">delete</span>
             </button>
           )}
-          {!isCodeContext && <TableSizeMenuButton dense onInsert={insertTableWithSize} />}
           {renderAiActionMenu(true, true)}
         </div>
       </BubbleMenu>
@@ -2738,7 +3266,7 @@ export function RichNotebookEditor({
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
           <ResizablePanel panelRef={editorPanelRef} defaultSize={dependencyGraphOpen ? '70%' : '100%'} minSize="25%">
-            <EditorContent editor={editor} className="h-full min-h-0 overflow-y-auto" />
+            <EditorContent editor={editor} className="notebook-editor-scroll h-full min-h-0 overflow-y-auto" />
           </ResizablePanel>
           <ResizableHandle className={`${dependencyGraphOpen ? '' : 'hidden'}`} />
           <ResizablePanel
@@ -2843,6 +3371,173 @@ export function RichNotebookEditor({
         insertButtonLabel={askAIApplyMode === 'optimize' ? '生成建议列表' : '插入回原文'}
         onInsertResult={insertAiResultBack}
       />
+      <Popover
+        open={linkPopoverOpen}
+        onOpenChange={(open) => {
+          setLinkEditorOpen(open);
+          if (!open) {
+            setLinkEditRange(null);
+            setLinkEditorAnchor(null);
+          }
+        }}
+      >
+        {linkEditorAnchor && (
+          <PopoverAnchor asChild>
+            <div style={{ position: 'fixed', left: linkEditorAnchor.left, top: linkEditorAnchor.top }} />
+          </PopoverAnchor>
+        )}
+        <PopoverContent className="w-80">
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">链接文本</div>
+            <input
+              value={linkDraftText}
+              onChange={(event) => setLinkDraftText(event.target.value)}
+              className="h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              placeholder="显示文本"
+            />
+            <div className="text-xs font-medium text-muted-foreground">链接地址</div>
+            <input
+              value={linkDraftUrl}
+              onChange={(event) => setLinkDraftUrl(event.target.value)}
+              className="h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              placeholder="https://example.com"
+            />
+            <div className="text-xs font-medium text-muted-foreground">链接标题（可选）</div>
+            <input
+              value={linkDraftTitle}
+              onChange={(event) => setLinkDraftTitle(event.target.value)}
+              className="h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              placeholder="鼠标悬停提示"
+            />
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                className="rounded border px-2 py-1 text-xs hover:bg-accent disabled:opacity-40"
+                onClick={openDraftLink}
+                disabled={!linkDraftUrl.trim()}
+              >
+                跳转
+              </button>
+              <button type="button" className="rounded border px-2 py-1 text-xs hover:bg-accent" onClick={removeLink}>
+                去除链接
+              </button>
+              <button type="button" className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground hover:opacity-90" onClick={applyLinkEdit}>
+                保存
+              </button>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+      <Popover
+        open={imagePopoverOpen}
+        onOpenChange={(open) => {
+          setImageEditorOpen(open);
+          if (!open) {
+            setImageEditorPos(null);
+            setImageEditorAnchor(null);
+          }
+        }}
+      >
+        {imageEditorAnchor && (
+          <PopoverAnchor asChild>
+            <div style={{ position: 'fixed', left: imageEditorAnchor.left, top: imageEditorAnchor.top }} />
+          </PopoverAnchor>
+        )}
+        <PopoverContent className="w-80">
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">图片地址</div>
+            <input
+              value={imageDraftSrc}
+              onChange={(event) => setImageDraftSrc(event.target.value)}
+              className="h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              placeholder="/uploads/images/..."
+            />
+            <div className="text-xs font-medium text-muted-foreground">Alt 文本</div>
+            <input
+              value={imageDraftAlt}
+              onChange={(event) => setImageDraftAlt(event.target.value)}
+              className="h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              placeholder="图片描述"
+            />
+            <div className="text-xs font-medium text-muted-foreground">Title（可选）</div>
+            <input
+              value={imageDraftTitle}
+              onChange={(event) => setImageDraftTitle(event.target.value)}
+              className="h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              placeholder="悬停提示"
+            />
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                className="rounded border px-2 py-1 text-xs hover:bg-accent disabled:opacity-40"
+                onClick={() => {
+                  const href = imageDraftSrc.trim();
+                  if (!href || typeof window === 'undefined') return;
+                  window.open(href, '_blank', 'noopener,noreferrer');
+                }}
+                disabled={!imageDraftSrc.trim()}
+              >
+                打开
+              </button>
+              <button
+                type="button"
+                className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground hover:opacity-90"
+                onClick={applyImageEdit}
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+      <Popover
+        open={inlineMathPopoverOpen}
+        onOpenChange={(open) => {
+          setInlineMathEditOpen(open);
+          if (!open) {
+            setInlineMathEditPos(null);
+            setInlineMathEditAnchor(null);
+          }
+        }}
+      >
+        {inlineMathEditAnchor && (
+          <PopoverAnchor asChild>
+            <div style={{ position: 'fixed', left: inlineMathEditAnchor.left, top: inlineMathEditAnchor.top }} />
+          </PopoverAnchor>
+        )}
+        <PopoverContent className="w-[520px] max-w-[calc(100vw-24px)]">
+          <div className="space-y-2">
+            <div className="text-sm font-medium">编辑行内公式</div>
+            <div className="text-xs text-muted-foreground">输入 LaTeX 表达式并保存。</div>
+            <textarea
+              value={inlineMathEditLatex}
+              onChange={(event) => setInlineMathEditLatex(event.target.value)}
+              className="min-h-[120px] w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              placeholder="例如：\\frac{a}{b}"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm hover:bg-accent"
+                onClick={() => {
+                  setInlineMathEditOpen(false);
+                  setInlineMathEditPos(null);
+                  setInlineMathEditAnchor(null);
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm text-primary-foreground hover:opacity-90"
+                onClick={applyInlineMathEdit}
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
       </div>
       {tocOpen && (
         <aside className="h-full w-64 shrink-0 border-l bg-muted/20">
@@ -2934,6 +3629,14 @@ export function RichNotebookEditor({
           height: 0;
           pointer-events: none;
           opacity: 0.7;
+        }
+        .notebook-rich-editor .tiptap a {
+          color: #2563eb;
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+        .notebook-rich-editor .tiptap a:hover {
+          color: #1d4ed8;
         }
         .notebook-rich-editor .tiptap-mathematics-render {
           border: 1px solid hsl(var(--border));

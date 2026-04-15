@@ -86,8 +86,16 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       const weekDays = [0,1,2,3,4,5,6].map(i => t(`dashboard.weekdays.${i}`));
-
-      const res = await fetch('/api/dashboard');
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth-token') : null;
+      const res = await fetch('/api/dashboard', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.status === 401) {
+        localStorage.removeItem('auth-token');
+        localStorage.removeItem('auth-user');
+        router.push('/login');
+        return;
+      }
       if (!res.ok) throw new Error('Dashboard API failed');
       const data = await res.json();
 

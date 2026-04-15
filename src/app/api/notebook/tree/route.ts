@@ -9,6 +9,7 @@ interface TreeNode {
   name: string;
   path: string;
   type: 'file' | 'directory';
+  modifiedTime?: number;
   children?: TreeNode[];
 }
 
@@ -42,23 +43,34 @@ async function buildTree(dirPath: string, rootPath: string, depth: number, maxDe
             name: entry.name,
             path: relativePath,
             type: 'directory',
+            modifiedTime: stat.mtimeMs,
             children,
           });
         } else if (stat.isFile()) {
-          files.push({ name: entry.name, path: relativePath, type: 'file' });
+          files.push({ name: entry.name, path: relativePath, type: 'file', modifiedTime: stat.mtimeMs });
         }
       } catch {}
     } else if (entry.isFile()) {
+      let modifiedTime = 0;
+      try {
+        const stat = await fs.stat(fullPath);
+        modifiedTime = stat.mtimeMs;
+      } catch {}
       files.push({
         name: entry.name,
         path: relativePath,
         type: 'file',
+        modifiedTime,
       });
     }
   }
 
   dirs.sort((a, b) => a.name.localeCompare(b.name));
-  files.sort((a, b) => a.name.localeCompare(b.name));
+  files.sort((a, b) => {
+    const timeDiff = (b.modifiedTime || 0) - (a.modifiedTime || 0);
+    if (timeDiff !== 0) return timeDiff;
+    return a.name.localeCompare(b.name);
+  });
 
   return [...dirs, ...files];
 }

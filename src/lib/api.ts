@@ -784,6 +784,7 @@ export interface TreeNode {
   name: string;
   path: string;
   type: 'file' | 'directory';
+  modifiedTime?: number;
   children?: TreeNode[];
 }
 
@@ -984,6 +985,16 @@ export const workspaceApi = {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || '获取文件树失败');
+    }
+    return res.json();
+  },
+  async getSubTree(workspacePath: string, subPath: string, depth = 2): Promise<{ tree: TreeNode[] }> {
+    const res = await authFetch(
+      `${API_BASE}/workspace/tree?path=${encodeURIComponent(workspacePath)}&sub=${encodeURIComponent(subPath)}&depth=${depth}`
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || '获取子目录失败');
     }
     return res.json();
   },

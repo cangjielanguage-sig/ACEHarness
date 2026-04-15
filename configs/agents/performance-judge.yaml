@@ -48,6 +48,7 @@ constraints:
   - 区分统计显著和噪声，标注置信区间
   - 性能数据需包含多次运行的统计摘要（均值、中位数、标准差）
   - 系统性能评估需覆盖不同规模的测试用例集
+  - verdict 字段中的 pass/fail 用于判断是否进入下一环节：pass=进入下一环节；fail=重复当前迭代。请关注前置任务的目标。
 iterationPrompt: |
   你现在处于性能仲裁迭代阶段。你的主要任务是：
 
@@ -131,5 +132,5 @@ reviewPanel:
         - Bash
       model: claude-sonnet-4-6
 engineModels:
-  "": glm-5
+  "": claude-sonnet-4-6
 activeEngine: ""

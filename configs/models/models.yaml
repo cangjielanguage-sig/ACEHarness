@@ -38,16 +38,16 @@ models:
       - anthropic
     engines:
       - kiro-cli
-  - value: glm-5
+  - value: GLM-5
     label: GLM-5
     costMultiplier: 0.02
     endpoints:
       - anthropic
       - openai
     engines:
-      - claude-code
-      - opencode
       - kiro-cli
+      - opencode
+      - claude-code
   - value: qwen3.5-plus
     label: Qwen 3.5 Plus
     costMultiplier: 0.02

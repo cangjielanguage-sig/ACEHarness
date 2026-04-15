@@ -5,6 +5,7 @@ import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
+import WorkspaceDirectoryPicker from '@/components/common/WorkspaceDirectoryPicker';
 import { RobotLogo } from './ChatMessage';
 
 interface SessionSummaryItem {
@@ -133,32 +134,46 @@ export default function ChatSidebar() {
       {/* 工作目录 */}
       <div className="border-t p-3">
         {editingCwd ? (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <div className="flex items-center gap-1.5 px-2">
               <span className="material-symbols-outlined text-sm text-muted-foreground">folder</span>
               <span className="text-xs font-semibold text-muted-foreground">工作目录</span>
             </div>
             <Input
-              autoFocus
               value={cwdInput}
               onChange={(e) => setCwdInput(e.target.value)}
               placeholder="留空使用默认目录"
               className="h-7 text-xs"
-              onBlur={() => {
-                setWorkingDirectory(cwdInput.trim());
-                setEditingCwd(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  setWorkingDirectory(cwdInput.trim());
-                  setEditingCwd(false);
-                }
-                if (e.key === 'Escape') {
+            />
+            <WorkspaceDirectoryPicker
+              workspaceRoot="/"
+              value={cwdInput}
+              onChange={setCwdInput}
+              className="h-52"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => {
                   setCwdInput(workingDirectory);
                   setEditingCwd(false);
-                }
-              }}
-            />
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  setWorkingDirectory(cwdInput.trim());
+                  setEditingCwd(false);
+                }}
+              >
+                确定
+              </Button>
+            </div>
           </div>
         ) : (
           <button

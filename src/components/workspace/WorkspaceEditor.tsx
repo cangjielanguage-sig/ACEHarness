@@ -19,6 +19,7 @@ import {
 import { FileTreeSidebar, type ClipboardItem } from "./FileTreeSidebar"
 import { EditorPanel } from "./EditorPanel"
 import { FileSearchCommand } from "./FileSearchCommand"
+import AiAssistantSheet from "@/components/chat/AiAssistantSheet"
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden"
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 
@@ -31,6 +32,41 @@ interface WorkspaceEditorProps {
   notebookScope?: NotebookScope
   notebookShareToken?: string
   notebookPermission?: 'read' | 'write'
+}
+
+type DiffLine = { type: 'equal' | 'delete' | 'add'; text: string }
+
+function buildLineDiff(beforeText: string, afterText: string): DiffLine[] {
+  const before = (beforeText || "").replace(/\r\n/g, "\n").split("\n")
+  const after = (afterText || "").replace(/\r\n/g, "\n").split("\n")
+  // Ignore pure EOF newline differences to avoid trailing blank-line suggestions.
+  if (before.length > 1 && before[before.length - 1] === "") before.pop()
+  if (after.length > 1 && after[after.length - 1] === "") after.pop()
+  const dp: number[][] = Array.from({ length: before.length + 1 }, () => Array(after.length + 1).fill(0))
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    for (let j = after.length - 1; j >= 0; j -= 1) {
+      dp[i][j] = before[i] === after[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+  const lines: DiffLine[] = []
+  let i = 0
+  let j = 0
+  while (i < before.length || j < after.length) {
+    if (i < before.length && j < after.length && before[i] === after[j]) {
+      lines.push({ type: "equal", text: before[i] })
+      i += 1
+      j += 1
+      continue
+    }
+    if (j >= after.length || (i < before.length && dp[i + 1][j] > dp[i][j + 1])) {
+      lines.push({ type: "delete", text: before[i] ?? "" })
+      i += 1
+      continue
+    }
+    lines.push({ type: "add", text: after[j] ?? "" })
+    j += 1
+  }
+  return lines
 }
 
 const PREVIEW_EXTENSIONS = new Set([
@@ -46,6 +82,99 @@ function isPreviewFile(filePath: string): boolean {
 
 function getFileType(filePath: string): string {
   return filePath.split(".").pop()?.toLowerCase() || ""
+}
+
+function splitSuggestionIntoLineHunks(payload: {
+  action: 'review' | 'fixError' | 'addComment'
+  sourceText: string
+  targetText: string
+  baseRange: {
+    startLineNumber: number
+    startColumn: number
+    endLineNumber: number
+    endColumn: number
+  }
+}) {
+  const { action, sourceText, targetText, baseRange } = payload
+  const beforeLines = (sourceText || "").replace(/\r\n/g, "\n").split("\n")
+  const diff = buildLineDiff(sourceText, targetText)
+  const suggestions: Array<{
+    id: string
+    action: 'review' | 'fixError' | 'addComment'
+    sourceText: string
+    targetText: string
+    oldLineCount: number
+    newLineCount: number
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+    decorateRange: {
+      startLineNumber: number
+      endLineNumber: number
+    }
+    insertBefore: boolean
+  }> = []
+
+  let sourceLineCursor = 0
+  let idx = 0
+  while (idx < diff.length) {
+    if (diff[idx]?.type === "equal") {
+      sourceLineCursor += 1
+      idx += 1
+      continue
+    }
+
+    const hunkStartSourceLine = sourceLineCursor
+    const deleted: string[] = []
+    const added: string[] = []
+    while (idx < diff.length && diff[idx]?.type !== "equal") {
+      const line = diff[idx]
+      if (line.type === "delete") {
+        deleted.push(line.text)
+        sourceLineCursor += 1
+      } else if (line.type === "add") {
+        added.push(line.text)
+      }
+      idx += 1
+    }
+
+    const oldLineCount = deleted.length
+    const newLineCount = added.length
+    if (oldLineCount === 0 && newLineCount === 0) continue
+    const startLineNumber = baseRange.startLineNumber + hunkStartSourceLine
+    const endLineNumber = oldLineCount > 0 ? startLineNumber + oldLineCount : startLineNumber
+    const decorateEndLineNumber = oldLineCount > 0 ? startLineNumber + oldLineCount - 1 : startLineNumber
+    const insertsBeforeExistingLine = oldLineCount === 0 && hunkStartSourceLine < beforeLines.length
+    suggestions.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      action,
+      sourceText: deleted.join("\n"),
+      targetText: (() => {
+        if (newLineCount === 0) return ""
+        const joined = added.join("\n")
+        if (oldLineCount > 0) return `${joined}\n`
+        return insertsBeforeExistingLine ? `${joined}\n` : joined
+      })(),
+      oldLineCount,
+      newLineCount,
+      range: {
+        startLineNumber,
+        startColumn: 1,
+        endLineNumber,
+        endColumn: 1,
+      },
+      decorateRange: {
+        startLineNumber,
+        endLineNumber: decorateEndLineNumber,
+      },
+      insertBefore: insertsBeforeExistingLine,
+    })
+  }
+
+  return suggestions
 }
 
 export function WorkspaceEditor({
@@ -69,6 +198,58 @@ export function WorkspaceEditor({
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [treeCollapsed, setTreeCollapsed] = React.useState(false)
   const [clipboard, setClipboard] = React.useState<ClipboardItem | null>(null)
+  const [aiSheetOpen, setAiSheetOpen] = React.useState(false)
+  const [aiContext, setAiContext] = React.useState("")
+  const [aiAutoTask, setAiAutoTask] = React.useState<{ id: string; displayText: string; prompt: string } | null>(null)
+  const [aiSelectionMeta, setAiSelectionMeta] = React.useState<{
+    action: 'explain' | 'review' | 'fixError' | 'addComment'
+    text: string
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+  } | null>(null)
+  const [pendingAiSuggestions, setPendingAiSuggestions] = React.useState<Array<{
+    id: string
+    action: 'review' | 'fixError' | 'addComment'
+    sourceText: string
+    targetText: string
+    oldLineCount: number
+    newLineCount: number
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+    decorateRange: {
+      startLineNumber: number
+      endLineNumber: number
+    }
+    insertBefore: boolean
+  }>>([])
+  const [applyAiSuggestionRequest, setApplyAiSuggestionRequest] = React.useState<{
+    id: string
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+    targetText: string
+  } | null>(null)
+  const [applyAiSuggestionQueue, setApplyAiSuggestionQueue] = React.useState<Array<{
+    id: string
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+    targetText: string
+  }>>([])
   const treePanelRef = usePanelRef()
   const router = useRouter()
   const pathname = usePathname()
@@ -89,6 +270,121 @@ export function WorkspaceEditor({
     const fileName = selectedFile.split("/").pop() || selectedFile
     return `${fileName} · ${baseTitle}`
   }, [baseTitle, open, selectedFile])
+
+  const openAiWithFilePath = React.useCallback(() => {
+    const filePathText = selectedFile ? `当前文件路径：${selectedFile}` : "当前未选择文件"
+    setAiContext(filePathText)
+    setAiSelectionMeta(null)
+    setAiAutoTask(null)
+    setAiSheetOpen(true)
+  }, [selectedFile])
+
+  const openAiWithSelection = React.useCallback((payload: {
+    text: string
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+  }) => {
+    const rawText = payload.text
+    if (!rawText.trim()) return
+    setAiContext(rawText)
+    setAiSelectionMeta({
+      action: 'explain',
+      text: rawText,
+      range: payload.range,
+    })
+    setAiAutoTask({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      displayText: '解释选中内容',
+      prompt: [
+        '你是代码解释助手。',
+        '请解释下面选中内容的作用、关键逻辑与输入输出。',
+        '要求：结构清晰、简洁、可执行。',
+        '',
+        '选中内容：',
+        rawText,
+      ].join('\n'),
+    })
+    setAiSheetOpen(true)
+  }, [])
+
+  const openAiWithAction = React.useCallback((action: 'explain' | 'review' | 'fixError' | 'addComment', payload: {
+    text: string
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+  }) => {
+    const rawText = payload.text
+    if (!rawText.trim()) return
+    let displayText = '解释选中内容'
+    let instruction = '请解释下面选中内容的作用、关键逻辑与输入输出。'
+    if (action === 'review') {
+      displayText = '检视意见'
+      instruction = '请对下面内容进行代码审查，给出问题点、风险与改进建议。'
+    } else if (action === 'fixError') {
+      displayText = '解决错误'
+      instruction = '请定位下面内容中的错误并给出修复后的代码。'
+    } else if (action === 'addComment') {
+      displayText = '添加注释'
+      instruction = '请在不改变逻辑的前提下，为下面代码补充高质量注释并返回完整结果。'
+    }
+    setAiContext(rawText)
+    setAiSelectionMeta({
+      action,
+      text: rawText,
+      range: payload.range,
+    })
+    setAiAutoTask({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      displayText,
+      prompt: [
+        '你是专业代码助手。',
+        instruction,
+        '输出要求：严格按下面格式返回，不要输出额外说明。',
+        '如果是代码结果，必须保持原语言语法与换行缩进，不要压成一行。',
+        '<result>',
+        action === 'review' ? '检视后的建议内容' : '处理后的完整内容',
+        '</result>',
+        '',
+        '选中内容：',
+        rawText,
+      ].join('\n'),
+    })
+    setAiSheetOpen(true)
+  }, [])
+
+  const handleAiInsertResult = React.useCallback((content: string) => {
+    if (!content.trim()) return
+    const result = content
+    if (!aiSelectionMeta) return
+    const { action } = aiSelectionMeta
+    if (action === 'review' || action === 'fixError' || action === 'addComment') {
+      const hunks = splitSuggestionIntoLineHunks({
+        action,
+        sourceText: aiSelectionMeta.text,
+        targetText: result,
+        baseRange: aiSelectionMeta.range,
+      })
+      if (hunks.length === 0) return
+      setPendingAiSuggestions((prev) => [...prev, ...hunks])
+      return
+    }
+    if (action === 'explain') return
+  }, [aiSelectionMeta])
+
+  React.useEffect(() => {
+    if (applyAiSuggestionRequest) return
+    if (applyAiSuggestionQueue.length === 0) return
+    const [next, ...rest] = applyAiSuggestionQueue
+    setApplyAiSuggestionRequest(next)
+    setApplyAiSuggestionQueue(rest)
+  }, [applyAiSuggestionQueue, applyAiSuggestionRequest])
 
   useDocumentTitle(currentTitle)
 
@@ -241,6 +537,13 @@ export function WorkspaceEditor({
         setOversize(false)
         setFileBlob(null)
         setTree([])
+        setAiSheetOpen(false)
+        setAiContext("")
+        setAiAutoTask(null)
+        setAiSelectionMeta(null)
+        setPendingAiSuggestions([])
+        setApplyAiSuggestionRequest(null)
+        setApplyAiSuggestionQueue([])
         updateUrlFileState(null)
       }
       onOpenChange(newOpen)
@@ -260,6 +563,46 @@ export function WorkspaceEditor({
               <span className="text-sm text-muted-foreground truncate flex-1 px-2">
                 {baseTitle}
               </span>
+              {pendingAiSuggestions.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      setApplyAiSuggestionQueue(
+                        [...pendingAiSuggestions]
+                          .sort((a, b) => b.range.startLineNumber - a.range.startLineNumber)
+                          .map((item) => ({
+                            id: item.id,
+                            range: item.range,
+                            targetText: item.targetText,
+                          })),
+                      )
+                    }}
+                  >
+                    接受全部
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setPendingAiSuggestions([])}
+                  >
+                    拒绝全部
+                  </Button>
+                </div>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={openAiWithFilePath}
+                title="问 AI"
+              >
+                <span className="material-symbols-outlined text-[16px]">smart_toy</span>
+                <span className="sr-only">问 AI</span>
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"
@@ -320,6 +663,49 @@ export function WorkspaceEditor({
                   notebookScope={notebookScope}
                   notebookShareToken={notebookShareToken}
                   notebookPermission={notebookPermission}
+                  onAskAIFromFile={openAiWithFilePath}
+                  onAskAIFromSelection={openAiWithSelection}
+                  onAskAIAction={openAiWithAction}
+                  applyAiSuggestion={applyAiSuggestionRequest}
+                  aiSuggestions={pendingAiSuggestions}
+                  onAcceptAiSuggestion={(id) => {
+                    const hit = pendingAiSuggestions.find((item) => item.id === id)
+                    if (!hit) return
+                    setApplyAiSuggestionRequest({
+                      id: hit.id,
+                      range: hit.range,
+                      targetText: hit.targetText,
+                    })
+                    const lineDelta = hit.newLineCount - hit.oldLineCount
+                    setPendingAiSuggestions((prev) => prev
+                      .filter((item) => item.id !== id)
+                      .map((item) => {
+                        if (lineDelta === 0) return item
+                        if (item.range.startLineNumber < hit.range.endLineNumber) return item
+                        return {
+                          ...item,
+                          range: {
+                            ...item.range,
+                            startLineNumber: item.range.startLineNumber + lineDelta,
+                            endLineNumber: item.range.endLineNumber + lineDelta,
+                          },
+                          decorateRange: {
+                            startLineNumber: item.decorateRange.startLineNumber + lineDelta,
+                            endLineNumber: item.decorateRange.endLineNumber + lineDelta,
+                          },
+                          insertBefore: item.insertBefore,
+                        }
+                      }))
+                  }}
+                  onRejectAiSuggestion={(id) => {
+                    setPendingAiSuggestions((prev) => prev.filter((x) => x.id !== id))
+                  }}
+                  onApplyAiSuggestionDone={(id) => {
+                    if (applyAiSuggestionRequest?.id === id) {
+                      setApplyAiSuggestionRequest(null)
+                    }
+                    setPendingAiSuggestions((prev) => prev.filter((x) => x.id !== id))
+                  }}
                 />
               </ResizablePanel>
             </ResizablePanelGroup>
@@ -332,6 +718,18 @@ export function WorkspaceEditor({
         onOpenChange={setSearchOpen}
         tree={tree}
         onSelectFile={handleSelectFile}
+      />
+      <AiAssistantSheet
+        open={aiSheetOpen}
+        onOpenChange={setAiSheetOpen}
+        title={mode === "notebook" ? "Notebook AI 助手" : "Editor AI 助手"}
+        context={aiContext}
+        contextLabel="当前上下文（文件路径 / 选中内容）"
+        autoTask={aiAutoTask}
+        onInsertResult={handleAiInsertResult}
+        inputPlaceholder="基于当前文件问点具体问题..."
+        sessionStorageKey={mode === "notebook" ? "workspace-notebook-ai-session-id" : "workspace-editor-ai-session-id"}
+        sessionTitle={mode === "notebook" ? "Notebook Editor AI" : "Workspace Editor AI"}
       />
     </>
   )

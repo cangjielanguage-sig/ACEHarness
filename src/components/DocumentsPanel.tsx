@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { runsApi, workspaceApi, type NotebookScope } from '@/lib/api';
+import { runsApi, workspaceApi, type NotebookScope, type TreeNode } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Checkbox } from '@/components/ui/checkbox';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import Markdown from '@/components/Markdown';
+import NotebookSaveDialog from '@/components/notebook/NotebookSaveDialog';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useToast } from '@/components/ui/toast';
 import styles from '@/app/workbench/[config]/page.module.css';
@@ -95,6 +96,12 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
   // Delete confirm
   const [deleteTarget, setDeleteTarget] = useState<string[] | null>(null);
   const [savingNotebookFile, setSavingNotebookFile] = useState<string | null>(null);
+  const [saveNotebookDialogOpen, setSaveNotebookDialogOpen] = useState(false);
+  const [saveNotebookTarget, setSaveNotebookTarget] = useState<DocFile | null>(null);
+  const [saveNotebookScope, setSaveNotebookScope] = useState<NotebookScope>('personal');
+  const [saveNotebookDirectory, setSaveNotebookDirectory] = useState('');
+  const [saveNotebookDirs, setSaveNotebookDirs] = useState<Array<{ path: string; label: string }>>([]);
+  const [saveNotebookDirsLoading, setSaveNotebookDirsLoading] = useState(false);
 
   // Fullscreen sidebar controls
   const FOLDER_TREE_WIDTH_KEY = 'doc-folder-tree-width';
@@ -299,7 +306,49 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
       .replace(/^-|-$/g, '');
   };
 
-  const saveDocToNotebook = useCallback(async (file: DocFile, scope: NotebookScope = 'personal') => {
+  const collectNotebookDirectories = useCallback((tree: TreeNode[]): Array<{ path: string; label: string }> => {
+    const dirs = new Set<string>(['']);
+    const walk = (nodes: TreeNode[]) => {
+      nodes.forEach((node) => {
+        if (node.type === 'directory') {
+          dirs.add(node.path || '');
+          if (node.children && node.children.length > 0) walk(node.children);
+        }
+      });
+    };
+    walk(tree);
+    return Array.from(dirs)
+      .sort((a, b) => a.localeCompare(b))
+      .map((path) => ({ path, label: path || '根目录 /' }));
+  }, []);
+
+  const loadNotebookDirectories = useCallback(async (scope: NotebookScope) => {
+    setSaveNotebookDirsLoading(true);
+    try {
+      const result = await workspaceApi.getNotebookTree(8, { scope });
+      const dirs = collectNotebookDirectories(result.tree || []);
+      setSaveNotebookDirs(dirs.length > 0 ? dirs : [{ path: '', label: '根目录 /' }]);
+      setSaveNotebookDirectory((prev) => {
+        if (prev && dirs.some((item) => item.path === prev)) return prev;
+        return dirs[0]?.path ?? '';
+      });
+    } catch {
+      setSaveNotebookDirs([{ path: '', label: '根目录 /' }]);
+      setSaveNotebookDirectory('');
+    } finally {
+      setSaveNotebookDirsLoading(false);
+    }
+  }, [collectNotebookDirectories]);
+
+  const openSaveNotebookDialog = useCallback((file: DocFile) => {
+    setSaveNotebookTarget(file);
+    setSaveNotebookScope('personal');
+    setSaveNotebookDirectory('');
+    setSaveNotebookDialogOpen(true);
+    void loadNotebookDirectories('personal');
+  }, [loadNotebookDirectories]);
+
+  const saveDocToNotebook = useCallback(async (file: DocFile, scope: NotebookScope = 'personal', directory = '') => {
     if (!runId) return;
     setSavingNotebookFile(file.filename);
     try {
@@ -309,7 +358,9 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
       const base = sanitizeNotebookName(file.baseName.replace(/\.md$/i, '') || 'workflow-doc');
       const ts = new Date();
       const stamp = `${ts.getFullYear()}${String(ts.getMonth() + 1).padStart(2, '0')}${String(ts.getDate()).padStart(2, '0')}-${String(ts.getHours()).padStart(2, '0')}${String(ts.getMinutes()).padStart(2, '0')}${String(ts.getSeconds()).padStart(2, '0')}`;
-      const notebookPath = `${base}-${stamp}.cj.md`;
+      const fileName = `${base}-${stamp}.cj.md`;
+      const normalizedDir = (directory || '').replace(/^\/+|\/+$/g, '');
+      const notebookPath = normalizedDir ? `${normalizedDir}/${fileName}` : fileName;
       await workspaceApi.manageNotebook('create-file', { path: notebookPath }, { scope });
       await workspaceApi.saveNotebookFile(notebookPath, content, { scope });
       toast('success', `已保存到 Notebook：${notebookPath}`);
@@ -499,16 +550,10 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
               <span className="material-symbols-outlined text-sm mr-2">download</span>下载
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={e => { e.stopPropagation(); void saveDocToNotebook(file, 'personal'); }}
+              onClick={e => { e.stopPropagation(); openSaveNotebookDialog(file); }}
               disabled={savingNotebookFile === file.filename}
             >
-              <span className="material-symbols-outlined text-sm mr-2">person</span>保存到 Notebook（个人）
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={e => { e.stopPropagation(); void saveDocToNotebook(file, 'global'); }}
-              disabled={savingNotebookFile === file.filename}
-            >
-              <span className="material-symbols-outlined text-sm mr-2">groups</span>保存到 Notebook（团队）
+              <span className="material-symbols-outlined text-sm mr-2">save</span>保存到 Notebook…
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive" onClick={e => { e.stopPropagation(); setDeleteTarget([file.filename]); }}>
@@ -686,6 +731,30 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <NotebookSaveDialog
+        open={saveNotebookDialogOpen}
+        onOpenChange={setSaveNotebookDialogOpen}
+        scope={saveNotebookScope}
+        onScopeChange={(scope) => {
+          setSaveNotebookScope(scope);
+          setSaveNotebookDirectory('');
+          void loadNotebookDirectories(scope);
+        }}
+        directory={saveNotebookDirectory}
+        onDirectoryChange={setSaveNotebookDirectory}
+        directories={saveNotebookDirs}
+        loadingDirectories={saveNotebookDirsLoading}
+        saving={Boolean(saveNotebookTarget && savingNotebookFile === saveNotebookTarget.filename)}
+        previewText={saveNotebookTarget
+          ? `将保存：${saveNotebookDirectory ? `${saveNotebookDirectory}/` : ''}${sanitizeNotebookName(saveNotebookTarget.baseName.replace(/\.md$/i, '') || 'workflow-doc')}-YYYYMMDD-HHMMSS.cj.md`
+          : '请选择文档'}
+        onConfirm={async () => {
+          if (!saveNotebookTarget) return;
+          await saveDocToNotebook(saveNotebookTarget, saveNotebookScope, saveNotebookDirectory);
+          setSaveNotebookDialogOpen(false);
+        }}
+      />
 
       {/* Delete confirmation */}
       <ConfirmDialog
