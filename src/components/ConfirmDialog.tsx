@@ -28,6 +28,8 @@ export default function ConfirmDialog({
   variant = 'destructive',
   onConfirm, onCancel,
 }: ConfirmDialogProps) {
+  const showCancel = typeof cancelLabel === 'string' ? cancelLabel.trim().length > 0 : Boolean(cancelLabel);
+
   return (
     <AlertDialog open={open} onOpenChange={(o) => !o && onCancel()}>
       <AlertDialogContent>
@@ -36,7 +38,9 @@ export default function ConfirmDialog({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={onCancel}>{cancelLabel}</AlertDialogCancel>
+          {showCancel ? (
+            <AlertDialogCancel onClick={onCancel}>{cancelLabel}</AlertDialogCancel>
+          ) : null}
           <AlertDialogAction
             onClick={onConfirm}
             className={variant === 'destructive'

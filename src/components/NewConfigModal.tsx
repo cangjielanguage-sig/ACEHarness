@@ -381,9 +381,13 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
     }
 
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth-token') : null;
       const response = await fetch('/api/configs/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ ...data, mode: workflowMode }),
       });
       const result = await response.json();

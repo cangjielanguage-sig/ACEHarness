@@ -1,23 +1,61 @@
 import { existsSync } from 'fs';
-import { mkdir, readFile, writeFile } from 'fs/promises';
-import open from 'open';
-import prompts from 'prompts';
-import { getConcreteEngines } from '@/lib/engine-metadata';
-import { isEngineAvailable, type EngineType } from '@/lib/engines/engine-factory';
-import { getAceDirectory, getAppConfigPath, getEngineConfigPath, getNotebookDataRoot, getDataDir, getRepoRoot } from '@/lib/app-paths';
-import { loadSystemSettings, saveSystemSettings, type SystemSettings } from '@/lib/system-settings';
-import { isSetup, setupFirstAdmin } from '@/lib/user-store';
+import { mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { createHash, randomBytes, randomUUID } from 'crypto';
+import { dirname } from 'path';
+import { spawn } from 'child_process';
+import { parse, stringify } from 'yaml';
+import {
+  getWorkspaceDirectory,
+  getEngineConfigPath,
+  getWorkspaceNotebookRoot,
+  getWorkspaceDataDir,
+  getRepoRoot,
+  getWorkspaceDataFile,
+} from './lib/app-paths';
+
+process.chdir(getRepoRoot());
 
 type Locale = 'zh' | 'en';
+type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode';
 
-interface AppConfig {
-  engine?: EngineType;
+interface SystemSettings {
+  gitcodeToken?: string;
+  host?: string;
+  port?: number;
+  lanAccess?: boolean;
+  locale?: Locale;
 }
+
+interface PromptChoice<T extends string | number | boolean> {
+  title: string;
+  value: T;
+}
+
+interface PromptBase<T extends string> {
+  type: T;
+  name: string;
+  message: string;
+  initial?: unknown;
+}
+
+type PromptQuestion =
+  | (PromptBase<'text'> & { validate?: (value: string) => true | string })
+  | (PromptBase<'password'> & { validate?: (value: string) => true | string })
+  | (PromptBase<'number'> & { min?: number; max?: number })
+  | (PromptBase<'toggle'> & { active: string; inactive: string })
+  | (PromptBase<'select'> & { choices: Array<PromptChoice<any>> });
 
 interface CliMessages {
   setupCancelled: string;
   welcome: string;
+  statusLabel: string;
   runtimeHome: string;
+  localeStatus: (value: string) => string;
+  engineStatus: (value: string) => string;
+  adminStatus: (configured: boolean) => string;
+  resetRequiresForce: string;
+  resetDone: string;
+  resetTarget: string;
   languagePrompt: string;
   languageChoices: Array<{ title: string; value: Locale }>;
   detectEngines: string;
@@ -46,11 +84,33 @@ interface CliMessages {
   failedToStart: (message: string) => string;
 }
 
+const SYSTEM_SETTINGS_PATH = getWorkspaceDataFile('system-settings.yaml');
+const USERS_FILE = getWorkspaceDataFile('users.json');
+const TOKENS_FILE = getWorkspaceDataFile('tokens.json');
+const ADMIN_FILE = getWorkspaceDataFile('admin.json');
+const NOTEBOOK_SHARES_FILE = getWorkspaceDataFile('notebook-shares.json');
+
+const ENGINE_META: Array<{ id: EngineType; name: string }> = [
+  { id: 'claude-code', name: 'Claude Code' },
+  { id: 'codex', name: 'Codex' },
+  { id: 'kiro-cli', name: 'Kiro CLI' },
+  { id: 'opencode', name: 'OpenCode' },
+  { id: 'cursor', name: 'Cursor CLI' },
+  { id: 'cangjie-magic', name: 'CangjieMagic' },
+];
+
 const CLI_MESSAGES: Record<Locale, CliMessages> = {
   zh: {
     setupCancelled: '初始化已取消',
-    welcome: '[ACE] 欢迎使用。首次启动将初始化本地运行配置。',
+    welcome: '[ACE] 本地配置检查',
+    statusLabel: '[ACE] 当前状态',
     runtimeHome: '运行目录',
+    localeStatus: (value: string) => `语言: ${value}`,
+    engineStatus: (value: string) => `默认引擎: ${value}`,
+    adminStatus: (configured: boolean) => `管理员: ${configured ? '已配置' : '未配置'}`,
+    resetRequiresForce: '[ACE] 请使用 `ace reset --force` 确认重置本地 ACE 配置。',
+    resetDone: '[ACE] 重置完成。下次运行 `ace` 时会重新初始化。',
+    resetTarget: '[ACE] 已清理',
     languagePrompt: '请选择语言',
     languageChoices: [
       { title: '中文', value: 'zh' },
@@ -83,8 +143,15 @@ const CLI_MESSAGES: Record<Locale, CliMessages> = {
   },
   en: {
     setupCancelled: 'Setup cancelled',
-    welcome: '[ACE] Welcome. First-time setup will initialize local runtime configuration.',
+    welcome: '[ACE] Local configuration check',
+    statusLabel: '[ACE] Current status',
     runtimeHome: 'Runtime home',
+    localeStatus: (value: string) => `Language: ${value}`,
+    engineStatus: (value: string) => `Default engine: ${value}`,
+    adminStatus: (configured: boolean) => `Admin: ${configured ? 'configured' : 'missing'}`,
+    resetRequiresForce: '[ACE] Re-run with `ace reset --force` to confirm resetting local ACE state.',
+    resetDone: '[ACE] Reset complete. The next `ace` run will initialize again.',
+    resetTarget: '[ACE] Removed',
     languagePrompt: 'Choose your language',
     languageChoices: [
       { title: 'English', value: 'en' },
@@ -125,6 +192,265 @@ function normalizeLocale(value: unknown): Locale {
   return value === 'en' ? 'en' : 'zh';
 }
 
+function formatLocaleLabel(locale?: Locale): string {
+  return locale === 'en' ? 'English' : '中文';
+}
+
+function formatEngineLabel(engine?: EngineType): string {
+  const hit = ENGINE_META.find((item) => item.id === engine);
+  return hit?.name || '未设置';
+}
+
+function resolveCliLocale(): Locale {
+  return normalizeLocale(process.env.ACE_LOCALE || process.env.LANG || process.env.LC_ALL);
+}
+
+function parseArgs(argv: string[]) {
+  const args = argv.slice(2);
+  return {
+    command: args[0] || '',
+    force: args.includes('--force'),
+    verbose: args.includes('-V') || args.includes('--verbose'),
+  };
+}
+
+async function resetAceState(force: boolean) {
+  const messages = getLocaleMessages(resolveCliLocale());
+  if (!force) {
+    console.log(messages.resetRequiresForce);
+    process.exit(1);
+  }
+
+  const targets = [
+    getEngineConfigPath(),
+    SYSTEM_SETTINGS_PATH,
+    USERS_FILE,
+    TOKENS_FILE,
+    ADMIN_FILE,
+    NOTEBOOK_SHARES_FILE,
+  ];
+
+  for (const target of targets) {
+    await rm(target, { force: true, recursive: true });
+    console.log(`${messages.resetTarget}: ${target}`);
+  }
+
+  console.log(messages.resetDone);
+}
+
+async function loadConfiguredEngine(): Promise<EngineType | undefined> {
+  if (!existsSync(getEngineConfigPath())) return undefined;
+  try {
+    const content = JSON.parse(await readFile(getEngineConfigPath(), 'utf-8'));
+    return content.engine as EngineType | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function saveConfiguredEngine(engine: EngineType) {
+  await writeFile(
+    getEngineConfigPath(),
+    JSON.stringify({ engine, updatedAt: new Date().toISOString() }, null, 2),
+    'utf-8'
+  );
+}
+
+async function loadSystemSettings(): Promise<SystemSettings> {
+  try {
+    const content = await readFile(SYSTEM_SETTINGS_PATH, 'utf-8');
+    const parsed = parse(content);
+    return parsed && typeof parsed === 'object' ? parsed as SystemSettings : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveSystemSettings(settings: SystemSettings): Promise<void> {
+  await mkdir(dirname(SYSTEM_SETTINGS_PATH), { recursive: true });
+  await writeFile(SYSTEM_SETTINGS_PATH, stringify(settings), 'utf-8');
+}
+
+async function isSetup(): Promise<boolean> {
+  if (!existsSync(USERS_FILE)) {
+    if (!existsSync(ADMIN_FILE)) return false;
+    try {
+      const admin = JSON.parse(await readFile(ADMIN_FILE, 'utf-8'));
+      return Boolean(admin?.username || admin?.email);
+    } catch {
+      return false;
+    }
+  }
+  try {
+    const users = JSON.parse(await readFile(USERS_FILE, 'utf-8'));
+    return Array.isArray(users) && users.some((user) => user?.role === 'admin');
+  } catch {
+    return false;
+  }
+}
+
+function hashPassword(password: string, salt: string): string {
+  return createHash('sha256').update(password + salt).digest('hex');
+}
+
+function hashAnswer(answer: string, salt: string): string {
+  return createHash('sha256').update(answer.toLowerCase().trim() + salt).digest('hex');
+}
+
+async function setupFirstAdmin(data: {
+  username: string;
+  email: string;
+  password: string;
+  question: string;
+  answer: string;
+  personalDir: string;
+}) {
+  const users = existsSync(USERS_FILE) ? JSON.parse(await readFile(USERS_FILE, 'utf-8')) : [];
+  if (Array.isArray(users) && users.length > 0) return;
+
+  const salt = randomBytes(16).toString('hex');
+  const user = {
+    id: randomUUID(),
+    username: data.username,
+    email: data.email,
+    passwordHash: hashPassword(data.password, salt),
+    salt,
+    question: data.question,
+    answerHash: hashAnswer(data.answer, salt),
+    role: 'admin',
+    personalDir: data.personalDir,
+    createdAt: Date.now(),
+  };
+
+  await mkdir(getWorkspaceDataDir(), { recursive: true });
+  await writeFile(USERS_FILE, JSON.stringify([user], null, 2), 'utf-8');
+}
+
+function commandExists(command: string): boolean {
+  const envPath = process.env.PATH || '';
+  const paths = envPath.split(process.platform === 'win32' ? ';' : ':').filter(Boolean);
+  const exts = process.platform === 'win32'
+    ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';')
+    : [''];
+
+  for (const dir of paths) {
+    for (const ext of exts) {
+      const fullPath = `${dir}/${command}${ext}`;
+      if (existsSync(fullPath)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+async function moduleExists(moduleName: string): Promise<boolean> {
+  try {
+    await import(moduleName);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isCangjieMagicAvailable(): boolean {
+  return Boolean(process.env.CANGJIE_MAGIC_PATH) && commandExists('cjpm');
+}
+
+async function detectEngines() {
+  const availability = await Promise.all(ENGINE_META.map(async (engine) => ({
+    ...engine,
+    available:
+      engine.id === 'claude-code' ? await moduleExists('@anthropic-ai/claude-agent-sdk')
+        : engine.id === 'codex' ? (await moduleExists('@openai/codex-sdk')) || commandExists('codex')
+          : engine.id === 'cangjie-magic' ? isCangjieMagicAvailable()
+            : commandExists(engine.id === 'cursor' ? 'agent' : engine.id),
+  })));
+
+  return availability;
+}
+
+type PromptFn = (questions: PromptQuestion | PromptQuestion[], options?: { onCancel?: () => void }) => Promise<Record<string, any>>;
+
+async function loadPrompts(): Promise<PromptFn | null> {
+  try {
+    const mod = require('prompts');
+    return mod.default || mod;
+  } catch {
+    return null;
+  }
+}
+
+async function fallbackPrompt(questions: PromptQuestion | PromptQuestion[], options?: { onCancel?: () => void }) {
+  const readline = await import('readline');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (message: string) => new Promise<string>((resolve) => rl.question(message, resolve));
+  const list = Array.isArray(questions) ? questions : [questions];
+  const answers: Record<string, any> = {};
+
+  try {
+    for (const question of list) {
+      if (question.type === 'select') {
+        console.log(question.message);
+        question.choices.forEach((choice, index) => {
+          console.log(`  ${index + 1}. ${choice.title}`);
+        });
+        const input = (await ask(`> [${Number(question.initial || 0) + 1}]: `)).trim();
+        const index = input ? Number(input) - 1 : Number(question.initial || 0);
+        answers[question.name] = question.choices[Math.max(0, Math.min(question.choices.length - 1, index))]?.value;
+        continue;
+      }
+
+      if (question.type === 'toggle') {
+        const initial = question.initial ? question.active : question.inactive;
+        const input = (await ask(`${question.message} (${question.active}/${question.inactive}) [${initial}]: `)).trim().toLowerCase();
+        answers[question.name] = input
+          ? input === question.active.toLowerCase() || input === 'y' || input === 'yes' || input === '1' || input === 'true'
+          : Boolean(question.initial);
+        continue;
+      }
+
+      const suffix = question.initial !== undefined ? ` [${String(question.initial)}]` : '';
+      const raw = await ask(`${question.message}${suffix}: `);
+      const value = raw === '' && question.initial !== undefined ? question.initial : raw;
+
+      if (value === '\u0003') {
+        options?.onCancel?.();
+      }
+
+      if (question.type === 'number') {
+        answers[question.name] = Number(value);
+        continue;
+      }
+
+      if ((question.type === 'text' || question.type === 'password') && question.validate) {
+        const validation = question.validate(String(value));
+        if (validation !== true) {
+          console.log(validation);
+          const retry = await fallbackPrompt(question, options);
+          answers[question.name] = retry[question.name];
+          continue;
+        }
+      }
+
+      answers[question.name] = value;
+    }
+  } finally {
+    rl.close();
+  }
+
+  return answers;
+}
+
+async function prompt(questions: PromptQuestion | PromptQuestion[], options?: { onCancel?: () => void }) {
+  const promptsImpl = await loadPrompts();
+  if (promptsImpl) {
+    return promptsImpl(questions as any, options);
+  }
+  return fallbackPrompt(questions, options);
+}
+
 function getPromptOptions(locale: Locale) {
   return {
     onCancel: () => {
@@ -133,47 +459,9 @@ function getPromptOptions(locale: Locale) {
   };
 }
 
-async function ensureRuntimeDirs() {
-  await Promise.all([
-    mkdir(getAceDirectory('workspace'), { recursive: true }),
-    mkdir(getAceDirectory('config'), { recursive: true }),
-    mkdir(getDataDir(), { recursive: true }),
-    mkdir(getAceDirectory('cache'), { recursive: true }),
-    mkdir(getAceDirectory('logs'), { recursive: true }),
-    mkdir(getNotebookDataRoot(), { recursive: true }),
-  ]);
-}
-
-async function loadAppConfig(): Promise<AppConfig> {
-  if (!existsSync(getAppConfigPath())) return {};
-  try {
-    return JSON.parse(await readFile(getAppConfigPath(), 'utf-8')) as AppConfig;
-  } catch {
-    return {};
-  }
-}
-
-async function saveAppConfig(config: AppConfig) {
-  await writeFile(getAppConfigPath(), JSON.stringify(config, null, 2), 'utf-8');
-  if (config.engine) {
-    await writeFile(getEngineConfigPath(), JSON.stringify({ engine: config.engine, updatedAt: new Date().toISOString() }, null, 2), 'utf-8');
-  }
-}
-
-async function detectEngines() {
-  const engines = getConcreteEngines();
-  const availability = await Promise.all(
-    engines.map(async (engine) => ({
-      ...engine,
-      available: await isEngineAvailable(engine.id),
-    }))
-  );
-  return availability;
-}
-
 async function promptForLocale(initialLocale: Locale): Promise<Locale> {
   const messages = getLocaleMessages(initialLocale);
-  const answer = await prompts({
+  const answer = await prompt({
     type: 'select',
     name: 'value',
     message: messages.languagePrompt,
@@ -184,7 +472,7 @@ async function promptForLocale(initialLocale: Locale): Promise<Locale> {
   return normalizeLocale(answer.value);
 }
 
-function buildAdminPrompts(messages: CliMessages) {
+function buildAdminPrompts(messages: CliMessages): PromptQuestion[] {
   return [
     {
       type: 'text',
@@ -221,80 +509,9 @@ function buildAdminPrompts(messages: CliMessages) {
   ];
 }
 
-async function runFirstLaunchWizard() {
-  await ensureRuntimeDirs();
-
-  const settings = await loadSystemSettings();
-  const appConfig = await loadAppConfig();
-  const adminExists = await isSetup();
-
-  const initialLocale = normalizeLocale(settings.locale);
-  const locale = await promptForLocale(initialLocale);
+async function promptForNetworkSettings(settings: SystemSettings, locale: Locale): Promise<SystemSettings> {
   const messages = getLocaleMessages(locale);
-
-  console.log(messages.welcome);
-  console.log(`[ACE] ${messages.runtimeHome}: ${getAceDirectory('workspace')}`);
-
-  const shouldDetectEnginesAnswer = await prompts({
-    type: 'toggle',
-    name: 'value',
-    message: messages.detectEngines,
-    initial: true,
-    active: messages.yes,
-    inactive: messages.skip,
-  }, getPromptOptions(locale));
-
-  const shouldDetectEngines = Boolean(shouldDetectEnginesAnswer.value);
-  const detected = shouldDetectEngines ? await detectEngines() : [];
-  const availableChoices = detected.filter((item) => item.available);
-
-  let selectedEngine = appConfig.engine || 'claude-code';
-  if (shouldDetectEngines) {
-    if (availableChoices.length > 0) {
-      const engineAnswer = await prompts({
-        type: 'select',
-        name: 'value',
-        message: messages.chooseEngine,
-        choices: [
-          { title: messages.skipKeepDefault, value: '__skip__' },
-          ...availableChoices.map((item) => ({ title: item.name, value: item.id })),
-        ],
-        initial: Math.max(availableChoices.findIndex((item) => item.id === selectedEngine) + 1, 0),
-      }, getPromptOptions(locale));
-
-      if (engineAnswer.value && engineAnswer.value !== '__skip__') {
-        selectedEngine = engineAnswer.value as EngineType;
-      }
-    } else {
-      console.log(messages.noEnginesDetected);
-    }
-  }
-
-  if (!adminExists) {
-    const adminAnswer = await prompts({
-      type: 'toggle',
-      name: 'value',
-      message: messages.createAdmin,
-      initial: false,
-      active: messages.yes,
-      inactive: messages.skip,
-    }, getPromptOptions(locale));
-
-    if (adminAnswer.value) {
-      const adminForm = await prompts(buildAdminPrompts(messages), getPromptOptions(locale));
-
-      await setupFirstAdmin({
-        username: adminForm.username.trim(),
-        email: adminForm.email.trim(),
-        password: adminForm.password,
-        question: adminForm.question.trim(),
-        answer: adminForm.answer.trim(),
-        personalDir: '',
-      });
-    }
-  }
-
-  const networkForm = await prompts([
+  const networkForm = await prompt([
     {
       type: 'number',
       name: 'port',
@@ -313,18 +530,103 @@ async function runFirstLaunchWizard() {
     },
   ], getPromptOptions(locale));
 
-  await saveAppConfig({
-    ...appConfig,
-    engine: selectedEngine,
-  });
+  const lanAccess = Boolean(networkForm.lanAccess);
+  return {
+    ...settings,
+    locale,
+    port: Number(networkForm.port || settings.port || 3000),
+    lanAccess,
+    host: lanAccess ? '0.0.0.0' : '127.0.0.1',
+  };
+}
+
+async function runFirstLaunchWizard() {
+  const settings = await loadSystemSettings();
+  const configuredEngine = await loadConfiguredEngine();
+  const adminExists = await isSetup();
+
+  const initialLocale = normalizeLocale(settings.locale);
+  const locale = settings.locale ? initialLocale : await promptForLocale(initialLocale);
+  const messages = getLocaleMessages(locale);
+
+  console.log(messages.welcome);
+  console.log(messages.statusLabel);
+  console.log(`  ${messages.localeStatus(formatLocaleLabel(settings.locale ? initialLocale : undefined))}`);
+  console.log(`  ${messages.engineStatus(configuredEngine ? formatEngineLabel(configuredEngine) : '未设置')}`);
+  console.log(`  ${messages.adminStatus(adminExists)}`);
+  const { verbose } = parseArgs(process.argv);
+  if (verbose) {
+    console.log(`[ACE] ${messages.runtimeHome}: ${getWorkspaceDirectory('workspace')}`);
+  }
+
+  let selectedEngine = configuredEngine || 'claude-code';
+  if (!configuredEngine) {
+    const shouldDetectEnginesAnswer = await prompt({
+      type: 'toggle',
+      name: 'value',
+      message: messages.detectEngines,
+      initial: true,
+      active: messages.yes,
+      inactive: messages.skip,
+    }, getPromptOptions(locale));
+
+    const shouldDetectEngines = Boolean(shouldDetectEnginesAnswer.value);
+    const detected = shouldDetectEngines ? await detectEngines() : [];
+    const availableChoices = detected.filter((item) => item.available);
+
+    if (shouldDetectEngines) {
+      if (availableChoices.length > 0) {
+        const engineAnswer = await prompt({
+          type: 'select',
+          name: 'value',
+          message: messages.chooseEngine,
+          choices: [
+            { title: messages.skipKeepDefault, value: '__skip__' },
+            ...availableChoices.map((item) => ({ title: item.name, value: item.id })),
+          ],
+          initial: Math.max(availableChoices.findIndex((item) => item.id === selectedEngine) + 1, 0),
+        }, getPromptOptions(locale));
+
+        if (engineAnswer.value && engineAnswer.value !== '__skip__') {
+          selectedEngine = engineAnswer.value as EngineType;
+        }
+      } else {
+        console.log(messages.noEnginesDetected);
+      }
+    }
+  }
+
+  if (!adminExists) {
+    const adminAnswer = await prompt({
+      type: 'toggle',
+      name: 'value',
+      message: messages.createAdmin,
+      initial: false,
+      active: messages.yes,
+      inactive: messages.skip,
+    }, getPromptOptions(locale));
+
+    if (adminAnswer.value) {
+      const adminForm = await prompt(buildAdminPrompts(messages), getPromptOptions(locale));
+
+      await setupFirstAdmin({
+        username: String(adminForm.username).trim(),
+        email: String(adminForm.email).trim(),
+        password: String(adminForm.password),
+        question: String(adminForm.question).trim(),
+        answer: String(adminForm.answer).trim(),
+        personalDir: '',
+      });
+    }
+  }
+
+  if (!configuredEngine) {
+    await saveConfiguredEngine(selectedEngine);
+  }
 
   await saveSystemSettings({
     ...settings,
     locale,
-    port: Number(networkForm.port || settings.port || 3000),
-    lanAccess: Boolean(networkForm.lanAccess),
-    host: networkForm.lanAccess ? '0.0.0.0' : '127.0.0.1',
-    onboardingCompleted: true,
   });
 }
 
@@ -333,20 +635,52 @@ async function syncBrowserLocale(settings: SystemSettings) {
   process.env.ACE_LOCALE = settings.locale;
 }
 
+function tryOpenBrowser(url: string): boolean {
+  const commands: Array<[string, string[]]> = process.platform === 'darwin'
+    ? [['open', [url]]]
+    : process.platform === 'win32'
+      ? [['cmd', ['/c', 'start', '', url]]]
+      : [['xdg-open', [url]]];
+
+  for (const [command, args] of commands) {
+    if (!commandExists(command)) {
+      continue;
+    }
+
+    try {
+      const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+      child.on('error', () => {
+        // ignore launcher failures and fall back to printing the URL
+      });
+      child.unref();
+      return true;
+    } catch {
+      // ignore and fall through
+    }
+  }
+
+  return false;
+}
+
 async function start() {
-  await ensureRuntimeDirs();
   const settings = await loadSystemSettings();
-  if (!settings.onboardingCompleted) {
+  const configuredEngine = await loadConfiguredEngine();
+  const adminExists = await isSetup();
+  if (!settings.locale || !configuredEngine || !adminExists) {
     await runFirstLaunchWizard();
   }
 
   const nextSettings = await loadSystemSettings();
   const locale = normalizeLocale(nextSettings.locale);
+  const updatedSettings = await promptForNetworkSettings(nextSettings, locale);
+  await saveSystemSettings({
+    ...updatedSettings,
+  });
   const messages = getLocaleMessages(locale);
-  await syncBrowserLocale({ ...nextSettings, locale });
+  await syncBrowserLocale({ ...updatedSettings, locale });
 
-  process.env.ACE_HOST = nextSettings.host || (nextSettings.lanAccess ? '0.0.0.0' : '127.0.0.1');
-  process.env.ACE_PORT = String(nextSettings.port || 3000);
+  process.env.ACE_HOST = updatedSettings.host || (updatedSettings.lanAccess ? '0.0.0.0' : '127.0.0.1');
+  process.env.ACE_PORT = String(updatedSettings.port || 3000);
   process.env.PORT = process.env.ACE_PORT;
   process.env = {
     ...process.env,
@@ -357,19 +691,28 @@ async function start() {
   const url = `http://${urlHost}:${process.env.ACE_PORT}`;
 
   setTimeout(() => {
-    open(url).catch(() => {
+    if (!tryOpenBrowser(url)) {
       console.log(messages.openBrowserFallback(url));
-    });
+    }
   }, 1200);
 
   console.log(messages.startingServer(url));
-  process.chdir(getRepoRoot());
-  await import('../server.js');
+  require('../server.js');
 }
 
-start().catch((error) => {
+async function main() {
+  const { command, force } = parseArgs(process.argv);
+  if (command === 'reset') {
+    await resetAceState(force);
+    return;
+  }
+
+  await start();
+}
+
+main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
-  const locale = normalizeLocale(process.env.ACE_LOCALE);
+  const locale = resolveCliLocale();
   console.error(getLocaleMessages(locale).failedToStart(message));
   process.exit(1);
 });

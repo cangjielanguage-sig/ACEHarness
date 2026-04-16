@@ -1,13 +1,18 @@
 {
   "name": "aceharness",
-  "version": "1.0.0",
+  "version": "1.0.0-beta.0",
   "description": "ACEHarness - Agent Centric Engineering Harness (From Cangjie Team)",
   "scripts": {
+    "build:cli": "node scripts/build-cli.js",
     "dev": "node server.js dev",
-    "build": "next build",
+    "build": "npm run build:cli && next build",
     "start": "node server.js",
     "lint": "next lint",
-    "ace": "node ./bin/ace.js"
+    "ace": "node ./bin/ace.js",
+    "prepare": "node scripts/build-cli.js",
+    "prepack": "npm run build",
+    "publish:npm": "npm run build && npm publish",
+    "publish:beta": "npm run build && npm publish --tag beta"
   },
   "keywords": [
     "ai",
@@ -125,6 +130,16 @@
     "typescript": "^5.0.0"
   },
   "main": "server.js",
+  "files": [
+    "bin",
+    "dist",
+    "server.js",
+    "public",
+    ".next",
+    "skills",
+    "configs",
+    "messages"
+  ],
   "bin": {
     "ace": "./bin/ace.js"
   },

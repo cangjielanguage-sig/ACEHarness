@@ -3,8 +3,9 @@ import fs from 'fs/promises';
 import { existsSync, symlinkSync, mkdirSync, lstatSync, readlinkSync } from 'fs';
 import path from 'path';
 import { getEngineConfigDir } from '@/lib/engines/engine-config';
+import { getEngineConfigPath } from '@/lib/app-paths';
 
-const ENGINE_CONFIG_FILE = path.join(process.cwd(), '.engine.json');
+const ENGINE_CONFIG_FILE = getEngineConfigPath();
 const SKILLS_DIR = path.join(process.cwd(), 'skills');
 
 interface EngineConfig {
