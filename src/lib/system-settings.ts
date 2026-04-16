@@ -1,11 +1,17 @@
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import { dirname, resolve } from 'path';
+import { dirname } from 'path';
 import { parse, stringify } from 'yaml';
+import { getAceDataFile } from '@/lib/app-paths';
 
-const SYSTEM_SETTINGS_PATH = resolve(process.cwd(), 'data', 'system-settings.yaml');
+const SYSTEM_SETTINGS_PATH = getAceDataFile('system-settings.yaml');
 
 export interface SystemSettings {
   gitcodeToken?: string;
+  host?: string;
+  port?: number;
+  lanAccess?: boolean;
+  onboardingCompleted?: boolean;
+  locale?: 'zh' | 'en';
 }
 
 async function readSystemSettings(): Promise<SystemSettings> {

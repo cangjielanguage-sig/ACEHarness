@@ -7,14 +7,16 @@ export async function runNodejsInstrumentation() {
   const { existsSync, symlinkSync, mkdirSync, lstatSync, readlinkSync } = await import('fs');
   const { join } = await import('path');
   const { getEngineConfigDir } = await import('./engines/engine-config');
+  const { getAceDirectory, getEngineConfigPath } = await import('./app-paths');
 
   const WORKSPACE_ROOT = process.cwd();
   const SKILLS_DIR = join(WORKSPACE_ROOT, 'skills');
+  const aceConfigDir = getAceDirectory('config');
 
-  // Determine engine-aware config directory from .engine.json
+  // Determine engine-aware config directory from persisted engine config
   let engineConfigDir = '.claude';
   try {
-    const engineJson = join(WORKSPACE_ROOT, '.engine.json');
+    const engineJson = getEngineConfigPath();
     if (existsSync(engineJson)) {
       const { readFileSync } = await import('fs');
       const config = JSON.parse(readFileSync(engineJson, 'utf-8'));
@@ -23,7 +25,7 @@ export async function runNodejsInstrumentation() {
   } catch { /* use default */ }
 
   // Create engine config dir (e.g. .kiro/) and symlink skills/ into it
-  const configDir = join(WORKSPACE_ROOT, engineConfigDir);
+  const configDir = join(aceConfigDir, engineConfigDir);
   try {
     if (!existsSync(configDir)) {
       mkdirSync(configDir, { recursive: true });

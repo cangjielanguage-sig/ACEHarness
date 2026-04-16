@@ -7,6 +7,7 @@
 import { readFile } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { getEngineConfigPath } from '@/lib/app-paths';
 import type { Engine } from './engine-interface';
 import { KiroCliEngineWrapper } from './kiro-cli-wrapper';
 import { CangjieMagicEngineWrapper } from './cangjie-magic-wrapper';
@@ -26,7 +27,8 @@ interface EngineConfig {
  * Get the configured engine type
  */
 export async function getConfiguredEngine(): Promise<EngineType> {
-  const configPath = resolve(process.cwd(), '.engine.json');
+  const configPath = getEngineConfigPath();
+  const legacyConfigPath = resolve(process.cwd(), '.engine.json');
 
   if (existsSync(configPath)) {
     try {
@@ -35,6 +37,16 @@ export async function getConfiguredEngine(): Promise<EngineType> {
       return config.engine || 'claude-code';
     } catch (error) {
       console.warn('Failed to read engine config, using default:', error);
+    }
+  }
+
+  if (existsSync(legacyConfigPath)) {
+    try {
+      const content = await readFile(legacyConfigPath, 'utf-8');
+      const config: EngineConfig = JSON.parse(content);
+      return config.engine || 'claude-code';
+    } catch (error) {
+      console.warn('Failed to read legacy engine config, using default:', error);
     }
   }
 

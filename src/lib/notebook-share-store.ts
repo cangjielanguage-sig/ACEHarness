@@ -1,10 +1,10 @@
 import { createHash, randomBytes } from 'crypto';
 import { existsSync } from 'fs';
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import { resolve } from 'path';
 import type { NotebookScope } from './notebook-manager';
+import { getAceDataFile, getDataDir } from '@/lib/app-paths';
 
-const SHARES_FILE = resolve(process.cwd(), 'data', 'notebook-shares.json');
+const SHARES_FILE = getAceDataFile('notebook-shares.json');
 
 export type NotebookSharePermission = 'read' | 'write';
 
@@ -39,7 +39,7 @@ async function loadShares(): Promise<NotebookShare[]> {
 }
 
 async function saveShares(shares: NotebookShare[]): Promise<void> {
-  await mkdir(resolve(process.cwd(), 'data'), { recursive: true });
+  await mkdir(getDataDir(), { recursive: true });
   await writeFile(SHARES_FILE, JSON.stringify(shares, null, 2), 'utf-8');
 }
 
