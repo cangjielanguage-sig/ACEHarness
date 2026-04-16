@@ -2,21 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { deleteRun } from '@/lib/run-store';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
-import { readFile, rm } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { parse } from 'yaml';
 import { workflowRegistry } from '@/lib/workflow-registry';
 
 const RUNS_DIR = resolve(process.cwd(), 'runs');
 
-function normalizeWorkDirPath(raw: string | null): string | null {
-  if (!raw) return null;
-  return raw.startsWith('/') ? raw : resolve(process.cwd(), raw);
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { action, runIds, cleanWorkDir } = body;
+    const { action, runIds } = body;
 
     if (action !== 'delete') {
       return NextResponse.json(
@@ -37,31 +32,22 @@ export async function POST(request: NextRequest) {
 
     for (const runId of runIds) {
       try {
-        // If cleanWorkDir, read state.yaml for workingDirectory and stop if running
-        if (cleanWorkDir) {
-          try {
-            const stateFile = resolve(RUNS_DIR, runId, 'state.yaml');
-            if (existsSync(stateFile)) {
-              const content = await readFile(stateFile, 'utf-8');
-              const state = parse(content);
-              // Stop if running
-              if (state.configFile) {
-                try {
-                  const manager = await workflowRegistry.getManager(state.configFile);
-                  const status = manager.getStatus();
-                  if (status.runId === runId && (status.status === 'running' || status.status === 'preparing')) {
-                    await manager.stop();
-                  }
-                } catch { /* ignore */ }
-              }
-              // Clean working directory
-              const workDir = normalizeWorkDirPath(state.workingDirectory || null);
-              if (workDir && existsSync(workDir)) {
-                await rm(workDir, { recursive: true, force: true });
-              }
+        try {
+          const stateFile = resolve(RUNS_DIR, runId, 'state.yaml');
+          if (existsSync(stateFile)) {
+            const content = await readFile(stateFile, 'utf-8');
+            const state = parse(content);
+            if (state.configFile) {
+              try {
+                const manager = await workflowRegistry.getManager(state.configFile);
+                const status = manager.getStatus();
+                if (status.runId === runId && (status.status === 'running' || status.status === 'preparing')) {
+                  await manager.stop();
+                }
+              } catch { /* ignore */ }
             }
-          } catch { /* ignore */ }
-        }
+          }
+        } catch { /* ignore */ }
         await deleteRun(runId);
         deletedCount++;
       } catch (error: any) {

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import WorkflowModeSelector from './WorkflowModeSelector';
 import { EngineModelSelect } from './EngineModelSelect';
 import { ComboboxPortalProvider } from './ui/combobox';
@@ -74,9 +75,11 @@ export default function NewConfigModal({
     defaultValues: {
       mode: 'phase-based',
       workingDirectory: '',
+      workspaceMode: 'in-place',
     },
   });
   const workingDirectoryValue = watch('workingDirectory');
+  const workspaceModeValue = watch('workspaceMode');
 
   const generateDefaultFilename = useCallback(() => {
     const now = new Date();
@@ -97,7 +100,7 @@ export default function NewConfigModal({
   }, [generateDefaultFilename, getValues, isOpen, setValue]);
 
   const applySchemaIssues = useCallback((issues: Array<{ path?: (string | number)[]; message?: string }>) => {
-    const supported = ['filename', 'workflowName', 'workingDirectory', 'description', 'requirements', 'mode'];
+    const supported = ['filename', 'workflowName', 'workingDirectory', 'workspaceMode', 'description', 'requirements', 'mode'];
     clearErrors();
     const messages: string[] = [];
     for (const issue of issues) {
@@ -300,6 +303,7 @@ export default function NewConfigModal({
 **目标文件名**: configs/${filename}
 **工作流名称**: ${data.workflowName}
 **工作目录**: ${workDir}
+**工作区模式**: ${data.workspaceMode === 'isolated-copy' ? '创建副本工程后执行（isolated-copy）' : '直接在工作目录执行（in-place）'}
 **需求描述**: ${reqs}
 ${data.description ? `**补充说明**: ${data.description}` : ''}
 
@@ -330,6 +334,7 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
       filename: draft.filename,
       workflowName: draft.workflowName,
       workingDirectory: draft.workingDirectory,
+      workspaceMode: draft.workspaceMode,
       description: draft.description,
       requirements: draft.requirements,
       mode: workflowMode,
@@ -400,7 +405,7 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
         if (details.length > 0) {
           for (const issue of details) {
             const field = issue?.path?.[0];
-            if (typeof field === 'string' && ['filename', 'workflowName', 'workingDirectory', 'description', 'requirements', 'mode'].includes(field)) {
+            if (typeof field === 'string' && ['filename', 'workflowName', 'workingDirectory', 'workspaceMode', 'description', 'requirements', 'mode'].includes(field)) {
               setError(field as keyof NewConfigForm, { type: 'server', message: issue.message });
             }
           }
@@ -424,6 +429,7 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
       formErrors.filename?.message,
       formErrors.workflowName?.message,
       formErrors.workingDirectory?.message,
+      formErrors.workspaceMode?.message,
       formErrors.description?.message,
       formErrors.requirements?.message,
     ].filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
@@ -743,6 +749,32 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
             )}
             <p className="text-xs text-muted-foreground">
               工作流执行时的工作目录
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="workspaceMode">
+              工作区模式 <span className="text-destructive">*</span>
+            </Label>
+            <Select
+              value={workspaceModeValue}
+              onValueChange={(value: 'isolated-copy' | 'in-place') => {
+                setValue('workspaceMode', value, { shouldDirty: true, shouldValidate: true });
+              }}
+            >
+              <SelectTrigger id="workspaceMode" className={errors.workspaceMode ? 'border-destructive' : ''}>
+                <SelectValue placeholder="选择工作区模式" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="in-place">直接在工作目录执行</SelectItem>
+                <SelectItem value="isolated-copy">先创建副本工程再执行</SelectItem>
+              </SelectContent>
+            </Select>
+            {errors.workspaceMode && (
+              <p className="text-sm text-destructive">{errors.workspaceMode.message}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              推荐默认直接在工作目录执行；只有需要隔离原工程时再选择创建副本
             </p>
           </div>
 

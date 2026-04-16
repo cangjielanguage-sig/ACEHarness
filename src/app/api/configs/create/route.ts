@@ -7,7 +7,7 @@ import { ZodError } from 'zod';
 import { requireAuth } from '@/lib/auth-middleware';
 import { setConfigMeta } from '@/lib/config-metadata';
 
-function createPhaseBasedConfig(workflowName: string, workingDirectory: string, description?: string) {
+function createPhaseBasedConfig(workflowName: string, workingDirectory: string, workspaceMode: 'isolated-copy' | 'in-place', description?: string) {
   return {
     workflow: {
       name: workflowName,
@@ -27,12 +27,13 @@ function createPhaseBasedConfig(workflowName: string, workingDirectory: string, 
     },
     context: {
       projectRoot: workingDirectory,
+      workspaceMode,
       requirements: '',
     },
   };
 }
 
-function createStateMachineConfig(workflowName: string, workingDirectory: string, description?: string) {
+function createStateMachineConfig(workflowName: string, workingDirectory: string, workspaceMode: 'isolated-copy' | 'in-place', description?: string) {
   return {
     workflow: {
       name: workflowName,
@@ -111,6 +112,7 @@ function createStateMachineConfig(workflowName: string, workingDirectory: string
     },
     context: {
       projectRoot: workingDirectory,
+      workspaceMode,
       requirements: '',
     },
   };
@@ -135,7 +137,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { filename, workflowName, workingDirectory, description, mode, requirements } = validationResult.data;
+    const { filename, workflowName, workingDirectory, workspaceMode, description, mode, requirements } = validationResult.data;
     const workflowMode = mode || 'phase-based';
 
     // 检查文件是否已存在
@@ -159,7 +161,7 @@ export async function POST(request: NextRequest) {
         const response = await fetch(`http://localhost:${port}/api/configs/ai-generate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requirements, workflowName, filename }),
+          body: JSON.stringify({ requirements, workflowName, filename, workspaceMode }),
         });
         const result = await response.json();
         if (!response.ok || !result.success) {
@@ -171,12 +173,12 @@ export async function POST(request: NextRequest) {
         defaultConfig = result.config;
       } catch (e) {
         // 如果 AI 生成失败，使用默认模板
-        defaultConfig = createPhaseBasedConfig(workflowName, workingDirectory, description);
+        defaultConfig = createPhaseBasedConfig(workflowName, workingDirectory, workspaceMode, description);
       }
     } else if (workflowMode === 'state-machine') {
-      defaultConfig = createStateMachineConfig(workflowName, workingDirectory, description);
+      defaultConfig = createStateMachineConfig(workflowName, workingDirectory, workspaceMode, description);
     } else {
-      defaultConfig = createPhaseBasedConfig(workflowName, workingDirectory, description);
+      defaultConfig = createPhaseBasedConfig(workflowName, workingDirectory, workspaceMode, description);
     }
 
     const yamlContent = stringify(defaultConfig);

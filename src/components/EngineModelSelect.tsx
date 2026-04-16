@@ -88,10 +88,9 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
     return result;
   }, [models, globalEngine, globalLabel]);
 
-  const engineInfo = getEngineMeta(effectiveEngine);
   const modelLabel = models.find(m => m.value === model)?.label || model || '选择模型';
-  const isFollowSystem = !engine;
-  const placeholder = isFollowSystem ? `跟随系统 / ${modelLabel}` : `${engineInfo?.name || effectiveEngine} / ${modelLabel}`;
+  const triggerLabel = modelLabel;
+  const triggerIcon = <EngineIcon engineId={effectiveEngine} className="h-4 w-4" />;
 
   const handleValueChange = (val: string) => {
     if (!val) return;
@@ -111,7 +110,8 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
       value={compositeValue}
       onValueChange={handleValueChange}
       groups={groups}
-      placeholder={placeholder}
+      triggerLabel={triggerLabel}
+      triggerIcon={triggerIcon}
       triggerClassName={`h-8 text-xs ${className}`}
     />
   );

@@ -5,7 +5,6 @@ import { useChat } from '@/contexts/ChatContext';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
-import WorkspaceDirectoryPicker from '@/components/common/WorkspaceDirectoryPicker';
 import { RobotLogo } from './ChatMessage';
 
 interface SessionSummaryItem {
@@ -25,11 +24,9 @@ type SkillItem = {
 };
 
 export default function ChatSidebar() {
-  const { sessions, activeSessionId, setActiveSessionId, createSession, deleteSession, renameSession, skillSettings, discoveredSkills, toggleSkill, workingDirectory, setWorkingDirectory } = useChat();
+  const { sessions, activeSessionId, setActiveSessionId, createSession, deleteSession, renameSession, skillSettings, discoveredSkills, toggleSkill } = useChat();
   const [skillModalOpen, setSkillModalOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [editingCwd, setEditingCwd] = useState(false);
-  const [cwdInput, setCwdInput] = useState('');
 
   const enabledCount = discoveredSkills.filter(s => !!skillSettings[s.name]).length;
 
@@ -130,67 +127,6 @@ export default function ChatSidebar() {
           </button>
         </div>
       )}
-
-      {/* 工作目录 */}
-      <div className="border-t p-3">
-        {editingCwd ? (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-1.5 px-2">
-              <span className="material-symbols-outlined text-sm text-muted-foreground">folder</span>
-              <span className="text-xs font-semibold text-muted-foreground">工作目录</span>
-            </div>
-            <Input
-              value={cwdInput}
-              onChange={(e) => setCwdInput(e.target.value)}
-              placeholder="留空使用默认目录"
-              className="h-7 text-xs"
-            />
-            <WorkspaceDirectoryPicker
-              workspaceRoot="/"
-              value={cwdInput}
-              onChange={setCwdInput}
-              className="h-52"
-            />
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => {
-                  setCwdInput(workingDirectory);
-                  setEditingCwd(false);
-                }}
-              >
-                取消
-              </Button>
-              <Button
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => {
-                  setWorkingDirectory(cwdInput.trim());
-                  setEditingCwd(false);
-                }}
-              >
-                确定
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <button
-            className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-muted/60 transition-colors"
-            onClick={() => { setCwdInput(workingDirectory); setEditingCwd(true); }}
-          >
-            <div className="flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-sm text-muted-foreground">folder</span>
-              <span className="text-xs font-semibold text-muted-foreground">工作目录</span>
-            </div>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-mono truncate max-w-[120px]" title={workingDirectory || '默认'}>
-              {workingDirectory ? workingDirectory.split('/').pop() : '默认'}
-            </span>
-          </button>
-        )}
-      </div>
-
       {/* Skills 管理弹窗 */}
       {skillModalOpen && (
         <SkillManagerModal

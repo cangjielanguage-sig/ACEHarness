@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { Children, isValidElement, useMemo, useState, useCallback, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -146,6 +146,18 @@ function NotebookOutputDetails({ node, children, ...props }: any) {
   );
 }
 
+function renderMarkdownFragment(content: string) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeRaw, rehypePreserveUnknownHtmlAsText]}
+      components={components}
+    >
+      {preprocessMarkdown(content)}
+    </ReactMarkdown>
+  );
+}
+
 function normalizeLanguage(language: string) {
   if (language === 'cangjie') return cangjieLanguageRegistered ? 'cangjie' : 'text';
   if (language === 'shell') return 'bash';
@@ -271,7 +283,29 @@ const components = {
     );
   },
   details({ node, children, ...props }: any) {
-    return <NotebookOutputDetails node={node} {...props}>{children}</NotebookOutputDetails>;
+    if (node?.properties?.[NOTEBOOK_OUTPUT_ATTR] === 'true') {
+      return <NotebookOutputDetails node={node} {...props}>{children}</NotebookOutputDetails>;
+    }
+
+    const parts = Children.toArray(children);
+    const summaryNode = parts.find((child) => isValidElement(child) && child.type === 'summary') || null;
+    const bodyText = parts
+      .filter((child) => child !== summaryNode && typeof child === 'string')
+      .join('')
+      .trim();
+    const bodyNodes = parts.filter((child) => child !== summaryNode && typeof child !== 'string');
+
+    return (
+      <details className="my-2 border border-border/50 rounded-md" {...props}>
+        {summaryNode}
+        {(bodyText || bodyNodes.length > 0) && (
+          <div className="px-3 py-2">
+            {bodyText ? renderMarkdownFragment(bodyText) : null}
+            {bodyNodes}
+          </div>
+        )}
+      </details>
+    );
   },
   summary({ children, ...props }: any) {
     return (
@@ -458,13 +492,7 @@ export default function Markdown({ children }: { children: string }) {
 
   return (
     <div className={styles.markdownContent}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw, rehypePreserveUnknownHtmlAsText]}
-        components={components}
-      >
-        {processedContent}
-      </ReactMarkdown>
+      {renderMarkdownFragment(processedContent)}
     </div>
   );
 }

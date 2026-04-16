@@ -1,7 +1,7 @@
 {
   "dashboard": {
     "title": "ACEHarness 控制中心",
-    "subtitle": "全流程 Multi-Agent 智能编排系统",
+    "subtitle": "Your team of AIs, collaborating to get work done.",
     "stats": {
       "totalRuns": "总运行次数",
       "successRate": "成功率",

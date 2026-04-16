@@ -185,7 +185,7 @@ export default function SetupPage() {
               <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
                 ACEHarness
               </h1>
-              <p className="text-xs text-muted-foreground">全流程 Multi-Agent 智能编排系统</p>
+              <p className="text-xs text-muted-foreground">Your team of AIs, collaborating to get work done.</p>
             </div>
           </div>
 
@@ -339,7 +339,7 @@ export default function SetupPage() {
               <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
                 ACEHarness
               </h1>
-              <p className="text-xs text-muted-foreground">全流程 Multi-Agent 智能编排系统</p>
+              <p className="text-xs text-muted-foreground">Your team of AIs, collaborating to get work done.</p>
             </div>
           </div>
 

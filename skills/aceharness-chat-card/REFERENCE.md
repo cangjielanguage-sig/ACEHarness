@@ -93,7 +93,7 @@ Badge 和 Status 支持以下预设颜色名：
 使用 `scripts/validate-card.mjs` 校验 card JSON：
 
 ```bash
-echo '{"header":{"title":"test"},"blocks":[]}' | node scripts/validate-card.mjs
+echo '{"header":{"title":"test"},"blocks":[]}' | node /absolute/path/to/skills/aceharness-chat-card/scripts/validate-card.mjs
 ```
 
 校验内容：
