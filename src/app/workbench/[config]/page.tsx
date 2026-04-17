@@ -34,6 +34,7 @@ import { WorkspaceEditor } from '@/components/workspace/WorkspaceEditor';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Switch } from '@/components/ui/switch';
 import { EngineSelect } from '@/components/EngineSelect';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import WorkspaceDirectoryPicker from '@/components/common/WorkspaceDirectoryPicker';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -203,7 +204,7 @@ export default function WorkbenchPage() {
     viewMode, workflowConfig, editingConfig, agentConfigs,
     workflowStatus, runId, currentPhase, currentStep, agents, logs, completedSteps, failedSteps,
     showCheckpoint, checkpointMessage, checkpointIsIterative, activeTab, selectedAgent, selectedStep,
-    projectRoot, requirements, timeoutMinutes, engine, skills, showProcessPanel,
+    projectRoot, workspaceMode, requirements, timeoutMinutes, engine, skills, showProcessPanel,
     showEditNodeModal, editingNode, iterationStates, stepResults, stepIdMap,
     globalContext, phaseContexts,
   } = state;
@@ -674,6 +675,7 @@ export default function WorkbenchPage() {
       dispatch({ type: 'SET_EDITING_CONFIG', payload: config });
       dispatch({ type: 'SET_AGENTS_CONFIG', payload: loadedAgents || [] });
       dispatch({ type: 'SET_PROJECT_ROOT', payload: config.context?.projectRoot || '' });
+      dispatch({ type: 'SET_WORKSPACE_MODE', payload: config.context?.workspaceMode || 'isolated-copy' });
       dispatch({ type: 'SET_REQUIREMENTS', payload: config.context?.requirements || '' });
       dispatch({ type: 'SET_TIMEOUT_MINUTES', payload: config.context?.timeoutMinutes || 30 });
       dispatch({ type: 'SET_ENGINE', payload: config.context?.engine || '' });
@@ -956,6 +958,7 @@ export default function WorkbenchPage() {
           ...(workflowConfig.context || {}),
           ...(editingConfig?.context || {}),
           projectRoot,
+          workspaceMode,
           requirements,
           timeoutMinutes,
           engine: engine || undefined,
@@ -1217,13 +1220,6 @@ export default function WorkbenchPage() {
   };
 
   const handleDeleteRun = async (runId: string) => {
-    // Fetch run detail to get workingDirectory path
-    let workingDir: string | null = null;
-    try {
-      const detail = await runsApi.getRunDetail(runId);
-      workingDir = detail?.workingDirectory || null;
-    } catch { /* ignore */ }
-
     const confirmed = await confirm({
       title: '删除运行记录',
       description: '确定要删除这个运行记录吗？此操作不可撤销。',
@@ -1233,20 +1229,9 @@ export default function WorkbenchPage() {
     });
     if (!confirmed) return;
 
-    // Always ask whether to also clean the working directory.
-    const cleanWorkDir = await confirm({
-      title: '清理工作目录',
-      description: workingDir
-        ? `是否删除当前运行记录的工作目录 ${workingDir} ？`
-        : '是否同时删除该运行关联的工作目录（若存在）？',
-      confirmLabel: '删除工作目录',
-      cancelLabel: '仅删除记录',
-      variant: 'destructive',
-    });
-
     try {
-      await runsApi.deleteRun(runId, cleanWorkDir);
-      toast('success', cleanWorkDir ? '运行记录和工作目录已删除' : '运行记录已删除');
+      await runsApi.deleteRun(runId);
+      toast('success', '运行记录已删除');
       // Reload history
       await loadHistory();
     } catch (error: any) {
@@ -1333,17 +1318,9 @@ export default function WorkbenchPage() {
     });
     if (!confirmed) return;
 
-    const cleanWorkDir = await confirm({
-      title: '清理工作目录',
-      description: `是否同时删除选中的 ${selectedRunIds.length} 条运行记录的工作目录？`,
-      confirmLabel: '删除工作目录',
-      cancelLabel: '仅删除记录',
-      variant: 'destructive',
-    });
-
     setBatchDeleting(true);
     try {
-      const result = await runsApi.batchDeleteRuns(selectedRunIds, cleanWorkDir);
+      const result = await runsApi.batchDeleteRuns(selectedRunIds);
       toast('success', result.message);
       setSelectedRunIds([]);
       await loadHistory();
@@ -2026,6 +2003,7 @@ export default function WorkbenchPage() {
         context: {
           ...(editingConfig.context || {}),
           projectRoot,
+          workspaceMode,
           requirements,
           timeoutMinutes,
           engine: engine || undefined,
@@ -2232,6 +2210,10 @@ export default function WorkbenchPage() {
                         <p className="text-sm mt-1">{projectRoot}</p>
                       </div>
                     )}
+                    <div>
+                      <Label className="text-xs font-medium text-muted-foreground">工作区模式</Label>
+                      <p className="text-sm mt-1">{workspaceMode === 'isolated-copy' ? '先创建副本工程再执行' : '直接在工作目录执行'}</p>
+                    </div>
                     {requirements && (
                       <div>
                         <Label className="text-xs font-medium text-muted-foreground">需求描述</Label>
@@ -2823,6 +2805,25 @@ export default function WorkbenchPage() {
                             className="mt-2 h-60"
                           />
                           <p className="text-xs text-muted-foreground mt-1.5">工作流执行时的项目根目录路径</p>
+                        </div>
+
+                        <div>
+                          <Label className="text-sm font-medium">工作区模式</Label>
+                          <div className="mt-2">
+                            <Select
+                              value={workspaceMode}
+                              onValueChange={(value: 'isolated-copy' | 'in-place') => dispatch({ type: 'SET_WORKSPACE_MODE', payload: value })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="in-place">直接在工作目录执行</SelectItem>
+                                <SelectItem value="isolated-copy">先创建副本工程再执行</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1.5">默认推荐直接在工作目录执行；只有需要隔离原工程时再创建副本</p>
                         </div>
 
                         <div>

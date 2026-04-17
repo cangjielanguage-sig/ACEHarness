@@ -5,8 +5,8 @@
  */
 
 import { readFile } from 'fs/promises';
-import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { getEngineConfigPath } from '@/lib/app-paths';
 import type { Engine } from './engine-interface';
 import { KiroCliEngineWrapper } from './kiro-cli-wrapper';
 import { CangjieMagicEngineWrapper } from './cangjie-magic-wrapper';
@@ -26,7 +26,7 @@ interface EngineConfig {
  * Get the configured engine type
  */
 export async function getConfiguredEngine(): Promise<EngineType> {
-  const configPath = resolve(process.cwd(), '.engine.json');
+  const configPath = getEngineConfigPath();
 
   if (existsSync(configPath)) {
     try {

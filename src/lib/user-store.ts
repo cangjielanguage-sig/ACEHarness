@@ -4,12 +4,12 @@
  */
 
 import { mkdir, writeFile, readFile } from 'fs/promises';
-import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { randomBytes, createHash, randomUUID } from 'crypto';
+import { getWorkspaceDataFile, getWorkspaceDataDir } from '@/lib/app-paths';
 
-const USERS_FILE = resolve(process.cwd(), 'data', 'users.json');
-const ADMIN_FILE = resolve(process.cwd(), 'data', 'admin.json');
+const USERS_FILE = getWorkspaceDataFile('users.json');
+const ADMIN_FILE = getWorkspaceDataFile('admin.json');
 
 export interface User {
   id: string;
@@ -66,7 +66,7 @@ export async function loadUsers(): Promise<User[]> {
 }
 
 async function saveUsers(users: User[]): Promise<void> {
-  await mkdir(resolve(process.cwd(), 'data'), { recursive: true });
+  await mkdir(getWorkspaceDataDir(), { recursive: true });
   await writeFile(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
 }
 
@@ -217,7 +217,7 @@ export async function adminResetPassword(userId: string, newPwd: string): Promis
 }
 
 // --- Token Store (multi-user, persisted to disk) ---
-const TOKENS_FILE = resolve(process.cwd(), 'data', 'tokens.json');
+const TOKENS_FILE = getWorkspaceDataFile('tokens.json');
 const tokenStore = new Map<string, { userId: string; expiry: number }>();
 let tokensLoaded = false;
 
@@ -239,7 +239,7 @@ function loadTokensSync(): void {
 function persistTokens(): void {
   try {
     const { mkdirSync, writeFileSync } = require('fs');
-    mkdirSync(resolve(process.cwd(), 'data'), { recursive: true });
+    mkdirSync(getWorkspaceDataDir(), { recursive: true });
     writeFileSync(TOKENS_FILE, JSON.stringify([...tokenStore.entries()]), 'utf-8');
   } catch { /* ignore */ }
 }
@@ -307,7 +307,7 @@ export async function migrateFromAdminJson(): Promise<boolean> {
       createdAt: admin.createdAt || Date.now(),
       lastLoginAt: admin.lastLoginAt,
     };
-    await mkdir(resolve(process.cwd(), 'data'), { recursive: true });
+    await mkdir(getWorkspaceDataDir(), { recursive: true });
     await writeFile(USERS_FILE, JSON.stringify([user], null, 2), 'utf-8');
     return true;
   } catch {

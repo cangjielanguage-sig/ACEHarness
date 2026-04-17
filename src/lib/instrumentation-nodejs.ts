@@ -7,14 +7,15 @@ export async function runNodejsInstrumentation() {
   const { existsSync, symlinkSync, mkdirSync, lstatSync, readlinkSync } = await import('fs');
   const { join } = await import('path');
   const { getEngineConfigDir } = await import('./engines/engine-config');
+  const { getEngineConfigPath } = await import('./app-paths');
 
   const WORKSPACE_ROOT = process.cwd();
   const SKILLS_DIR = join(WORKSPACE_ROOT, 'skills');
 
-  // Determine engine-aware config directory from .engine.json
+  // Determine engine-aware config directory from persisted engine config
   let engineConfigDir = '.claude';
   try {
-    const engineJson = join(WORKSPACE_ROOT, '.engine.json');
+    const engineJson = getEngineConfigPath();
     if (existsSync(engineJson)) {
       const { readFileSync } = await import('fs');
       const config = JSON.parse(readFileSync(engineJson, 'utf-8'));

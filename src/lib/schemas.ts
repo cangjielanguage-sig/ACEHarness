@@ -84,6 +84,7 @@ export const roleConfigSchema = z.object({
 // 上下文配置 Schema
 export const contextConfigSchema = z.object({
   projectRoot: z.string().optional(),
+  workspaceMode: z.enum(['isolated-copy', 'in-place']).optional(),
   requirements: z.string().optional(),
   codebase: z.string().optional(),
   timeoutMinutes: z.number().min(1).optional(),
@@ -122,6 +123,7 @@ export const newConfigFormSchema = z.object({
   workingDirectory: z
     .string()
     .min(1, '工作目录不能为空'),
+  workspaceMode: z.enum(['isolated-copy', 'in-place']).default('in-place'),
   description: z.string().optional(),
   mode: z.enum(['phase-based', 'state-machine', 'ai-guided']).default('phase-based').optional(),
   requirements: z.string().optional(), // AI 引导模式下的需求描述

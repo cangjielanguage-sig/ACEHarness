@@ -56,6 +56,7 @@ export interface WorkflowState {
   selectedStep: any | null;
   projectRoot: string;
   workingDirectory: string | null;
+  workspaceMode: 'isolated-copy' | 'in-place';
   requirements: string;
   timeoutMinutes: number;
   engine: string;
@@ -96,6 +97,7 @@ type WorkflowAction =
   | { type: 'SET_SELECTED_AGENT'; payload: Agent | null }
   | { type: 'SET_SELECTED_STEP'; payload: any | null }
   | { type: 'SET_PROJECT_ROOT'; payload: string }
+  | { type: 'SET_WORKSPACE_MODE'; payload: 'isolated-copy' | 'in-place' }
   | { type: 'SET_REQUIREMENTS'; payload: string }
   | { type: 'SET_TIMEOUT_MINUTES'; payload: number }
   | { type: 'SET_ENGINE'; payload: string }
@@ -136,6 +138,7 @@ function createInitialState(initialViewMode: ViewMode = 'run'): WorkflowState {
     selectedStep: null,
     projectRoot: '',
     workingDirectory: null,
+    workspaceMode: 'isolated-copy',
     requirements: '',
     timeoutMinutes: 30,
     engine: '',
@@ -178,6 +181,7 @@ function workflowReducer(state: WorkflowState, action: WorkflowAction): Workflow
     case 'SET_SELECTED_AGENT': return { ...state, selectedAgent: action.payload };
     case 'SET_SELECTED_STEP': return { ...state, selectedStep: action.payload };
     case 'SET_PROJECT_ROOT': return { ...state, projectRoot: action.payload };
+    case 'SET_WORKSPACE_MODE': return { ...state, workspaceMode: action.payload };
     case 'SET_REQUIREMENTS': return { ...state, requirements: action.payload };
     case 'SET_TIMEOUT_MINUTES': return { ...state, timeoutMinutes: action.payload };
     case 'SET_ENGINE': return { ...state, engine: action.payload };

@@ -83,9 +83,6 @@ export default function StateMachineExecutionView({
   onForceTransition,
 }: StateMachineExecutionViewProps) {
   const [activeTab, setActiveTab] = useState('overview');
-  const allWorkflowAgents = Array.from(new Set(
-    states.flatMap((s) => s.steps.map((step) => step.agent)).filter(Boolean)
-  ));
 
   return (
     <div className="h-full flex flex-col">
@@ -175,8 +172,9 @@ export default function StateMachineExecutionView({
           <div className="h-full">
             <AgentFlowDiagram
               flow={agentFlow}
+              states={states}
               currentRound={currentPlanRound}
-              allAgents={allWorkflowAgents}
+              currentStep={currentStep}
             />
           </div>
         </TabsContent>

@@ -1,16 +1,31 @@
 #!/usr/bin/env node
 /**
  * Aceharness 工作流配置验证脚本
- * 用法: node validate-workflow.mjs <config.yaml>
+ * 用法: node /abs/path/to/validate-workflow.mjs <config.yaml>
  */
 import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
-import { resolve, dirname, isAbsolute } from 'path';
+import { resolve, dirname, isAbsolute, join } from 'path';
 import { fileURLToPath } from 'url';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = resolve(__dirname, '..', '..', '..', '..', '..');
+
+function isProjectRoot(dir) {
+  return existsSync(join(dir, 'configs', 'agents')) && existsSync(join(dir, 'package.json'));
+}
+
+function findProjectRoot(startDir) {
+  let current = resolve(startDir);
+  while (true) {
+    if (isProjectRoot(current)) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+const PROJECT_ROOT = findProjectRoot(__dirname) || findProjectRoot(process.cwd()) || process.cwd();
 
 // --- Schemas (mirror of src/lib/schemas.ts) ---
 
@@ -48,6 +63,7 @@ const workflowPhaseSchema = z.object({
 
 const contextConfigSchema = z.object({
   projectRoot: z.string().optional(),
+  workspaceMode: z.enum(['isolated-copy', 'in-place']).optional(),
   requirements: z.string().optional(),
   codebase: z.string().optional(),
   timeoutMinutes: z.number().min(1).optional(),
@@ -204,6 +220,13 @@ function validate(configPath) {
     }
   }
 
+  const workspaceMode = typeof config?.context?.workspaceMode === 'string'
+    ? config.context.workspaceMode.trim()
+    : '';
+  if (workspaceMode && workspaceMode !== 'isolated-copy' && workspaceMode !== 'in-place') {
+    errors.push(`context.workspaceMode 非法: "${workspaceMode}"，只能是 "isolated-copy" 或 "in-place"`);
+  }
+
   if (mode === 'state-machine' && config?.workflow?.states) {
     for (const state of config.workflow.states) {
       for (const step of state.steps || []) {
@@ -288,4 +311,10 @@ if (!configPath) {
   console.error('用法: node validate-workflow.mjs <config.yaml>');
   process.exit(1);
 }
-validate(resolve(process.cwd(), configPath));
+const resolvedConfigPath = isAbsolute(configPath)
+  ? configPath
+  : (existsSync(resolve(PROJECT_ROOT, configPath))
+      ? resolve(PROJECT_ROOT, configPath)
+      : resolve(process.cwd(), configPath));
+
+validate(resolvedConfigPath);

@@ -29,12 +29,6 @@ cd cangjie_ace_skills/cangjie_compiler_knowledge
 python3 scripts/search.py "关键词"
 ```
 
-**Recent Improvements:**
-- ✅ Precise matching for Chinese phrases (e.g., "类型推断" now returns type inference, not "类")
-- ✅ Smart fuzzy matching based on keyword length (short keywords = stricter matching)
-- ✅ Prioritizes complete phrase matches over partial matches
-- ✅ Reduced noise from single-character matches
-
 ### Method 2: Direct File Access (For browsing concepts)
 - Read description files: `knowledge-base/descriptions/*.md`
 - Contains 40+ detailed concept explanations

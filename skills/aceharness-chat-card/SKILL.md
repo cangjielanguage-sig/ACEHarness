@@ -51,10 +51,10 @@ tags:
 
 ```bash
 # 方式 1：生成后验证
-echo '{"header": {...}, "blocks": [...]}' | node skills/aceharness-chat-card/scripts/validate-card.mjs
+echo '{"header": {...}, "blocks": [...]}' | node /absolute/path/to/skills/aceharness-chat-card/scripts/validate-card.mjs
 
 # 方式 2：直接验证
-node skills/aceharness-chat-card/scripts/validate-card.mjs <(echo '{"header": {...}, "blocks": [...]}')
+node /absolute/path/to/skills/aceharness-chat-card/scripts/validate-card.mjs /path/to/card.json
 ```
 
 发现错误**立即修正**后，再输出到用户可见区域。
@@ -220,10 +220,10 @@ type Block =
 使用方法：
 ```bash
 # 从 stdin 读取验证
-echo '{"header": {...}, "blocks": [...]}' | node skills/aceharness-chat-card/scripts/validate-card.mjs
+echo '{"header": {...}, "blocks": [...]}' | node /absolute/path/to/skills/aceharness-chat-card/scripts/validate-card.mjs
 
 # 从文件验证
-node skills/aceharness-chat-card/scripts/validate-card.mjs /path/to/card.json
+node /absolute/path/to/skills/aceharness-chat-card/scripts/validate-card.mjs /path/to/card.json
 ```
 
 验证通过后返回退出码 0，失败返回退出码 1 并输出错误信息。

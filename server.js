@@ -9,9 +9,15 @@ const syncProtocol = require('y-protocols/sync');
 const awarenessProtocol = require('y-protocols/awareness');
 const encoding = require('lib0/encoding');
 const decoding = require('lib0/decoding');
+const {
+  getWorkspaceDataFile,
+  getWorkspaceNotebookRoot,
+} = require(path.join(__dirname, 'dist/lib/app-paths.js'));
 
 const dev = process.argv.includes('dev') || process.env.NODE_ENV !== 'production';
-const app = next({ dev, hostname: '0.0.0.0', port: Number(process.env.PORT || 3000) });
+const host = process.env.ACE_HOST || '127.0.0.1';
+const port = Number(process.env.PORT || process.env.ACE_PORT || 3000);
+const app = next({ dev, hostname: host, port });
 const handle = app.getRequestHandler();
 
 const docs = new Map();
@@ -33,7 +39,7 @@ function readJson(filePath, fallback) {
 
 function validateAuthToken(token) {
   if (!token) return null;
-  const tokensFile = path.resolve(process.cwd(), 'data', 'tokens.json');
+  const tokensFile = getWorkspaceDataFile('tokens.json');
   const entries = readJson(tokensFile, []);
   if (!Array.isArray(entries)) return null;
   const now = Date.now();
@@ -46,7 +52,7 @@ function validateAuthToken(token) {
 }
 
 function getUserById(userId) {
-  const usersFile = path.resolve(process.cwd(), 'data', 'users.json');
+  const usersFile = getWorkspaceDataFile('users.json');
   const users = readJson(usersFile, []);
   if (!Array.isArray(users)) return null;
   const user = users.find((item) => item && item.id === userId);
@@ -56,7 +62,7 @@ function getUserById(userId) {
 
 function getShareByToken(token) {
   if (!token) return null;
-  const sharesFile = path.resolve(process.cwd(), 'data', 'notebook-shares.json');
+  const sharesFile = getWorkspaceDataFile('notebook-shares.json');
   const shares = readJson(sharesFile, []);
   if (!Array.isArray(shares)) return null;
   return shares.find((item) => item && item.token === token) || null;
@@ -121,7 +127,7 @@ function resolveCollabRoom(searchParams) {
   if (!filePath && !shareToken) return { ok: false, reason: '缺少 file 参数' };
 
   if (scope === 'global') {
-    const globalRoot = path.resolve(process.cwd(), 'data', 'notebook');
+    const globalRoot = getWorkspaceNotebookRoot();
     const share = shareToken ? getShareByToken(shareToken) : null;
     if (shareToken && (!share || share.scope !== 'global')) {
       return { ok: false, reason: '分享链接无效' };
@@ -221,8 +227,7 @@ app.prepare().then(() => {
     });
   });
 
-  const port = Number(process.env.PORT || 3000);
-  server.listen(port, '0.0.0.0', () => {
-    console.log(`[ACEHarness] Server ready on http://0.0.0.0:${port}`);
+  server.listen(port, host, () => {
+    console.log(`[ACEHarness] Server ready on http://${host}:${port}`);
   });
 });

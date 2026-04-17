@@ -294,9 +294,8 @@ export const runsApi = {
     return response.json();
   },
 
-  async deleteRun(id: string, cleanWorkDir = false): Promise< ApiResponse> {
-    const params = cleanWorkDir ? '?cleanWorkDir=true' : '';
-    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/delete${params}`, {
+  async deleteRun(id: string, _cleanWorkDir = false): Promise< ApiResponse> {
+    const response = await authFetch(`${API_BASE}/runs/${encodeURIComponent(id)}/delete`, {
       method: 'DELETE',
     });
     if (!response.ok) {
@@ -370,11 +369,11 @@ export const runsApi = {
     return response.json();
   },
 
-  async batchDeleteRuns(runIds: string[], cleanWorkDir = false): Promise<ApiResponse & { deletedCount: number; errors?: string[] }> {
+  async batchDeleteRuns(runIds: string[], _cleanWorkDir = false): Promise<ApiResponse & { deletedCount: number; errors?: string[] }> {
     const response = await authFetch(`${API_BASE}/runs/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', runIds, cleanWorkDir }),
+      body: JSON.stringify({ action: 'delete', runIds }),
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));

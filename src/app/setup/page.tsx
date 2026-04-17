@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { RobotLogo } from '@/components/chat/ChatMessage';
 import AvatarPicker from '@/components/AvatarPicker';
+import WorkspaceDirectoryPicker from '@/components/common/WorkspaceDirectoryPicker';
 
 interface DiscoveredSkill {
   name: string;
@@ -184,7 +185,7 @@ export default function SetupPage() {
               <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
                 ACEHarness
               </h1>
-              <p className="text-xs text-muted-foreground">全流程 Multi-Agent 智能编排系统</p>
+              <p className="text-xs text-muted-foreground">Your team of AIs, collaborating to get work done.</p>
             </div>
           </div>
 
@@ -281,6 +282,14 @@ export default function SetupPage() {
                   onChange={(e) => setPersonalDir(e.target.value)}
                   className="h-10"
                 />
+                <div className="mt-2">
+                  <WorkspaceDirectoryPicker
+                    workspaceRoot="/"
+                    value={personalDir}
+                    onChange={setPersonalDir}
+                    className="h-64"
+                  />
+                </div>
                 <p className="text-xs text-muted-foreground mt-1">工作流执行时的隔离目录</p>
               </div>
 
@@ -330,7 +339,7 @@ export default function SetupPage() {
               <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-blue-500 bg-clip-text text-transparent">
                 ACEHarness
               </h1>
-              <p className="text-xs text-muted-foreground">全流程 Multi-Agent 智能编排系统</p>
+              <p className="text-xs text-muted-foreground">Your team of AIs, collaborating to get work done.</p>
             </div>
           </div>
 
