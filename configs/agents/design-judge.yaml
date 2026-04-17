@@ -131,5 +131,5 @@ reviewPanel:
         - Grep
       model: claude-sonnet-4-6
 engineModels:
-  "": glm-5
+  "": claude-sonnet-4-6
 activeEngine: ""

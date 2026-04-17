@@ -39,5 +39,5 @@ constraints:
   - 信息不确定时必须明确标注“未定位/不确定”，不要猜测
 _file: oh-cangjie-analyst.yaml
 engineModels:
-  "": glm-5
+  "": claude-sonnet-4-6
 activeEngine: ""

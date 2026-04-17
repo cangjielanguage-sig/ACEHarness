@@ -67,5 +67,5 @@ constraints:
   - 不得无依据给出"已对齐/已通过"结论
 _file: oh-cangjie-reviewer.yaml
 engineModels:
-  "": glm-5
+  "": claude-sonnet-4-6
 activeEngine: ""

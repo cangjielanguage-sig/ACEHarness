@@ -40,5 +40,5 @@ constraints:
   - 必须保持 FFI 导出层薄、Impl 层厚的分层原则
 _file: oh-cangjie-coder.yaml
 engineModels:
-  "": glm-5
+  "": claude-sonnet-4-6
 activeEngine: ""
