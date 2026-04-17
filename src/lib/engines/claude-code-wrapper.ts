@@ -10,7 +10,7 @@
 import { EventEmitter } from 'events';
 import { readdir, readFile, stat, mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { loadEnvVars, buildEnvObject } from '../env-manager';
 import { fenced } from '../markdown-utils';
 import type { Engine, EngineOptions, EngineResult, EngineStreamEvent } from './engine-interface';
@@ -42,9 +42,6 @@ const CAPTURE_PRIORITY: Record<SdkPlanCapturedVia, number> = {
 function priorityOf(via: SdkPlanCapturedVia | ''): number {
   return via ? CAPTURE_PRIORITY[via] : 999;
 }
-function shortTaskId(id: string): string {
-  return !id ? '?' : id.length <= 12 ? id : `${id.slice(0, 10)}…`;
-}
 function clip(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max) + '…';
 }
@@ -64,20 +61,92 @@ function resolveToolName(raw: string): string {
   return String(raw || '').trim().toLowerCase();
 }
 function toolPath(rawInput: Record<string, unknown>): string {
-  const path = rawInput.file_path ?? rawInput.filePath ?? rawInput.path;
+  const path = rawInput.file_path ?? rawInput.filePath ?? rawInput.filepath ?? rawInput.file ?? rawInput.path;
   return typeof path === 'string' ? path : '';
+}
+function toolLanguageFromPath(filePath: string): string {
+  const ext = filePath.split('.').pop() || '';
+  if (!ext || ext === filePath) return '';
+  if (ext === 'cj') return 'cangjie';
+  return ext;
+}
+function toolText(rawInput: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = rawInput[key];
+    if (typeof value === 'string' && value) return value;
+  }
+  return '';
+}
+function readToolFileContent(filePath: string): string {
+  if (!filePath || !existsSync(filePath)) return '';
+  try {
+    return readFileSync(filePath, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+function formatCommandOutput(output: string, exitCode?: number | null): string {
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return exitCode != null && exitCode !== 0 ? `\n(exit code: ${exitCode})\n` : '';
+  }
+  const lines = trimmed.split('\n');
+  let rendered = '';
+  if (lines.length <= 15) {
+    rendered = `\n${fenced(trimmed)}\n`;
+  } else {
+    rendered = `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n${fenced(trimmed)}\n\n</details>\n`;
+  }
+  if (exitCode != null && exitCode !== 0) rendered += `(exit code: ${exitCode})\n`;
+  return rendered;
+}
+function formatClaudeToolExecutionResult(toolNameRaw: string, result: unknown): string {
+  const toolName = resolveToolName(toolNameRaw);
+  if (!result || typeof result !== 'object') {
+    const text = extractTextFromUnknown(result).trim();
+    return text ? `\n${fenced(text)}\n` : '';
+  }
+
+  const raw = result as Record<string, unknown>;
+
+  if (toolName === 'bash') {
+    const stdout = typeof raw.stdout === 'string' ? raw.stdout : '';
+    const stderr = typeof raw.stderr === 'string' ? raw.stderr : '';
+    const output = typeof raw.output === 'string'
+      ? raw.output
+      : [stdout, stderr].filter(Boolean).join(stdout && stderr ? '\n' : '');
+    const exitCode = typeof raw.exit_code === 'number'
+      ? raw.exit_code
+      : (typeof raw.exitCode === 'number' ? raw.exitCode : null);
+    return formatCommandOutput(output, exitCode);
+  }
+
+  if (toolName === 'read') {
+    const text = extractTextFromUnknown(raw.content ?? raw.result ?? raw.text).trim();
+    if (!text) return '';
+    const lines = text.split('\n');
+    if (lines.length <= 15) return `\n${fenced(text)}\n`;
+    return `\n<details><summary>查看内容 (${lines.length} 行)</summary>\n\n${fenced(text)}\n\n</details>\n`;
+  }
+
+  const text = extractTextFromUnknown(raw.output ?? raw.content ?? raw.result ?? raw.message ?? result).trim();
+  if (!text) return '';
+  const lines = text.split('\n');
+  if (lines.length <= 15) return `\n${fenced(text)}\n`;
+  return `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n${fenced(text)}\n\n</details>\n`;
 }
 function formatClaudeToolResult(toolNameRaw: string, inputJson: string): string {
   const toolName = resolveToolName(toolNameRaw);
   const isTaskTool = toolName === 'task' || toolName.endsWith('/task') || toolName.includes('task');
   const rawInput = parseToolJson(inputJson) || {};
   const p = toolPath(rawInput);
+  const lang = toolLanguageFromPath(p);
 
   if (toolName === 'write') {
-    const content = typeof rawInput.content === 'string' ? rawInput.content : '';
+    const content = toolText(rawInput, ['content', 'text', 'new_string', 'newString']);
     const lines = content ? content.split('\n').length : 0;
     let out = `\n📝 写入文件: \`${p || '(未知路径)'}\`${lines ? ` (${lines} 行)` : ''}\n`;
-    if (content) out += `\n<details><summary>查看内容 (${lines} 行)</summary>\n\n${fenced(content, p.split('.').pop() || '')}\n\n</details>\n`;
+    if (content) out += `\n<details><summary>查看内容 (${lines} 行)</summary>\n\n${fenced(content, lang)}\n\n</details>\n`;
     return out;
   }
   if (toolName === 'bash') {
@@ -88,7 +157,11 @@ function formatClaudeToolResult(toolNameRaw: string, inputJson: string): string 
     return `\n💻 执行命令 (${cmdLines.length} 行)\n\n<details><summary>查看命令</summary>\n\n${fenced(cmd, 'bash')}\n\n</details>\n`;
   }
   if (toolName === 'read') {
-    return `\n📖 读取文件: \`${p || '(未知路径)'}\`\n`;
+    const content = toolText(rawInput, ['content', 'result', 'text']) || readToolFileContent(p);
+    const lines = content ? content.split('\n').length : 0;
+    let out = `\n📖 读取文件: \`${p || '(未知路径)'}\`\n`;
+    if (content) out += `\n<details><summary>查看内容 (${lines} 行)</summary>\n\n${fenced(content, lang)}\n\n</details>\n`;
+    return out;
   }
   if (toolName === 'edit' || toolName === 'multiedit' || toolName === 'patch') {
     const oldStr = typeof rawInput.old_string === 'string' ? rawInput.old_string : (typeof rawInput.oldString === 'string' ? rawInput.oldString : '');
@@ -121,14 +194,51 @@ function formatClaudeToolResult(toolNameRaw: string, inputJson: string): string 
   }
   if (isTaskTool) {
     const desc = typeof rawInput.description === 'string' ? rawInput.description : '';
-    return `\n🤖 启动子任务: ${desc || '(无描述)'}\n`;
+    const prompt = typeof rawInput.prompt === 'string' ? rawInput.prompt : '';
+    const subagentType = typeof rawInput.subagent_type === 'string'
+      ? rawInput.subagent_type
+      : (typeof rawInput.subagentType === 'string' ? rawInput.subagentType : '');
+    let out = `\n🤖 启动子任务: ${desc || '(无描述)'}\n`;
+    if (subagentType) out += `\n类型: \`${subagentType}\`\n`;
+    if (prompt) {
+      const lines = prompt.split('\n').length;
+      out += `\n<details><summary>查看提示词 (${lines} 行)</summary>\n\n${fenced(prompt)}\n\n</details>\n`;
+    }
+    return out;
   }
   if (toolName === 'todowrite' || toolName === 'todo') {
     const todosRaw = (rawInput.todos ?? rawInput.items) as unknown;
     if (!Array.isArray(todosRaw) || todosRaw.length === 0) return '\n📋 任务列表更新中...\n';
     const done = todosRaw.filter((t: any) => t?.status === 'completed' || t?.status === 'done').length;
     const inProg = todosRaw.filter((t: any) => t?.status === 'in_progress' || t?.status === 'in-progress').length;
-    return `\n📋 任务列表 (${done}/${todosRaw.length} 完成${inProg ? `, ${inProg} 进行中` : ''})\n`;
+    let content = `\n<!-- todo-list-marker -->\n<div class="ace-todo-list">\n`;
+    content += `<div class="ace-todo-header">📋 任务列表 (${done}/${todosRaw.length} 完成${inProg ? `, ${inProg} 进行中` : ''})</div>\n`;
+    content += `<div class="ace-todo-progress"><div class="ace-todo-progress-bar" style="width:${Math.round((done / todosRaw.length) * 100)}%"></div></div>\n`;
+    for (const t of todosRaw) {
+      const status = t?.status;
+      const icon = status === 'completed' || status === 'done'
+        ? '✅'
+        : status === 'in_progress' || status === 'in-progress'
+          ? '⏳'
+          : '⬜';
+      const cls = status === 'completed' || status === 'done'
+        ? 'ace-todo-done'
+        : status === 'in_progress' || status === 'in-progress'
+          ? 'ace-todo-doing'
+          : 'ace-todo-pending';
+      const text = typeof t?.content === 'string'
+        ? t.content
+        : typeof t?.text === 'string'
+          ? t.text
+          : typeof t?.task === 'string'
+            ? t.task
+            : typeof t?.title === 'string'
+              ? t.title
+              : '(无内容)';
+      content += `<div class="ace-todo-item ${cls}">${icon} ${text}</div>\n`;
+    }
+    content += `</div>\n`;
+    return content;
   }
   if (toolName === 'webfetch') {
     const url = typeof rawInput.url === 'string' ? rawInput.url : '';
@@ -425,6 +535,7 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
       const iter = query({ prompt: userFacingPrompt, options: sdkOptions as any });
       const taskStartedAt = new Map<string, number>();
       const streamToolBlocks = new Map<number, { id: string; name: string; inputJson: string }>();
+      const toolCallsById = new Map<string, { name: string; inputJson: string }>();
       let capturedSessionId: string | undefined;
       let sawStreamEvent = false;
       let lastAssistantSnapshot = '';
@@ -505,6 +616,9 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
           } else if (eventType === 'content_block_stop' && Number.isFinite(eventIndex)) {
             const tool = streamToolBlocks.get(eventIndex);
             if (tool) {
+              if (tool.id) {
+                toolCallsById.set(tool.id, { name: tool.name, inputJson: tool.inputJson });
+              }
               const block = formatClaudeToolBlock(tool.name, tool.inputJson, tool.id);
               accumulated += block;
               this.emit('stream', { type: 'text', content: block } as EngineStreamEvent);
@@ -598,6 +712,18 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
           if (info) {
             accumulated += `\n${info}\n`;
             this.emit('stream', { type: 'text', content: `\n${info}\n` } as EngineStreamEvent);
+          }
+        } else if (msg.type === 'user') {
+          const userMsg = msg as { parent_tool_use_id?: string | null; tool_use_result?: unknown };
+          const toolUseId = typeof userMsg.parent_tool_use_id === 'string' ? userMsg.parent_tool_use_id : '';
+          if (toolUseId && userMsg.tool_use_result !== undefined) {
+            const tool = toolCallsById.get(toolUseId);
+            const rendered = formatClaudeToolExecutionResult(tool?.name || '', userMsg.tool_use_result);
+            if (rendered) {
+              accumulated += rendered;
+              this.emit('stream', { type: 'text', content: rendered } as EngineStreamEvent);
+              lastBlockWasTool = false;
+            }
           }
         } else if (msg.type === 'result') {
           if (msg.subtype === 'success') {

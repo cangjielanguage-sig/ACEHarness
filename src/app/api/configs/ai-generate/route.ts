@@ -36,7 +36,7 @@ function shouldUseStateMachine(requirements: string): boolean {
 /**
  * 生成阶段模式配置
  */
-function generatePhaseBasedConfig(requirements: string, workflowName: string) {
+function generatePhaseBasedConfig(requirements: string, workflowName: string, workspaceMode: 'isolated-copy' | 'in-place' = 'in-place') {
   const req = requirements.toLowerCase();
 
   const isCodeReview = req.includes('审查') || req.includes('review') || req.includes('pr');
@@ -108,6 +108,7 @@ function generatePhaseBasedConfig(requirements: string, workflowName: string) {
     },
     context: {
       projectRoot: '',
+      workspaceMode,
       requirements,
     },
   };
@@ -116,7 +117,7 @@ function generatePhaseBasedConfig(requirements: string, workflowName: string) {
 /**
  * 生成状态机模式配置（每个状态包含蓝队/红队/裁判三个步骤）
  */
-function generateStateMachineConfig(requirements: string, workflowName: string) {
+function generateStateMachineConfig(requirements: string, workflowName: string, workspaceMode: 'isolated-copy' | 'in-place' = 'in-place') {
   const req = requirements.toLowerCase();
 
   const isSecurityAudit = req.includes('安全') || req.includes('security') || req.includes('攻防') || req.includes('红蓝');
@@ -307,6 +308,7 @@ function generateStateMachineConfig(requirements: string, workflowName: string) 
     },
     context: {
       projectRoot: '',
+      workspaceMode,
       requirements,
     },
   };
@@ -316,17 +318,18 @@ function generateStateMachineConfig(requirements: string, workflowName: string) 
  * 使用 AI 生成工作流配置
  * 根据需求描述自动选择合适的工作流模式，并生成符合 schema 的配置
  */
-function generateWorkflowFromRequirements(requirements: string, workflowName: string) {
+function generateWorkflowFromRequirements(requirements: string, workflowName: string, workspaceMode: 'isolated-copy' | 'in-place' = 'in-place') {
   if (shouldUseStateMachine(requirements)) {
-    return generateStateMachineConfig(requirements, workflowName);
+    return generateStateMachineConfig(requirements, workflowName, workspaceMode);
   }
-  return generatePhaseBasedConfig(requirements, workflowName);
+  return generatePhaseBasedConfig(requirements, workflowName, workspaceMode);
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { requirements, workflowName } = body;
+    const { requirements, workflowName, workspaceMode } = body;
+    const normalizedWorkspaceMode = workspaceMode === 'isolated-copy' ? 'isolated-copy' : 'in-place';
 
     if (!requirements || requirements.trim().length < 10) {
       return NextResponse.json(
@@ -336,7 +339,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 生成工作流配置
-    const config = generateWorkflowFromRequirements(requirements, workflowName || 'AI生成工作流');
+    const config = generateWorkflowFromRequirements(requirements, workflowName || 'AI生成工作流', normalizedWorkspaceMode);
     const mode = 'mode' in config.workflow ? config.workflow.mode : 'phase-based';
 
     return NextResponse.json({

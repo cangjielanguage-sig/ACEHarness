@@ -7,11 +7,6 @@ import { workflowRegistry } from '@/lib/workflow-registry';
 
 const RUNS_DIR = resolve(process.cwd(), 'runs');
 
-function normalizeWorkDirPath(raw: string | null): string | null {
-  if (!raw) return null;
-  return raw.startsWith('/') ? raw : resolve(process.cwd(), raw);
-}
-
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -19,8 +14,6 @@ export async function DELETE(
   try {
     const runId = (await params).id;
     const runDir = resolve(RUNS_DIR, runId);
-    const cleanWorkDir = request.nextUrl.searchParams.get('cleanWorkDir') === 'true';
-
     // Check if run exists
     if (!existsSync(runDir)) {
       return NextResponse.json(
@@ -39,14 +32,12 @@ export async function DELETE(
     }
 
     // Read state.yaml to get workingDirectory and check if running
-    let workingDirectory: string | null = null;
     let configFile: string | null = null;
     try {
       const stateFile = resolve(runDir, 'state.yaml');
       if (existsSync(stateFile)) {
         const content = await readFile(stateFile, 'utf-8');
         const state = parse(content);
-        workingDirectory = normalizeWorkDirPath(state.workingDirectory || null);
         configFile = state.configFile || null;
       }
     } catch { /* ignore */ }
@@ -64,13 +55,6 @@ export async function DELETE(
 
     // Delete the run directory
     await rm(runDir, { recursive: true, force: true });
-
-    // Optionally clean up the working directory
-    if (cleanWorkDir && workingDirectory && existsSync(workingDirectory)) {
-      try {
-        await rm(workingDirectory, { recursive: true, force: true });
-      } catch { /* ignore */ }
-    }
 
     return NextResponse.json({ success: true, message: '运行记录已删除' });
   } catch (error: any) {

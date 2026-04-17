@@ -53,6 +53,28 @@ Your team of AIs, collaborating to get work done.
 
 ### 安装与运行
 
+快速开始：
+
+```bash
+npm install -g @cangjielang/aceharness
+
+# 启动：
+ace
+# ✔ 请选择语言 › 中文
+# [ACE] 欢迎使用。首次启动将初始化本地运行配置。
+# ...
+# [ACE] 正在启动服务：http://127.0.0.1:3000
+# [ACEHarness] Server ready on http://0.0.0.0:3000
+# [ACE] 请在浏览器中打开 http://127.0.0.1:3000
+
+# 重置账号密码、引擎设置等：
+ace reset --force
+# ...
+# [ACE] 重置完成。下次运行 `ace` 时会重新初始化。
+```
+
+如果您是开发者：
+
 ```bash
 git clone <repository-url> && cd aceharness
 

@@ -31,19 +31,42 @@ function Combobox<V>(props: ComboboxPrimitive.Root.Props<V, any>) {
 
 const ComboboxInput = React.forwardRef<
   HTMLInputElement,
-  React.ComponentPropsWithoutRef<typeof ComboboxPrimitive.Input> & { className?: string }
->(({ className, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof ComboboxPrimitive.Input> & {
+    className?: string;
+    leading?: React.ReactNode;
+    displayValue?: React.ReactNode;
+  }
+>(({ className, leading, displayValue, ...props }, ref) => (
   <ComboboxPrimitive.Trigger
     className={cn(
-      'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background text-sm ring-offset-background focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 [&:has(:disabled)]:cursor-not-allowed [&:has(:disabled)]:opacity-50',
+      'relative flex h-10 w-full items-center justify-between rounded-md border border-input bg-background text-sm ring-offset-background focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 [&:has(:disabled)]:cursor-not-allowed [&:has(:disabled)]:opacity-50',
       className,
     )}
   >
+    {leading ? (
+      <div className="flex shrink-0 items-center pl-3 text-muted-foreground">
+        {leading}
+      </div>
+    ) : null}
     <ComboboxPrimitive.Input
       ref={ref}
-      className="flex-1 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground min-w-0"
+      className={cn(
+        'peer flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground min-w-0',
+        leading ? 'pl-2' : 'px-3',
+        displayValue ? 'text-transparent focus:text-foreground' : 'px-3'
+      )}
       {...props}
     />
+    {displayValue ? (
+      <div
+        className={cn(
+          'pointer-events-none absolute inset-y-0 right-8 flex items-center text-sm text-foreground peer-focus:hidden',
+          leading ? 'left-8 pl-2' : 'left-0 px-3'
+        )}
+      >
+        <span className="truncate">{displayValue}</span>
+      </div>
+    ) : null}
     <ComboboxPrimitive.Icon className="px-2 shrink-0 opacity-50">
       <span className="material-symbols-outlined text-base">expand_more</span>
     </ComboboxPrimitive.Icon>
@@ -217,6 +240,8 @@ interface SingleComboboxProps {
   options?: ComboboxOptionType[];
   groups?: ComboboxGroupDef[];
   placeholder?: string;
+  triggerLabel?: string;
+  triggerIcon?: React.ReactNode;
   disabled?: boolean;
   className?: string;
   triggerClassName?: string;
@@ -230,6 +255,8 @@ function SingleCombobox({
   options = [],
   groups,
   placeholder = '请选择...',
+  triggerLabel,
+  triggerIcon,
   disabled = false,
   triggerClassName,
   emptyText = '无匹配项',
@@ -255,7 +282,12 @@ function SingleCombobox({
       items={items}
       itemToStringValue={(opt) => opt.label}
     >
-      <ComboboxInput placeholder={selected?.label || placeholder} className={triggerClassName} />
+      <ComboboxInput
+        placeholder={triggerLabel ? '' : (selected?.label || placeholder)}
+        className={triggerClassName}
+        leading={triggerIcon}
+        displayValue={triggerLabel || selected?.label}
+      />
       <ComboboxContent>
         <ComboboxEmpty>{emptyText}</ComboboxEmpty>
         {groups ? (

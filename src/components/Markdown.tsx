@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { Children, isValidElement, useMemo, useState, useCallback, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -146,6 +146,18 @@ function NotebookOutputDetails({ node, children, ...props }: any) {
   );
 }
 
+function renderMarkdownFragment(content: string) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeRaw, rehypePreserveUnknownHtmlAsText]}
+      components={components}
+    >
+      {preprocessMarkdown(content)}
+    </ReactMarkdown>
+  );
+}
+
 function normalizeLanguage(language: string) {
   if (language === 'cangjie') return cangjieLanguageRegistered ? 'cangjie' : 'text';
   if (language === 'shell') return 'bash';
@@ -271,7 +283,29 @@ const components = {
     );
   },
   details({ node, children, ...props }: any) {
-    return <NotebookOutputDetails node={node} {...props}>{children}</NotebookOutputDetails>;
+    if (node?.properties?.[NOTEBOOK_OUTPUT_ATTR] === 'true') {
+      return <NotebookOutputDetails node={node} {...props}>{children}</NotebookOutputDetails>;
+    }
+
+    const parts = Children.toArray(children);
+    const summaryNode = parts.find((child) => isValidElement(child) && child.type === 'summary') || null;
+    const bodyText = parts
+      .filter((child) => child !== summaryNode && typeof child === 'string')
+      .join('')
+      .trim();
+    const bodyNodes = parts.filter((child) => child !== summaryNode && typeof child !== 'string');
+
+    return (
+      <details className="my-2 border border-border/50 rounded-md" {...props}>
+        {summaryNode}
+        {(bodyText || bodyNodes.length > 0) && (
+          <div className="px-3 py-2">
+            {bodyText ? renderMarkdownFragment(bodyText) : null}
+            {bodyNodes}
+          </div>
+        )}
+      </details>
+    );
   },
   summary({ children, ...props }: any) {
     return (
@@ -282,7 +316,7 @@ const components = {
   },
 };
 
-const HTML_TAGS = new Set([
+const ALLOWED_RAW_HTML_TAGS = new Set([
   'a','abbr','address','area','article','aside','audio','b','base','bdi','bdo','blockquote',
   'body','br','button','canvas','caption','cite','code','col','colgroup','data','datalist',
   'dd','del','details','dfn','dialog','div','dl','dt','em','embed','fieldset','figcaption',
@@ -294,6 +328,42 @@ const HTML_TAGS = new Set([
   'table','tbody','td','template','textarea','tfoot','th','thead','time','title','tr','track',
   'u','ul','var','video','wbr',
 ]);
+
+function stringifyUnknownHtmlNode(node: any): string {
+  if (!node) return '';
+
+  if (node.type === 'text') {
+    return String(node.value || '');
+  }
+
+  if (node.type === 'element') {
+    const inner = Array.isArray(node.children) ? node.children.map(stringifyUnknownHtmlNode).join('') : '';
+    return `<${node.tagName}>${inner}</${node.tagName}>`;
+  }
+
+  if (Array.isArray(node.children)) {
+    return node.children.map(stringifyUnknownHtmlNode).join('');
+  }
+
+  return '';
+}
+
+function rehypePreserveUnknownHtmlAsText() {
+  function transform(node: any) {
+    if (!Array.isArray(node?.children)) return;
+
+    node.children = node.children.map((child: any) => {
+      if (child?.type === 'element' && !ALLOWED_RAW_HTML_TAGS.has(child.tagName?.toLowerCase?.() || '')) {
+        return { type: 'text', value: stringifyUnknownHtmlNode(child) };
+      }
+
+      transform(child);
+      return child;
+    });
+  }
+
+  return transform;
+}
 
 function closeUnterminatedFences(content: string): string {
   const lines = content.split('\n');
@@ -325,28 +395,9 @@ function closeUnterminatedFences(content: string): string {
   return content;
 }
 
-function escapeUnknownHtmlTagsOutsideCodeBlocks(content: string): string {
-  const segments = content.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g);
-
-  return segments.map((segment) => {
-    if (/^(```|~~~)/.test(segment)) {
-      return segment;
-    }
-
-    return segment.replace(
-      /<\/?([a-zA-Z][a-zA-Z0-9._-]*)(\s[^>]*)?\/?>/g,
-      (match, tagName) => {
-        if (HTML_TAGS.has(tagName.toLowerCase())) return match;
-        return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      }
-    );
-  }).join('');
-}
-
 function preprocessMarkdown(content: string): string {
   const closed = closeUnterminatedFences(content);
-  const escaped = escapeUnknownHtmlTagsOutsideCodeBlocks(closed);
-  return escaped.replace(
+  return closed.replace(
     /(?<![<"\[])(https?:\/\/[^\s<>\]")]+)/g,
     '<$1>'
   );
@@ -441,9 +492,7 @@ export default function Markdown({ children }: { children: string }) {
 
   return (
     <div className={styles.markdownContent}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={components}>
-        {processedContent}
-      </ReactMarkdown>
+      {renderMarkdownFragment(processedContent)}
     </div>
   );
 }

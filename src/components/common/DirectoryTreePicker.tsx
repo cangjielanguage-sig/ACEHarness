@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Folder, Loader2 } from 'lucide-react';
 import type { TreeNode } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -50,6 +50,38 @@ export default function DirectoryTreePicker({
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['']));
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
   const [pathInput, setPathInput] = useState(value);
+  const nodeRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  const handleLoadChildren = useCallback(async (path: string) => {
+    setLoadingPaths((prev) => new Set(prev).add(path));
+    try {
+      const children = await loadChildren(path);
+      setTree((prev) => replaceNodeChildren(prev, path, children || []));
+    } finally {
+      setLoadingPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    }
+  }, [loadChildren]);
+
+  const expandPath = useCallback(async (rawPath: string) => {
+    const normalized = rawPath.replace(/^\/+|\/+$/g, '');
+    if (!normalized) {
+      setExpanded(new Set(['']));
+      return;
+    }
+    const segments = normalized.split('/').filter(Boolean);
+    let current = '';
+    const nextExpanded = new Set<string>(['']);
+    for (const seg of segments) {
+      current = current ? `${current}/${seg}` : seg;
+      nextExpanded.add(current);
+      await handleLoadChildren(current);
+    }
+    setExpanded(nextExpanded);
+  }, [handleLoadChildren]);
 
   const refreshRoot = useCallback(async () => {
     setLoadingRoot(true);
@@ -83,30 +115,21 @@ export default function DirectoryTreePicker({
   }, [tree, value]);
 
   useEffect(() => {
-    if (!value || hasNodeInTree) return;
-    const segments = value.split('/').filter(Boolean);
-    const next = new Set<string>(['']);
-    let current = '';
-    segments.forEach((seg) => {
-      current = current ? `${current}/${seg}` : seg;
-      next.add(current);
-    });
-    setExpanded(next);
-  }, [hasNodeInTree, value]);
+    if (loadingRoot || !value || hasNodeInTree) return;
+    void expandPath(value);
+  }, [expandPath, hasNodeInTree, loadingRoot, value]);
 
-  const handleLoadChildren = useCallback(async (path: string) => {
-    setLoadingPaths((prev) => new Set(prev).add(path));
-    try {
-      const children = await loadChildren(path);
-      setTree((prev) => replaceNodeChildren(prev, path, children || []));
-    } finally {
-      setLoadingPaths((prev) => {
-        const next = new Set(prev);
-        next.delete(path);
-        return next;
-      });
-    }
-  }, [loadChildren]);
+  useEffect(() => {
+    if (loadingRoot) return;
+    const target = nodeRefs.current.get(value || '');
+    if (!target) return;
+
+    target.scrollIntoView({
+      block: 'center',
+      inline: 'nearest',
+      behavior: 'smooth',
+    });
+  }, [expanded, loadingPaths, loadingRoot, tree, value]);
 
   const expandAndSelectPath = useCallback(async (rawPath: string) => {
     const normalized = rawPath.replace(/^\/+|\/+$/g, '');
@@ -115,17 +138,9 @@ export default function DirectoryTreePicker({
       setExpanded(new Set(['']));
       return;
     }
-    const segments = normalized.split('/').filter(Boolean);
-    let current = '';
-    const nextExpanded = new Set<string>(['']);
-    for (const seg of segments) {
-      current = current ? `${current}/${seg}` : seg;
-      nextExpanded.add(current);
-      await handleLoadChildren(current);
-    }
-    setExpanded(nextExpanded);
+    await expandPath(normalized);
     onChange(normalized);
-  }, [handleLoadChildren, onChange]);
+  }, [expandPath, onChange]);
 
   const toggleExpand = useCallback((path: string, hasLoadedChildren: boolean | undefined) => {
     setExpanded((prev) => {
@@ -157,9 +172,16 @@ export default function DirectoryTreePicker({
           <div key={node.path}>
             <button
               type="button"
+              ref={(element) => {
+                if (element) {
+                  nodeRefs.current.set(node.path, element);
+                } else {
+                  nodeRefs.current.delete(node.path);
+                }
+              }}
               className={cn(
                 'inline-flex h-7 w-full min-w-0 items-center gap-1 overflow-hidden rounded px-1 text-left text-sm hover:bg-accent',
-                isSelected && 'bg-accent text-accent-foreground'
+                isSelected && 'bg-accent text-accent-foreground ring-2 ring-primary/35 outline outline-1 outline-primary/60 outline-offset-[-1px]'
               )}
               style={{ paddingLeft: `${8 + depth * 14}px` }}
               disabled={disabled}
@@ -226,9 +248,16 @@ export default function DirectoryTreePicker({
       </div>
       <button
         type="button"
+        ref={(element) => {
+          if (element) {
+            nodeRefs.current.set('', element);
+          } else {
+            nodeRefs.current.delete('');
+          }
+        }}
         className={cn(
           'flex h-8 w-full min-w-0 items-center gap-1 overflow-hidden px-2 text-left text-sm hover:bg-accent',
-          value === '' && 'bg-accent text-accent-foreground'
+          value === '' && 'bg-accent text-accent-foreground ring-2 ring-primary/35 outline outline-1 outline-primary/60 outline-offset-[-1px]'
         )}
         disabled={disabled}
         onClick={() => onChange('')}

@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
       }
 
       const onEngineStream = (evt: any) => {
-        if (evt?.type === 'text' && evt.content) {
+        if ((evt?.type === 'text' || evt?.type === 'tool') && evt.content) {
           appendEngineStreamContent(chatId, evt.content);
           if (proc) proc.streamContent += evt.content;
           engineStreamEvents.emit(chatId, { type: 'delta', content: evt.content });

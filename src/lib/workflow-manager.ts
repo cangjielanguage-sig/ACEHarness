@@ -124,6 +124,9 @@ export class WorkflowManager extends EventEmitter {
   private isolatedDir: string | null = null;
   /** Original projectRoot from config (before isolation) */
   private currentProjectRoot: string | null = null;
+  private getWorkingDirectory(): string | null {
+    return this.isolatedDir || this.currentProjectRoot || null;
+  }
   /** Cached workflow-level skills from context.skills */
   private workflowSkillsContent: string = '';
   /** Skills copied to workspace that need cleanup on finish */
@@ -682,7 +685,7 @@ export class WorkflowManager extends EventEmitter {
         pendingCheckpoint: this.pendingCheckpoint || undefined,
         globalContext: this.globalContext || undefined,
         phaseContexts: this.phaseContexts.size > 0 ? Object.fromEntries(this.phaseContexts) : undefined,
-        workingDirectory: this.isolatedDir || undefined,
+        workingDirectory: this.getWorkingDirectory() || undefined,
       };
       await saveRunState(state);
     } catch { /* non-critical */ }
@@ -796,8 +799,10 @@ export class WorkflowManager extends EventEmitter {
         await this.persistState();
       };
 
+      const workspaceMode = workflowConfig.context.workspaceMode || 'isolated-copy';
+
       // === Preparing phase: directory isolation (cp for independence) ===
-      if (this._userPersonalDir && workflowConfig.context.projectRoot) {
+      if (workspaceMode === 'isolated-copy' && this._userPersonalDir && workflowConfig.context.projectRoot) {
         await reportPreparingProgress('准备中：复制工作目录...', '复制工作目录');
         if (this.shouldStop) return;
         const srcDir = resolve(this._userPersonalDir, workflowConfig.context.projectRoot);
@@ -809,6 +814,7 @@ export class WorkflowManager extends EventEmitter {
             await mkdir(isolatedDir, { recursive: true });
             // Persist target working directory early so cleanup can find it
             this.isolatedDir = isolatedDir;
+            this.currentProjectRoot = isolatedDir;
             await this.persistState();
             await this.copyDirectoryWithProgress(srcDir, isolatedDir, runId, reportPreparingProgress);
             if (this.shouldStop) {
@@ -862,7 +868,7 @@ export class WorkflowManager extends EventEmitter {
       // === Switch to running ===
       this.status = 'running';
       this.currentStep = null;
-      this.emit('status', { status: 'running', message: '工作流已启动', runId, workingDirectory: this.isolatedDir || null });
+      this.emit('status', { status: 'running', message: '工作流已启动', runId, workingDirectory: this.getWorkingDirectory() });
       await this.persistState();
 
       await this.executeWorkflow(workflowConfig);
@@ -2698,7 +2704,7 @@ export class WorkflowManager extends EventEmitter {
       stepLogs: this.stepLogs,
       workflow: this.currentWorkflow,
       iterationStates: Object.fromEntries(this.iterationStates),
-      workingDirectory: this.isolatedDir || null,
+      workingDirectory: this.getWorkingDirectory(),
     };
   }
 

@@ -546,7 +546,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       pendingSdkPlanQuestion: this.pendingSdkPlanQuestionPayload,
       pendingSdkPlanSubtask: this.pendingSdkPlanSubtaskPayload,
       pendingPlanReview: this.pendingPlanReviewPayload,
-      workingDirectory: this.isolatedDir || null,
+      workingDirectory: this.getWorkingDirectory(),
     };
   }
 
@@ -645,8 +645,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
         await this.persistState();
       };
 
+      const workspaceMode = workflowConfig.context?.workspaceMode || 'isolated-copy';
+
       // === Preparing phase: directory isolation (cp for independence) ===
-      if (this._userPersonalDir && workflowConfig.context?.projectRoot) {
+      if (workspaceMode === 'isolated-copy' && this._userPersonalDir && workflowConfig.context?.projectRoot) {
         await reportPreparingProgress('准备中：复制工作目录...', '复制工作目录');
         // Resolve projectRoot relative to user's personal dir (not server cwd)
         const srcDir = resolve(this._userPersonalDir, workflowConfig.context.projectRoot);
@@ -659,6 +661,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
             await mkdir(isoDir, { recursive: true });
             // Persist target working directory early so cleanup can find it
             this.isolatedDir = isoDir;
+            this.currentProjectRoot = isoDir;
             await this.persistState();
             await this.copyDirectoryWithProgress(srcDir, isoDir, runId, reportPreparingProgress);
             if (this.shouldStop) {
@@ -712,7 +715,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         startTime: this.runStartTime,
         endTime: this.runEndTime,
         currentConfigFile: this.currentConfigFile,
-        workingDirectory: this.isolatedDir || null,
+        workingDirectory: this.getWorkingDirectory(),
       });
       await this.persistState();
 
@@ -913,7 +916,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         } : {}),
         // 等待 Plan 审批时持久化，以便页面刷新后恢复弹窗
         pendingPlanReview: !finalStatus ? (this.pendingPlanReviewPayload || null) : null,
-        workingDirectory: this.isolatedDir || undefined,
+        workingDirectory: this.getWorkingDirectory() || undefined,
       });
     } catch (err) {
     }
@@ -2432,6 +2435,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private isolatedDir: string | null = null;
   /** Original projectRoot from config (before isolation) */
   private currentProjectRoot: string | null = null;
+  private getWorkingDirectory(): string | null {
+    return this.isolatedDir || this.currentProjectRoot || null;
+  }
 
   setQueuedApprovalAction(action: 'approve' | 'iterate'): void {
     this.queuedApprovalAction = action;

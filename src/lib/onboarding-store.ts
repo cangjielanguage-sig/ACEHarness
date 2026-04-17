@@ -1,9 +1,9 @@
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import { resolve } from 'path';
 import { listUsers } from '@/lib/user-store';
+import { getWorkspaceDataFile, getWorkspaceDataDir } from '@/lib/app-paths';
 
-const ONBOARDING_FILE = resolve(process.cwd(), 'data', 'onboarding-progress.json');
+const ONBOARDING_FILE = getWorkspaceDataFile('onboarding-progress.json');
 
 export type OnboardingRole = 'admin' | 'user';
 export type OnboardingPhase = 'intro' | 'overview' | 'module' | 'member' | 'admin' | 'adminReport' | 'done';
@@ -117,7 +117,7 @@ export function defaultProgress(userId: string, role: OnboardingRole): Onboardin
 }
 
 async function saveAll(progressList: OnboardingProgress[]): Promise<void> {
-  await mkdir(resolve(process.cwd(), 'data'), { recursive: true });
+  await mkdir(getWorkspaceDataDir(), { recursive: true });
   await writeFile(ONBOARDING_FILE, JSON.stringify(progressList, null, 2), 'utf-8');
 }
 

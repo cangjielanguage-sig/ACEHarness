@@ -13,8 +13,10 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const locale = process.env.ACE_LOCALE === 'en' ? 'en' : 'zh-CN';
+
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <head />
       <body>
         <Providers>
