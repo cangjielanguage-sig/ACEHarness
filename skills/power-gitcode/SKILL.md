@@ -55,7 +55,13 @@ python3 ... get_pr --repo Cangjie/cangjie_compiler --pr-number 1149   ← 错
 python3 ... get_pr --owner Cangjie/cangjie_compiler --number 1149      ← 错
 ```
 
-**Token 配置：** 环境变量 `gitcode_password` 或 `gitcode_token`（在调用脚本前确保已设置）。
+**Token 配置：** 环境变量 `gitcode_password` 或 `gitcode_token`。**在执行任何脚本命令前，必须先执行 `source ~/.zshrc` 加载 Token，否则会报认证错误。**
+
+```bash
+# 每次调用脚本前必须先执行：
+source ~/.zshrc
+python3 skills/power-gitcode/scripts/power-gitcode.py ...
+```
 
 ## 能力概览
 

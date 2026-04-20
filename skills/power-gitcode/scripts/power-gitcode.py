@@ -20,12 +20,11 @@ class GitCodeClient:
     API_BASE = "api.gitcode.com"
 
     def __init__(self, token: str = None):
-        self.token = token or os.getenv("gitcode_password") or os.getenv("gitcode_token")
+        self.token = token or os.getenv("gitcode_token") or os.getenv("GITCODE_TOKEN")
         if not self.token:
             print("错误: 未找到 GitCode 密钥。", file=sys.stderr)
-            print("请通过以下任一方式配置（密钥仅在本地使用，不会发送给第三方）：", file=sys.stderr)
-            print("  1. export gitcode_password=\"你的Token\"  (推荐)", file=sys.stderr)
-            print("  2. export gitcode_token=\"你的Token\"", file=sys.stderr)
+            print("请通过以下方式配置（密钥仅在本地使用，不会发送给第三方）：", file=sys.stderr)
+            print("  export gitcode_token=\"你的Token\"", file=sys.stderr)
             print("获取 Token: GitCode → 设置 → 安全设置 → 私人令牌", file=sys.stderr)
 
     def _request(self, method: str, path: str, body: dict = None) -> Tuple[int, dict]:
