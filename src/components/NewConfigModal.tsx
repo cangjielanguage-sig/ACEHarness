@@ -99,6 +99,10 @@ export default function NewConfigModal({
     setValue('filename', generateDefaultFilename(), { shouldDirty: false, shouldValidate: true });
   }, [generateDefaultFilename, getValues, isOpen, setValue]);
 
+  useEffect(() => {
+    setValue('mode', workflowMode, { shouldDirty: true, shouldValidate: false });
+  }, [setValue, workflowMode]);
+
   const applySchemaIssues = useCallback((issues: Array<{ path?: (string | number)[]; message?: string }>) => {
     const supported = ['filename', 'workflowName', 'workingDirectory', 'workspaceMode', 'description', 'requirements', 'mode'];
     clearErrors();
@@ -677,6 +681,10 @@ ${data.description ? `**补充说明**: ${data.description}` : ''}
           </Button>
         </div>
         <form id="new-config-form" onSubmit={handleSubmit(onSubmit, onInvalid)} className="flex-1 overflow-auto px-6 space-y-6">
+          <input type="hidden" {...register('mode')} />
+          <input type="hidden" {...register('workingDirectory')} />
+          <input type="hidden" {...register('workspaceMode')} />
+
           {/* 工作流模式选择 */}
           <div className="space-y-2">
             <Label className="text-base font-semibold">

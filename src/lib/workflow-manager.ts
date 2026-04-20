@@ -577,6 +577,13 @@ export class WorkflowManager extends EventEmitter {
 
     // Register process in processManager so it's visible to the frontend
     const proc = processManager.registerExternalProcess(processId, agent, step, options.runId);
+    (proc as any)._cancelFn = () => {
+      try {
+        this.currentEngine?.cancel();
+      } catch {
+        // Best-effort cancellation; process state is still marked as killed.
+      }
+    };
 
     // Set up stream handler for the engine
     const streamHandler = (event: EngineStreamEvent) => {

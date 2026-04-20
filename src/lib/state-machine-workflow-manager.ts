@@ -977,6 +977,13 @@ export class StateMachineWorkflowManager extends EventEmitter {
       options.runId,
       options.stepId
     );
+    (proc as any)._cancelFn = () => {
+      try {
+        this.currentEngine?.cancel();
+      } catch {
+        // Best-effort cancellation; process state is still marked as killed.
+      }
+    };
 
     const streamHandler = (event: EngineStreamEvent) => {
       // 'thought' events are forwarded separately (matching Claude Code's { thinking } field),
@@ -1295,6 +1302,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
         }
 
         this.currentState = humanSelectedState;
+        this.emit('state-change', {
+          state: this.currentState,
+          message: `进入状态: ${this.currentState}`,
+        });
       } else {
         // No human approval needed, proceed automatically
         // Record transition
@@ -1337,6 +1348,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
         }
 
         this.currentState = nextState;
+        this.emit('state-change', {
+          state: this.currentState,
+          message: `进入状态: ${this.currentState}`,
+        });
       }
     }
   }
