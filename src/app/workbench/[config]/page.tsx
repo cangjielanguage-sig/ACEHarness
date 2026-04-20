@@ -1488,39 +1488,31 @@ export default function WorkbenchPage() {
     // Try SSE live stream if we have runId + step
     if (rid && activeStep) {
       let sseBuffer = '';
+      let sseRaw = '';
       const es = streamApi.connectLiveStream(
         rid,
         activeStep,
         (content) => {
-          // Accumulate into buffer, only split on CHUNK_SEP boundaries
-          sseBuffer += content;
-          const parts = sseBuffer.split(CHUNK_SEP);
-          // Last part is incomplete (no trailing separator) — keep in buffer
+          // SSE may replay the full accumulated content after reconnect.
+          // Normalize it into a monotonic raw stream before splitting chunks.
+          const nextRaw = sseRaw && content.startsWith(sseRaw)
+            ? content
+            : content.length >= sseRaw.length && content.startsWith(sseRaw)
+              ? content
+              : sseRaw && sseRaw.startsWith(content)
+                ? sseRaw
+                : sseRaw + content;
+
+          if (nextRaw === sseRaw) return;
+
+          sseRaw = nextRaw;
+          liveStreamRawRef.current = sseRaw;
+          liveStreamLenRef.current = sseRaw.length;
+
+          const parts = sseRaw.split(CHUNK_SEP);
           sseBuffer = parts.pop() || '';
-          if (parts.length > 0) {
-            const newChunks = parts.filter(Boolean);
-            if (newChunks.length > 0) {
-              liveStreamLenRef.current += content.length;
-              setLiveStream(prev => [...prev, ...newChunks]);
-            }
-          }
-          // Always update the last (in-progress) chunk
-          if (sseBuffer) {
-            setLiveStream(prev => {
-              // Replace or append the trailing incomplete chunk
-              const last = prev.length > 0 ? prev[prev.length - 1] : null;
-              // If last chunk was the previous buffer tail, replace it
-              if (last !== null && sseBuffer.startsWith(last)) {
-                return [...prev.slice(0, -1), sseBuffer];
-              }
-              // First chunk or after a separator
-              if (prev.length === 0 || parts.length > 0) {
-                return [...prev, sseBuffer];
-              }
-              // Append to last chunk (streaming continuation)
-              return [...prev.slice(0, -1), sseBuffer];
-            });
-          }
+          const rebuilt = [...parts.filter(Boolean), ...(sseBuffer ? [sseBuffer] : [])];
+          setLiveStream(rebuilt);
         },
         (_status) => {
           // Stream done — don't auto-close panel, user may still be reading

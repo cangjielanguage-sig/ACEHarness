@@ -12,6 +12,13 @@ import { NOTEBOOK_OUTPUT_ATTR } from '@/lib/notebook-markdown';
 import { copyText } from '@/lib/clipboard';
 import styles from './Markdown.module.css';
 
+function isSummaryElement(child: unknown): child is React.ReactElement<any> {
+  return isValidElement(child) && (
+    child.type === 'summary' ||
+    child.props?.node?.tagName === 'summary'
+  );
+}
+
 function CopyButton({ text, className = 'absolute top-2 right-2' }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
@@ -260,6 +267,13 @@ const components = {
       </code>
     );
   },
+  pre({ node: _node, children, ...props }: any) {
+    const parts = Children.toArray(children);
+    if (parts.length === 1 && isValidElement(parts[0])) {
+      return <>{parts[0]}</>;
+    }
+    return <pre {...props}>{children}</pre>;
+  },
   a({ href, children, ...props }: any) {
     const isGitCode = href && href.includes('gitcode.com');
     const linkStyle = { color: 'white', textDecoration: 'underline' };
@@ -288,7 +302,7 @@ const components = {
     }
 
     const parts = Children.toArray(children);
-    const summaryNode = parts.find((child) => isValidElement(child) && child.type === 'summary') || null;
+    const summaryNode = parts.find(isSummaryElement) || null;
     const bodyText = parts
       .filter((child) => child !== summaryNode && typeof child === 'string')
       .join('')
@@ -307,7 +321,7 @@ const components = {
       </details>
     );
   },
-  summary({ children, ...props }: any) {
+  summary({ node: _node, children, ...props }: any) {
     return (
       <summary className="cursor-pointer px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground select-none" {...props}>
         {children}
