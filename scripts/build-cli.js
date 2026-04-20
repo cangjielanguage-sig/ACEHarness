@@ -2,7 +2,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 const ts = require('typescript');
 
 const root = path.resolve(__dirname, '..');
@@ -18,16 +17,44 @@ function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
+function makeWritableRecursive(targetPath) {
+  if (!fs.existsSync(targetPath)) return;
+
+  let stat;
+  try {
+    stat = fs.lstatSync(targetPath);
+  } catch {
+    return;
+  }
+
+  try {
+    fs.chmodSync(targetPath, 0o700);
+  } catch {
+    // Best effort only — some platforms/files may still reject chmod.
+  }
+
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+
+  for (const entry of fs.readdirSync(targetPath)) {
+    makeWritableRecursive(path.join(targetPath, entry));
+  }
+}
+
 function cleanDir(dirPath) {
   if (!fs.existsSync(dirPath)) return;
+
   try {
     fs.rmSync(dirPath, { recursive: true, force: true });
     return;
-  } catch {
-    // Primary rmSync failed — try shell chmod + rm
+  } catch (error) {
+    if (!error || (error.code !== 'EPERM' && error.code !== 'EACCES')) {
+      throw error;
+    }
   }
+
   try {
-    execSync(`chmod -R u+w "${dirPath}" 2>/dev/null; rm -rf "${dirPath}"`, { stdio: 'ignore' });
+    makeWritableRecursive(dirPath);
+    fs.rmSync(dirPath, { recursive: true, force: true });
   } catch {
     // Cannot clean — use an alternate dist directory to avoid the permission issue
     console.warn(`[build-cli] Warning: could not clean ${dirPath}, using alternate output dir`);
