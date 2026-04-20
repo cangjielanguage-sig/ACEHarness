@@ -15,7 +15,7 @@ import styles from './Markdown.module.css';
 function isSummaryElement(child: unknown): child is React.ReactElement<any> {
   return isValidElement(child) && (
     child.type === 'summary' ||
-    child.props?.node?.tagName === 'summary'
+    (child.props as any)?.node?.tagName === 'summary'
   );
 }
 
