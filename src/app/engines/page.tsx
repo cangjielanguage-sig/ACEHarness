@@ -90,6 +90,14 @@ const engines: Engine[] = [
     features: ['ACP 协议', '智能补全', '代码重构', '命令行集成', '上下文感知'],
     endpoints: ['anthropic', 'openai'],
   },
+  {
+    id: 'trae-cli',
+    name: 'Trae CLI',
+    description: 'Trae 命令行 AI 编程助手，支持 ACP 协议，提供智能代码编辑和执行能力',
+    status: 'available',
+    features: ['ACP 协议', '智能代码编辑', '代码执行', 'MCP 工具支持', '插件系统'],
+    endpoints: ['anthropic', 'openai'],
+  },
 ];
 
 export default function EnginesPage() {
@@ -177,6 +185,7 @@ export default function EnginesPage() {
         'claude-code': '安装方法：npm install -g @anthropic-ai/claude-code',
         'cangjie-magic': '请在环境变量中配置 CANGJIE_HOME、CANGJIE_MAGIC_PATH、OPENSSL_PATH、CANGJIE_STDX_PATH',
         'opencode': '安装方法：npm install -g opencode-ai',
+        'trae-cli': '安装方法：curl -fsSL https://trae.cn/install | bash',
       };
       const hint = hints[engineId] || '请确保已安装相应的命令行工具';
       toast('error', `引擎 ${engine?.name} 不可用。${hint}`);
@@ -521,6 +530,11 @@ CANGJIE_STDX_PATH — stdx 动态库路径`}
               curl -fsSL https://cursor.sh/install | bash
             </code>
             <p className="text-xs">安装后刷新可用性检查，即可切换使用 Cursor CLI 引擎。</p>
+            <p className="mt-2"><strong>安装 Trae CLI：</strong></p>
+            <code className="block bg-background/50 p-2 rounded text-xs">
+              curl -fsSL https://trae.cn/install | bash
+            </code>
+            <p className="text-xs">安装后刷新可用性检查，即可切换使用 Trae CLI 引擎。</p>
           </div>
         </motion.div>
       </div>

@@ -164,6 +164,9 @@ export class ACPEngine extends EventEmitter {
       case 'cursor':
         args.push('acp');
         break;
+      case 'trae-cli':
+        args.push('acp', 'serve');
+        break;
       default:
         throw new Error(`Unknown engine type: ${this.config.engineType}`);
     }

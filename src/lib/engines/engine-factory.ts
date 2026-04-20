@@ -14,8 +14,9 @@ import { OpenCodeEngineWrapper } from './opencode-wrapper';
 import { CodexEngineWrapper } from './codex-wrapper';
 import { CursorEngineWrapper } from './cursor-wrapper';
 import { ClaudeCodeEngineWrapper } from './claude-code-wrapper';
+import { TraeCliEngineWrapper } from './trae-cli-wrapper';
 
-export type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode';
+export type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode' | 'trae-cli';
 
 interface EngineConfig {
   engine: EngineType;
@@ -144,6 +145,14 @@ export async function createEngine(type?: EngineType): Promise<Engine | null> {
       }
       return ocEngine;
 
+    case 'trae-cli':
+      const traeEngine = new TraeCliEngineWrapper();
+      if (!(await traeEngine.isAvailable())) {
+        console.warn('[EngineFactory] Trae CLI is not available, falling back to Claude Code');
+        return null;
+      }
+      return traeEngine;
+
     default:
       console.warn(`Unknown engine type: ${engineType}`);
       return null;
@@ -178,6 +187,10 @@ export async function isEngineAvailable(type: EngineType): Promise<boolean> {
     case 'cursor':
       const cursorCheck = new CursorEngineWrapper();
       return await cursorCheck.isAvailable();
+
+    case 'trae-cli':
+      const traeCheck = new TraeCliEngineWrapper();
+      return await traeCheck.isAvailable();
 
     default:
       return false;
