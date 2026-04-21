@@ -37,6 +37,11 @@ export const ENGINE_META: Record<EngineType, EngineMeta> = {
     name: 'CangjieMagic',
     iconPath: '/engines/cangjie_magic.png',
   },
+  'trae-cli': {
+    id: 'trae-cli',
+    name: 'Trae CLI',
+    iconPath: '/engines/trae.svg',
+  },
 }
 
 export const CONCRETE_ENGINE_IDS = Object.keys(ENGINE_META) as EngineType[]

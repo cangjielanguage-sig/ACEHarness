@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
     'opencode': 'opencode',
     'kiro-cli': 'kiro-cli',
     'cursor': 'agent',
+    'trae-cli': 'trae-cli',
   };
 
   const command = commandMap[engineType];

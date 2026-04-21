@@ -12,6 +12,7 @@ const ENGINE_CONFIG_DIRS: Record<string, string> = {
   'codex': '.codex',
   'cursor': '.cursor',
   'cangjie-magic': '.claude',
+  'trae-cli': '.trae',
 };
 
 /**
