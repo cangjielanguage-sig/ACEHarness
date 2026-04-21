@@ -687,7 +687,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       await reportPreparingProgress('准备中：构建 Agent 视图...', '构建 Agent 视图');
       this.initializeAgents(workflowConfig);
       await reportPreparingProgress('准备中：初始化执行引擎...', '初始化执行引擎');
-      await this.initializeEngine();
+      await this.initializeEngine(workflowConfig.context?.engine);
       if (this.shouldStop) return;
       await reportPreparingProgress('准备中：同步 Skills...', '同步 Skills');
       await this.syncSkillsToWorkspace(workflowConfig);
@@ -923,11 +923,25 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   /**
-   * Initialize the AI engine based on .engine.json configuration
+   * Initialize the AI engine based on workflow config first, then global config.
    */
-  private async initializeEngine(): Promise<void> {
+  private async initializeEngine(workflowEngine?: string): Promise<void> {
     try {
-      this.engineType = await getConfiguredEngine();
+      const requestedEngine = workflowEngine?.trim();
+      const supportedEngines: EngineType[] = ['claude-code', 'kiro-cli', 'codex', 'cursor', 'cangjie-magic', 'opencode', 'trae-cli'];
+      const isSupportedEngine = (value: string): value is EngineType => supportedEngines.includes(value as EngineType);
+
+      if (requestedEngine) {
+        if (isSupportedEngine(requestedEngine)) {
+          this.engineType = requestedEngine;
+        } else {
+          const globalEngine = await getConfiguredEngine();
+          this.emit('log', `工作流配置的引擎无效: ${requestedEngine}，回退到全局引擎 ${globalEngine}`);
+          this.engineType = globalEngine;
+        }
+      } else {
+        this.engineType = await getConfiguredEngine();
+      }
       this.emit('log', `使用引擎: ${this.engineType}`);
 
       // Always initialize currentEngine for the selected engine, including claude-code.
@@ -2343,7 +2357,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.initializeAgents(workflowConfig);
 
     // Initialize engine
-    await this.initializeEngine();
+    await this.initializeEngine(workflowConfig.context?.engine);
 
     // If resuming from __human_approval__, restore the approval wait flow
     if (this.currentState === '__human_approval__') {
