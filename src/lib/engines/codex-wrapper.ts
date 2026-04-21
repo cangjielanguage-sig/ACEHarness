@@ -13,6 +13,17 @@ export class CodexEngineWrapper extends EventEmitter implements Engine {
   private currentThread: any = null;
   private codexInstance: any = null;
   private _abortController: AbortController | null = null;
+  private lastBlockWasTool = false;
+
+  private getThreadOptions(options: EngineOptions) {
+    return {
+      model: options.model || undefined,
+      workingDirectory: options.workingDirectory,
+      skipGitRepoCheck: true,
+      approvalPolicy: 'never' as const,
+      sandboxMode: 'danger-full-access' as const,
+    };
+  }
 
   getName(): string {
     return 'codex';
@@ -44,9 +55,53 @@ export class CodexEngineWrapper extends EventEmitter implements Engine {
     return null;
   }
 
+  private emitText(content: string, appendToOutput = true): void {
+    if (!content) return;
+    if (appendToOutput) this.collectedOutput += content;
+    this.emit('stream', {
+      type: 'text',
+      content,
+    } as EngineStreamEvent);
+  }
+
+  private collectedOutput = '';
+
+  private formatCommandExecution(command: string): string {
+    const cmd = command || '';
+    const cmdLines = cmd.split('\n');
+    let content = `\n\n**🔧 bash**\n`;
+    if (cmdLines.length <= 1 && cmd.length <= 120) {
+      content += `\n💻 执行命令: \`${cmd}\`\n`;
+    } else {
+      content += `\n💻 执行命令 (${cmdLines.length} 行)\n`;
+      content += `\n<details><summary>查看命令</summary>\n\n${fenced(cmd, 'bash')}\n\n</details>\n`;
+    }
+    return content;
+  }
+
+  private formatCommandResult(output: string, exitCode?: number): string {
+    let resultText = (output || '').trim();
+    if (exitCode !== 0 && exitCode != null) {
+      resultText += resultText ? `\n(exit code: ${exitCode})` : `(exit code: ${exitCode})`;
+    }
+    if (!resultText) return '';
+    const lines = resultText.split('\n');
+    if (lines.length <= 15) {
+      return `\n${fenced(resultText)}\n`;
+    }
+    return `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n${fenced(resultText)}\n\n</details>\n`;
+  }
+
+  private formatFileChanges(changes: any[]): string {
+    const summary = (changes || []).map((c: any) => `  ${c.kind}: ${c.path}`).join('\n');
+    if (!summary) return '';
+    return `\n\n**📝 文件变更**\n\n${fenced(summary)}\n`;
+  }
+
   async execute(options: EngineOptions): Promise<EngineResult> {
     this._abortController = new AbortController();
-    let outputText = '';
+    this.collectedOutput = '';
+    this.lastBlockWasTool = false;
     try {
       const { Codex } = await import('@openai/codex-sdk');
 
@@ -57,15 +112,12 @@ export class CodexEngineWrapper extends EventEmitter implements Engine {
 
       // Create or reuse thread
       if (options.sessionId) {
-        this.currentThread = this.codexInstance.resumeThread(options.sessionId);
+        this.currentThread = this.codexInstance.resumeThread(
+          options.sessionId,
+          this.getThreadOptions(options),
+        );
       } else if (!this.currentThread) {
-        this.currentThread = this.codexInstance.startThread({
-          model: options.model || undefined,
-          workingDirectory: options.workingDirectory,
-          skipGitRepoCheck: true,
-          approvalPolicy: 'never',
-          sandboxMode: 'danger-full-access',
-        });
+        this.currentThread = this.codexInstance.startThread(this.getThreadOptions(options));
       }
 
       // Build prompt
@@ -85,64 +137,37 @@ export class CodexEngineWrapper extends EventEmitter implements Engine {
           case 'item.started': {
             const item = event.item;
             if (item.type === 'command_execution') {
-              const cmd = item.command || '';
-              const cmdLines = cmd.split('\n');
-              let content = `\n\n**🔧 命令执行**\n`;
-              if (cmdLines.length <= 1 && cmd.length <= 120) {
-                content += `\n💻 执行命令: \`${cmd}\`\n`;
-              } else {
-                content += `\n💻 执行命令 (${cmdLines.length} 行)\n`;
-                content += `\n<details><summary>查看命令</summary>\n\n${fenced(cmd, 'bash')}\n\n</details>\n`;
-              }
-              this.emit('stream', {
-                type: 'tool',
-                content,
-                metadata: { kind: 'command', command: cmd },
-              } as EngineStreamEvent);
+              this.emitText(this.formatCommandExecution(item.command || ''));
+              this.lastBlockWasTool = true;
             } else if (item.type === 'file_change') {
-              const files = (item as any).changes?.map((c: any) => `${c.kind} ${c.path}`).join(', ') || '';
-              this.emit('stream', {
-                type: 'tool',
-                content: `\n\n**📝 文件变更**\n\n${files}\n`,
-                metadata: { kind: 'file_change' },
-              } as EngineStreamEvent);
+              const formatted = this.formatFileChanges((item as any).changes || []);
+              if (formatted) {
+                this.emitText(formatted);
+                this.lastBlockWasTool = true;
+              }
             }
             break;
           }
           case 'item.completed': {
             const item = event.item;
             if (item.type === 'agent_message') {
-              outputText += item.text;
-              this.emit('stream', {
-                type: 'text',
-                content: item.text,
-              } as EngineStreamEvent);
+              const text = item.text || '';
+              const prefix = this.lastBlockWasTool && !text.startsWith('\n')
+                ? '\n\n<!-- chunk-boundary -->\n\n'
+                : '';
+              this.emitText(prefix + text);
+              this.lastBlockWasTool = false;
             } else if (item.type === 'reasoning') {
               this.emit('stream', {
                 type: 'thought',
                 content: (item as any).text || '',
               } as EngineStreamEvent);
             } else if (item.type === 'command_execution') {
-              const output = ((item as any).aggregated_output || '').trim();
-              const exitCode = (item as any).exit_code;
-              let resultText = output;
-              if (exitCode !== 0 && exitCode != null) {
-                resultText += resultText ? `\n(exit code: ${exitCode})` : `(exit code: ${exitCode})`;
-              }
-              if (resultText) {
-                const lines = resultText.split('\n');
-                if (lines.length <= 15) {
-                  this.emit('stream', { type: 'text', content: `\n${fenced(resultText)}\n` } as EngineStreamEvent);
-                } else {
-                  this.emit('stream', { type: 'text', content: `\n<details><summary>查看输出 (${lines.length} 行)</summary>\n\n${fenced(resultText)}\n\n</details>\n` } as EngineStreamEvent);
-                }
-              }
+              const formatted = this.formatCommandResult((item as any).aggregated_output || '', (item as any).exit_code);
+              if (formatted) this.emitText(formatted);
             } else if (item.type === 'file_change') {
-              const changes = (item as any).changes || [];
-              const summary = changes.map((c: any) => `  ${c.kind}: ${c.path}`).join('\n');
-              if (summary) {
-                this.emit('stream', { type: 'text', content: `\n${fenced(summary)}\n` } as EngineStreamEvent);
-              }
+              const formatted = this.formatFileChanges((item as any).changes || []);
+              if (formatted) this.emitText(formatted);
             } else if (item.type === 'todo_list') {
               const items = (item as any).items || [];
               if (items.length > 0) {
@@ -156,7 +181,7 @@ export class CodexEngineWrapper extends EventEmitter implements Engine {
                   content += `<div class="ace-todo-item ${cls}">${icon} ${t.text}</div>\n`;
                 }
                 content += `</div>\n`;
-                this.emit('stream', { type: 'text', content } as EngineStreamEvent);
+                this.emitText(content);
               }
             }
             break;
@@ -179,7 +204,7 @@ export class CodexEngineWrapper extends EventEmitter implements Engine {
             } as EngineStreamEvent);
             return {
               success: false,
-              output: outputText,
+              output: this.collectedOutput,
               error: errMsg,
             };
           }
@@ -188,7 +213,7 @@ export class CodexEngineWrapper extends EventEmitter implements Engine {
 
       return {
         success: true,
-        output: outputText,
+        output: this.collectedOutput,
         sessionId: this.currentThread?.id,
       };
     } catch (error: any) {
@@ -196,7 +221,7 @@ export class CodexEngineWrapper extends EventEmitter implements Engine {
       if (error?.name === 'AbortError' || this._abortController?.signal.aborted) {
         return {
           success: true,
-          output: outputText || '',
+          output: this.collectedOutput || '',
           stopReason: 'cancelled',
         };
       }
