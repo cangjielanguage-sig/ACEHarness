@@ -543,6 +543,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       supervisorFlow: this.supervisorFlow,
       agentFlow: this.agentFlow,
       stepLogs: this.stepLogs,
+      pendingQuestion: this.pendingUserQuestion,
       pendingSdkPlanQuestion: this.pendingSdkPlanQuestionPayload,
       pendingSdkPlanSubtask: this.pendingSdkPlanSubtaskPayload,
       pendingPlanReview: this.pendingPlanReviewPayload,
@@ -752,6 +753,13 @@ export class StateMachineWorkflowManager extends EventEmitter {
   async stop(): Promise<void> {
     this.shouldStop = true;
     this.status = 'stopped';
+    // Clear pending interaction payloads so UI won't show stale dialogs after stop.
+    this.pendingUserQuestion = null;
+    this.pendingUserQuestionResolver = null;
+    this.pendingSdkPlanQuestionPayload = null;
+    this.pendingSdkPlanSubtaskPayload = null;
+    this.pendingPlanReviewPayload = null;
+    this.pendingPlanReviewResolver = null;
     this.emit('status', {
       status: 'stopped',
       message: '工作流已停止',

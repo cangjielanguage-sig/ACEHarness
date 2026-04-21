@@ -280,7 +280,8 @@ function formatClaudeToolBlock(toolNameRaw: string, inputJson: string, toolId?: 
 }
 
 export async function readLatestPlanFile(
-  workDir: string
+  workDir: string,
+  minMtimeMs?: number
 ): Promise<{ path: string; content: string } | null> {
   const plansDir = join(workDir, '.claude', 'plans');
   if (!existsSync(plansDir)) return null;
@@ -291,6 +292,8 @@ export async function readLatestPlanFile(
       const p = join(plansDir, name);
       const st = await stat(p).catch(() => null);
       if (st?.isFile()) {
+        // Only accept plan files created/updated during current execution window.
+        if (typeof minMtimeMs === 'number' && st.mtimeMs < minMtimeMs) continue;
         if (!best || st.mtimeMs > best.mtime) best = { path: p, mtime: st.mtimeMs };
       }
     }
@@ -737,7 +740,7 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
               ? (accumulated || resultText)
               : (resultText || accumulated);
             if (isPlan) {
-              const fsHit = await readLatestPlanFile(options.workingDirectory);
+              const fsHit = await readLatestPlanFile(options.workingDirectory, execStartedAt);
               if (fsHit?.content?.trim()) this.setCapturedDeliverable(fsHit.content, fsHit.path, 'filesystem');
             }
             return {
@@ -757,7 +760,7 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
 
       // Post-loop: filesystem fallback + persist plan
       if (isPlan) {
-        const fsHit = await readLatestPlanFile(options.workingDirectory);
+        const fsHit = await readLatestPlanFile(options.workingDirectory, execStartedAt);
         if (fsHit?.content?.trim()) {
           this.setCapturedDeliverable(fsHit.content, fsHit.path, 'filesystem');
         }

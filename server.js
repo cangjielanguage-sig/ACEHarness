@@ -2,6 +2,60 @@
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+
+/**
+ * Custom server 不会自动加载 Next 在 `next dev` 下注入的 .env*，需在 require('next') 之前合并进 process.env。
+ * 与 Next 常见规则一致：已在操作系统环境中存在的变量不会被文件覆盖；多文件时后者覆盖前者。
+ */
+function parseEnvFileContent(content) {
+  const out = {};
+  for (let line of content.split(/\r?\n/)) {
+    line = line.replace(/^\uFEFF/, '');
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    let key = trimmed.slice(0, eq).trim();
+    if (key.startsWith('export ')) key = key.slice(7).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      const q = value[0];
+      value = value.slice(1, -1);
+      if (q === '"') {
+        value = value.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      }
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function loadProjectEnvFiles() {
+  const root = __dirname;
+  const isDev =
+    process.argv.includes('dev') || process.env.NODE_ENV !== 'production';
+  const names = isDev
+    ? ['.env', '.env.development', '.env.local', '.env.development.local']
+    : ['.env', '.env.production', '.env.local', '.env.production.local'];
+  const shellKeys = new Set(Object.keys(process.env));
+  const merged = {};
+  for (const name of names) {
+    const p = path.join(root, name);
+    if (!fs.existsSync(p)) continue;
+    const parsed = parseEnvFileContent(fs.readFileSync(p, 'utf8'));
+    Object.assign(merged, parsed);
+  }
+  for (const [key, value] of Object.entries(merged)) {
+    if (!shellKeys.has(key)) process.env[key] = value;
+  }
+}
+
+loadProjectEnvFiles();
+
 const next = require('next');
 const { WebSocketServer } = require('ws');
 const Y = require('yjs');

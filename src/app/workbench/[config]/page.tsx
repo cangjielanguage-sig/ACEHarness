@@ -331,6 +331,17 @@ export default function WorkbenchPage() {
         setPendingSdkPlanQuestion(null);
       }
 
+      const pendingQuestion = (status as any).pendingQuestion;
+      if (pendingQuestion && pendingQuestion.question) {
+        setPendingPlanQuestion({
+          question: pendingQuestion.question,
+          fromAgent: pendingQuestion.fromAgent || '',
+          round: typeof pendingQuestion.round === 'number' ? pendingQuestion.round : 0,
+        });
+      } else {
+        setPendingPlanQuestion(null);
+      }
+
       if (status.pendingPlanReview) {
         setPendingPlanReview(status.pendingPlanReview as any);
         setPlanReviewMode('view');
