@@ -280,8 +280,7 @@ function formatClaudeToolBlock(toolNameRaw: string, inputJson: string, toolId?: 
 }
 
 export async function readLatestPlanFile(
-  workDir: string,
-  minMtimeMs?: number
+  workDir: string
 ): Promise<{ path: string; content: string } | null> {
   const plansDir = join(workDir, '.claude', 'plans');
   if (!existsSync(plansDir)) return null;
@@ -292,8 +291,6 @@ export async function readLatestPlanFile(
       const p = join(plansDir, name);
       const st = await stat(p).catch(() => null);
       if (st?.isFile()) {
-        // Only accept plan files created/updated during current execution window.
-        if (typeof minMtimeMs === 'number' && st.mtimeMs < minMtimeMs) continue;
         if (!best || st.mtimeMs > best.mtime) best = { path: p, mtime: st.mtimeMs };
       }
     }
@@ -705,8 +702,20 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
             }
             // Hide SDK retry noise from end-user stream output.
             continue;
-          } else if (sys.subtype === 'init' || sys.subtype === 'session_start') {
-            // Skip init/session_start messages — not useful for output
+          } else if (
+            sys.subtype === 'init' ||
+            sys.subtype === 'session_start' ||
+            sys.subtype === 'hook_started' ||
+            sys.subtype === 'hook_response'
+          ) {
+            if (sys.subtype === 'hook_started' || sys.subtype === 'hook_response') {
+              console.debug('[ClaudeCode SDK hook]', {
+                subtype: sys.subtype,
+                message: sys.message,
+                toolName: sys.tool_name,
+              });
+            }
+            // Skip SDK lifecycle noise — not useful for end-user output
           } else if (sys.message) {
             info = `[SDK] ${sys.subtype ?? 'system'}: ${sys.message}`;
           } else if (sys.subtype) {
@@ -740,7 +749,7 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
               ? (accumulated || resultText)
               : (resultText || accumulated);
             if (isPlan) {
-              const fsHit = await readLatestPlanFile(options.workingDirectory, execStartedAt);
+              const fsHit = await readLatestPlanFile(options.workingDirectory);
               if (fsHit?.content?.trim()) this.setCapturedDeliverable(fsHit.content, fsHit.path, 'filesystem');
             }
             return {
@@ -760,7 +769,7 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
 
       // Post-loop: filesystem fallback + persist plan
       if (isPlan) {
-        const fsHit = await readLatestPlanFile(options.workingDirectory, execStartedAt);
+        const fsHit = await readLatestPlanFile(options.workingDirectory);
         if (fsHit?.content?.trim()) {
           this.setCapturedDeliverable(fsHit.content, fsHit.path, 'filesystem');
         }

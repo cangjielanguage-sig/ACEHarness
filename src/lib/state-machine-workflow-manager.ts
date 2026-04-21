@@ -40,14 +40,6 @@ import {
   type RouteDecision,
 } from './supervisor-router';
 
-/** 用户停止后打断仍在 await 的步骤；非引擎错误，executeState 应中止本状态循环。 */
-class WorkflowStoppedInterrupt extends Error {
-  constructor() {
-    super('工作流已停止');
-    this.name = 'WorkflowStoppedInterrupt';
-  }
-}
-
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
@@ -172,7 +164,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     stepName: string;
   } | null = null;
   private pendingPlanReviewResolver: ((result: {
-    action: 'approve' | 'edit' | 'reject' | 'stop';
+    action: 'approve' | 'edit' | 'reject';
     content?: string;
     feedback?: string;
   }) => void) | null = null;
@@ -551,7 +543,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
       supervisorFlow: this.supervisorFlow,
       agentFlow: this.agentFlow,
       stepLogs: this.stepLogs,
-      pendingQuestion: this.pendingUserQuestion,
       pendingSdkPlanQuestion: this.pendingSdkPlanQuestionPayload,
       pendingSdkPlanSubtask: this.pendingSdkPlanSubtaskPayload,
       pendingPlanReview: this.pendingPlanReviewPayload,
@@ -696,7 +687,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       await reportPreparingProgress('准备中：构建 Agent 视图...', '构建 Agent 视图');
       this.initializeAgents(workflowConfig);
       await reportPreparingProgress('准备中：初始化执行引擎...', '初始化执行引擎');
-      await this.initializeEngine();
+      await this.initializeEngine(workflowConfig.context?.engine);
       if (this.shouldStop) return;
       await reportPreparingProgress('准备中：同步 Skills...', '同步 Skills');
       await this.syncSkillsToWorkspace(workflowConfig);
@@ -761,25 +752,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
   async stop(): Promise<void> {
     this.shouldStop = true;
     this.status = 'stopped';
-    // 必须先 resolve 再清空，否则 waitForUserAnswer / waitForPlanApproval 中的 Promise 永不结束。
-    if (this.pendingUserQuestionResolver) {
-      const resolveUq = this.pendingUserQuestionResolver;
-      this.pendingUserQuestionResolver = null;
-      this.pendingUserQuestion = null;
-      resolveUq('[已停止] 工作流已中断');
-    } else {
-      this.pendingUserQuestion = null;
-    }
-    if (this.pendingPlanReviewResolver) {
-      const resolvePr = this.pendingPlanReviewResolver;
-      this.pendingPlanReviewResolver = null;
-      this.pendingPlanReviewPayload = null;
-      resolvePr({ action: 'stop' });
-    } else {
-      this.pendingPlanReviewPayload = null;
-    }
-    this.pendingSdkPlanQuestionPayload = null;
-    this.pendingSdkPlanSubtaskPayload = null;
     this.emit('status', {
       status: 'stopped',
       message: '工作流已停止',
@@ -951,11 +923,25 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   /**
-   * Initialize the AI engine based on .engine.json configuration
+   * Initialize the AI engine based on workflow config first, then global config.
    */
-  private async initializeEngine(): Promise<void> {
+  private async initializeEngine(workflowEngine?: string): Promise<void> {
     try {
-      this.engineType = await getConfiguredEngine();
+      const requestedEngine = workflowEngine?.trim();
+      const supportedEngines: EngineType[] = ['claude-code', 'kiro-cli', 'codex', 'cursor', 'cangjie-magic', 'opencode', 'trae-cli'];
+      const isSupportedEngine = (value: string): value is EngineType => supportedEngines.includes(value as EngineType);
+
+      if (requestedEngine) {
+        if (isSupportedEngine(requestedEngine)) {
+          this.engineType = requestedEngine;
+        } else {
+          const globalEngine = await getConfiguredEngine();
+          this.emit('log', `工作流配置的引擎无效: ${requestedEngine}，回退到全局引擎 ${globalEngine}`);
+          this.engineType = globalEngine;
+        }
+      } else {
+        this.engineType = await getConfiguredEngine();
+      }
       this.emit('log', `使用引擎: ${this.engineType}`);
 
       // Always initialize currentEngine for the selected engine, including claude-code.
@@ -1163,20 +1149,15 @@ export class StateMachineWorkflowManager extends EventEmitter {
         if (stateConfig.steps.length > 0) {
           await this.executeState(stateConfig, config, requirements);
         }
-        if (!this.shouldStop) {
-          this.emit('state-change', {
-            state: this.currentState,
-            message: `到达终止状态: ${this.currentState}`,
-          });
-        }
+        this.emit('state-change', {
+          state: this.currentState,
+          message: `到达终止状态: ${this.currentState}`,
+        });
         break;
       }
 
       // Execute current state
       const result = await this.executeState(stateConfig, config, requirements);
-      if (this.shouldStop) {
-        break;
-      }
 
       // Evaluate transitions
       // Remember whether this transition was forced by the user so we can skip human approval
@@ -1439,9 +1420,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
           }
         }
       } catch (stepError: any) {
-        if (stepError instanceof WorkflowStoppedInterrupt) {
-          break;
-        }
         const errorMsg = stepError.message || String(stepError);
         stepOutputs.push(`ERROR: ${errorMsg}`);
         const isEngineLevelFailure =
@@ -2379,7 +2357,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.initializeAgents(workflowConfig);
 
     // Initialize engine
-    await this.initializeEngine();
+    await this.initializeEngine(workflowConfig.context?.engine);
 
     // If resuming from __human_approval__, restore the approval wait flow
     if (this.currentState === '__human_approval__') {
@@ -2790,9 +2768,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
           });
           this.emit('agent-flow', { agentFlow: this.agentFlow });
           const answer = await this.waitForUserAnswer(req.question, step.agent, round);
-          if (this.shouldStop) {
-            throw new WorkflowStoppedInterrupt();
-          }
           extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
         } else {
           const agentSummaries = this.buildAgentSummaries();
@@ -2840,9 +2815,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
             });
             this.emit('agent-flow', { agentFlow: this.agentFlow });
             const answer = await this.waitForUserAnswer(req.question, step.agent, round);
-            if (this.shouldStop) {
-              throw new WorkflowStoppedInterrupt();
-            }
             extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
           } else {
             this.emit('route-decision', { ...decision, round, fromAgent: step.agent });
@@ -3171,9 +3143,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
         const reviewResult = await this.waitForPlanApproval(
           stepKey, step, state, config, planForReview, planEngine, requirements
         );
-        if (reviewResult.action === 'stop') {
-          throw new WorkflowStoppedInterrupt();
-        }
         if (reviewResult.action === 'edit' && reviewResult.content?.trim()) {
           finalOutput = reviewResult.content;
           // Overwrite persisted plan with edited version
@@ -3250,9 +3219,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       return finalOutput;
     } catch (err: unknown) {
-      if (err instanceof WorkflowStoppedInterrupt) {
-        throw err;
-      }
       const msg = err instanceof Error ? err.message : String(err);
       this.pendingSdkPlanQuestionPayload = null;
       this.currentStep = stepKey;
@@ -3284,7 +3250,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     planContent: string,
     planEngine: import('./engines/claude-code-wrapper').ClaudeCodeEngineWrapper,
     requirements?: string,
-  ): Promise<{ action: 'approve' | 'edit' | 'reject' | 'stop'; content?: string; feedback?: string }> {
+  ): Promise<{ action: 'approve' | 'edit' | 'reject'; content?: string; feedback?: string }> {
     const MAX_REJECT_ROUNDS = 5;
     let currentPlan = planContent;
 
@@ -3308,7 +3274,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       // Wait for user response (10 min timeout)
       const result = await new Promise<{
-        action: 'approve' | 'edit' | 'reject' | 'stop';
+        action: 'approve' | 'edit' | 'reject';
         content?: string;
         feedback?: string;
       }>((resolve) => {
@@ -3324,10 +3290,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       this.pendingPlanReviewPayload = null;
       this.pendingPlanReviewResolver = null;
-
-      if (result.action === 'stop') {
-        return { action: 'stop' };
-      }
 
       if (result.action === 'approve' || result.action === 'edit') {
         return result;

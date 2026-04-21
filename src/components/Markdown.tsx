@@ -94,32 +94,31 @@ function renderHighlightedCode(code: string, language: string) {
 
   if (shouldUseSyntaxHighlighter(normalizedLanguage)) {
     return (
-      <div className="overflow-x-auto rounded-md bg-[#282c34] text-slate-100">
-        <SyntaxHighlighter
-          language={normalizedLanguage}
-          style={atomOneDark}
-          customStyle={{
-            margin: 0,
-            background: 'transparent',
+      <SyntaxHighlighter
+        language={normalizedLanguage}
+        style={atomOneDark}
+        customStyle={{
+          margin: 0,
+          background: '#282c34',
+          color: '#e2e8f0',
+          borderRadius: '0.375rem',
+          padding: '1rem',
+          fontSize: '13px',
+          lineHeight: '1.5rem',
+          overflowX: 'auto',
+        }}
+        codeTagProps={{
+          style: {
+            fontFamily: 'inherit',
             color: '#e2e8f0',
-            borderRadius: '0.375rem',
-            padding: '1rem',
-            fontSize: '13px',
-            lineHeight: '1.5rem',
-          }}
-          codeTagProps={{
-            style: {
-              fontFamily: 'inherit',
-              color: '#e2e8f0',
-            },
-          }}
-          useInlineStyles
-          wrapLongLines={false}
-          PreTag="div"
-        >
-          {code}
-        </SyntaxHighlighter>
-      </div>
+          },
+        }}
+        useInlineStyles
+        wrapLongLines={false}
+        PreTag="pre"
+      >
+        {code}
+      </SyntaxHighlighter>
     );
   }
 

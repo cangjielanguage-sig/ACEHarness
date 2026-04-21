@@ -17,6 +17,12 @@ const CACHE_TTL = 10_000; // 10s — background refresh interval
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let isRefreshing = false;
 
+function getSafeTime(value: unknown): number {
+  if (typeof value !== 'string' || !value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
 async function computeDashboardData(userId = '', role: 'admin' | 'user' = 'admin') {
   const [configResult, agentCount, runsResult] = await Promise.all([
     readConfigsSummary(userId, role),
@@ -35,8 +41,10 @@ async function computeDashboardData(userId = '', role: 'admin' | 'user' = 'admin
   let totalDuration = 0;
   let durationCount = 0;
   for (const r of runs) {
-    if (r.endTime) {
-      totalDuration += new Date(r.endTime).getTime() - new Date(r.startTime).getTime();
+    const startTime = getSafeTime(r.startTime);
+    const endTime = getSafeTime(r.endTime);
+    if (startTime > 0 && endTime > 0) {
+      totalDuration += endTime - startTime;
       durationCount++;
     }
   }
@@ -46,7 +54,7 @@ async function computeDashboardData(userId = '', role: 'admin' | 'user' = 'admin
     r.configName = configNameMap[r.configFile] || r.configFile;
   }
 
-  runs.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+  runs.sort((a, b) => getSafeTime(b.startTime) - getSafeTime(a.startTime));
   const recentRuns = runs.slice(0, 5);
 
   // Weekly activity
@@ -54,7 +62,7 @@ async function computeDashboardData(userId = '', role: 'admin' | 'user' = 'admin
   const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
   const dayCounts: number[] = [0, 0, 0, 0, 0, 0, 0];
   for (const r of runs) {
-    const t = new Date(r.startTime).getTime();
+    const t = getSafeTime(r.startTime);
     if (t >= sevenDaysAgo) {
       const daysAgo = Math.floor((now - t) / (24 * 60 * 60 * 1000));
       if (daysAgo >= 0 && daysAgo < 7) dayCounts[6 - daysAgo]++;
@@ -177,6 +185,20 @@ interface RunSummary {
   currentPhase: string | null; totalSteps: number; completedSteps: number;
 }
 
+function isValidRunState(state: any): state is {
+  runId?: string;
+  configFile?: string;
+  startTime?: string;
+  endTime?: string | null;
+  status?: string;
+  currentPhase?: string | null;
+  completedSteps?: any[];
+  failedSteps?: any[];
+  stepLogs?: any[];
+} {
+  return !!state && typeof state === 'object' && !Array.isArray(state);
+}
+
 async function readAllRunsSummary() {
   const runs: RunSummary[] = [];
   const agentUsage: Record<string, { calls: number; cost: number }> = {};
@@ -192,13 +214,15 @@ async function readAllRunsSummary() {
       if (!existsSync(stateFile)) return null;
       try {
         const content = await readFile(stateFile, 'utf-8');
-        return { dirName: entry.name, state: parse(content) };
+        const state = parse(content);
+        if (!isValidRunState(state)) return null;
+        return { dirName: entry.name, state };
       } catch { return null; }
     })
   );
 
-  const valid = results.filter(Boolean) as { dirName: string; state: any }[];
-  valid.sort((a, b) => new Date(b.state.startTime).getTime() - new Date(a.state.startTime).getTime());
+  const valid = results.filter(Boolean) as { dirName: string; state: NonNullable<ReturnType<typeof parse>> }[];
+  valid.sort((a, b) => getSafeTime(b.state.startTime) - getSafeTime(a.state.startTime));
 
   for (const { state } of valid) {
     runs.push({
