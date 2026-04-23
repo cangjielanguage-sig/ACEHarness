@@ -16,6 +16,8 @@ export async function GET(request: NextRequest) {
 
     // Filter only workflow YAML files (not directories, not settings)
     const yamlFiles: string[] = [];
+
+    // Collect files from both root and subdirectories
     for (const entry of entries) {
       if (entry.isFile() && (entry.name.endsWith('.yaml') || entry.name.endsWith('.yml'))) {
         const meta = metaMap[entry.name];
@@ -23,6 +25,21 @@ export async function GET(request: NextRequest) {
           continue;
         }
         yamlFiles.push(entry.name);
+      } else if (entry.isDirectory() && entry.name !== 'agents') {
+        // Recursively scan subdirectories (except 'agents')
+        try {
+          const subEntries = await readdir(resolve(configsDir, entry.name), { withFileTypes: true });
+          for (const subEntry of subEntries) {
+            if (subEntry.isFile() && (subEntry.name.endsWith('.yaml') || subEntry.name.endsWith('.yml'))) {
+              const relPath = `${entry.name}/${subEntry.name}`;
+              const meta = metaMap[relPath];
+              if (meta?.visibility === 'private' && meta.createdBy && meta.createdBy !== auth.id && auth.role !== 'admin') {
+                continue;
+              }
+              yamlFiles.push(relPath);
+            }
+          }
+        } catch { /* subdirectory may not exist */ }
       }
     }
 
@@ -37,7 +54,8 @@ export async function GET(request: NextRequest) {
     const configs = [];
     for (const file of yamlFiles) {
       try {
-        const content = await readFile(resolve(configsDir, file), 'utf-8');
+        const filePath = resolve(configsDir, file);
+        const content = await readFile(filePath, 'utf-8');
         const config = parse(content);
 
         // 检测工作流模式
