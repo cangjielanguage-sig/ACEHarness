@@ -112,6 +112,15 @@ const engines: Engine[] = [
   },
 ];
 
+const CLAUDE_ALIAS_LABELS: Record<string, string> = {
+  default: 'Auto (default)',
+  best: 'Best',
+  sonnet: 'Claude Sonnet',
+  opus: 'Claude Opus',
+  haiku: 'Claude Haiku',
+  opusplan: 'Claude Opus Plan',
+};
+
 export default function EnginesPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -314,21 +323,24 @@ export default function EnginesPage() {
     }
     const merged = Array.from(mergedMap.values());
     try {
-      const res = await fetch('/api/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ models: merged }),
-      });
-      if (res.ok) {
-        setModels(merged);
-        toast('success', `已导入 ${toImport.length} 个模型`);
-        setShowImportDialog(false);
-      } else {
-        toast('error', '保存模型失败');
-      }
-    } catch {
-      toast('error', '保存模型失败');
+      await saveMergedModels(merged, `已导入 ${toImport.length} 个模型`);
+      setShowImportDialog(false);
+    } catch (error) {
+      toast('error', error instanceof Error ? error.message : '保存模型失败');
     }
+  };
+
+  const saveMergedModels = async (merged: ModelOption[], successMessage: string) => {
+    const res = await fetch('/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models: merged }),
+    });
+    if (!res.ok) {
+      throw new Error('保存模型失败');
+    }
+    setModels(merged);
+    toast('success', successMessage);
   };
 
   const handleSmokeTestClaudeModels = async () => {
@@ -354,6 +366,46 @@ export default function EnginesPage() {
       toast('error', `Claude Code 模型测试失败: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setSmokeTesting(false);
+    }
+  };
+
+  const handleImportSmokePassedModels = async () => {
+    const passed = smokeResults.filter((result) => result.ok);
+    if (passed.length === 0) {
+      toast('warning', '没有可导入的通过模型');
+      return;
+    }
+
+    const mergedMap = new Map(models.map((model) => [model.value, { ...model }]));
+    for (const result of passed) {
+      const existing = mergedMap.get(result.model);
+      const label = CLAUDE_ALIAS_LABELS[result.model] || result.resolvedModel || result.model;
+      if (existing) {
+        mergedMap.set(result.model, {
+          ...existing,
+          label: existing.label || label,
+          engines: Array.from(new Set([...(existing.engines || []), 'claude-code'])),
+          endpoints: Array.from(new Set([...(existing.endpoints || []), 'anthropic'])),
+        });
+      } else {
+        mergedMap.set(result.model, {
+          value: result.model,
+          label,
+          costMultiplier: 0.1,
+          endpoints: ['anthropic'],
+          engines: ['claude-code'],
+        });
+      }
+    }
+
+    try {
+      await saveMergedModels(
+        Array.from(mergedMap.values()),
+        `已导入 ${passed.length} 个通过测试的 Claude Code 模型`,
+      );
+      setShowSmokeDialog(false);
+    } catch (error) {
+      toast('error', error instanceof Error ? error.message : '保存模型失败');
     }
   };
 
@@ -727,6 +779,18 @@ CANGJIE_STDX_PATH — stdx 动态库路径`}
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="flex justify-between items-center pt-2">
+            <span className="text-xs text-muted-foreground">
+              通过 {smokeResults.filter((result) => result.ok).length} / {smokeResults.length}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowSmokeDialog(false)}>关闭</Button>
+              <Button onClick={handleImportSmokePassedModels}>
+                <Download className="w-4 h-4 mr-2" />
+                导入通过测试的模型
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

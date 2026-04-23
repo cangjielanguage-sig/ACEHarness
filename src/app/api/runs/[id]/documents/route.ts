@@ -4,6 +4,8 @@ import { readdir, stat, readFile, rename, unlink } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { parse } from 'yaml';
+import { getWorkspaceRunsDir } from '@/lib/app-paths';
+import { resolveWorkflowConfigPath } from '@/lib/workflow-config-path';
 
 /** Resolve the .ace-outputs dir and runs/outputs dir for a given runId */
 async function resolveOutputDirs(runId: string) {
@@ -12,16 +14,17 @@ async function resolveOutputDirs(runId: string) {
 
   let projectRoot = '';
   try {
-    let configPath = resolve(process.cwd(), state.configFile);
-    if (!existsSync(configPath)) configPath = resolve(process.cwd(), 'configs', state.configFile);
-    const config = parse(await readFile(configPath, 'utf-8'));
-    projectRoot = config?.context?.projectRoot || '';
+    const configPath = await resolveWorkflowConfigPath(state.configFile);
+    if (configPath) {
+      const config = parse(await readFile(configPath, 'utf-8'));
+      projectRoot = config?.context?.projectRoot || '';
+    }
   } catch { /* ignore */ }
 
-  if (!projectRoot) return null;
-
-  const aceDir = resolve(process.cwd(), projectRoot, '.ace-outputs', runId);
-  const runsDir = resolve(process.cwd(), 'runs', runId, 'outputs');
+  const aceDir = projectRoot
+    ? resolve(process.cwd(), projectRoot, '.ace-outputs', runId)
+    : null;
+  const runsDir = resolve(getWorkspaceRunsDir(), runId, 'outputs');
   return { state, projectRoot, aceDir, runsDir };
 }
 
@@ -43,7 +46,7 @@ export async function GET(
     if (!dirs) return NextResponse.json({ error: '未找到运行记录或未配置项目根目录' }, { status: 404 });
     const { state, aceDir, runsDir } = dirs;
 
-    const aceDirExists = existsSync(aceDir);
+    const aceDirExists = Boolean(aceDir && existsSync(aceDir));
     const runsDirExists = existsSync(runsDir);
 
     if (!aceDirExists && !runsDirExists) {
@@ -53,7 +56,7 @@ export async function GET(
     // If requesting a specific file's content — check runsDir first, then aceDir
     if (filePath) {
       const safe = filePath.replace(/\.\./g, '');
-      for (const dir of [runsDir, aceDir]) {
+      for (const dir of [runsDir, aceDir].filter((value): value is string => Boolean(value))) {
         if (!existsSync(dir)) continue;
         const fullPath = resolve(dir, safe);
         if (!fullPath.startsWith(dir)) continue;
@@ -69,7 +72,7 @@ export async function GET(
     const seenFiles = new Set<string>();
     const allEntries: { entry: string; dir: string }[] = [];
 
-    for (const dir of [runsDir, aceDir]) {
+    for (const dir of [runsDir, aceDir].filter((value): value is string => Boolean(value))) {
       if (!existsSync(dir)) continue;
       try {
         const entries = await readdir(dir);
@@ -87,32 +90,34 @@ export async function GET(
     // Build step→phase/agent lookup from config (once, outside loop)
     const stepMap: Record<string, { agent: string; phaseName: string; role: string }> = {};
     try {
-      const configPath = resolve(process.cwd(), state.configFile);
-      const configContent = await readFile(configPath, 'utf-8');
-      const config = parse(configContent);
-      if (config?.workflow?.phases) {
-        for (const phase of config.workflow.phases) {
-          for (const step of phase.steps || []) {
-            const safeStep = step.name.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
-            const info = { agent: step.agent || '', phaseName: phase.name, role: step.role || 'defender' };
-            stepMap[step.name] = info;
-            stepMap[safeStep] = info;
+      const configPath = await resolveWorkflowConfigPath(state.configFile);
+      if (configPath) {
+        const configContent = await readFile(configPath, 'utf-8');
+        const config = parse(configContent);
+        if (config?.workflow?.phases) {
+          for (const phase of config.workflow.phases) {
+            for (const step of phase.steps || []) {
+              const safeStep = step.name.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+              const info = { agent: step.agent || '', phaseName: phase.name, role: step.role || 'defender' };
+              stepMap[step.name] = info;
+              stepMap[safeStep] = info;
+            }
           }
         }
-      }
-      // State machine mode: states instead of phases
-      if (config?.workflow?.states) {
-        for (const state of config.workflow.states) {
-          for (const step of state.steps || []) {
-            const safeStep = step.name.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
-            const info = { agent: step.agent || '', phaseName: state.name, role: step.role || 'defender' };
-            stepMap[step.name] = info;
-            stepMap[safeStep] = info;
-            // Also map "stateName-stepName" format used in output filenames
-            const compositeKey = `${state.name}-${step.name}`;
-            const safeComposite = compositeKey.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
-            stepMap[compositeKey] = info;
-            stepMap[safeComposite] = info;
+        // State machine mode: states instead of phases
+        if (config?.workflow?.states) {
+          for (const state of config.workflow.states) {
+            for (const step of state.steps || []) {
+              const safeStep = step.name.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+              const info = { agent: step.agent || '', phaseName: state.name, role: step.role || 'defender' };
+              stepMap[step.name] = info;
+              stepMap[safeStep] = info;
+              // Also map "stateName-stepName" format used in output filenames
+              const compositeKey = `${state.name}-${step.name}`;
+              const safeComposite = compositeKey.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
+              stepMap[compositeKey] = info;
+              stepMap[safeComposite] = info;
+            }
           }
         }
       }
@@ -187,7 +192,7 @@ export async function PATCH(
 
     // Rename in both directories
     let renamed = false;
-    for (const dir of [dirs.runsDir, dirs.aceDir]) {
+    for (const dir of [dirs.runsDir, dirs.aceDir].filter((value): value is string => Boolean(value))) {
       const oldP = safePath(dir, file);
       const newP = safePath(dir, finalName);
       if (oldP && newP && existsSync(oldP)) {
@@ -219,7 +224,7 @@ export async function DELETE(
     const deleted: string[] = [];
     for (const file of files) {
       let found = false;
-      for (const dir of [dirs.runsDir, dirs.aceDir]) {
+      for (const dir of [dirs.runsDir, dirs.aceDir].filter((value): value is string => Boolean(value))) {
         const fullPath = safePath(dir, file);
         if (fullPath && existsSync(fullPath)) {
           await unlink(fullPath).catch(() => {});
