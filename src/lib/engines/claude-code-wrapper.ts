@@ -393,6 +393,36 @@ function formatElapsedSec(usageMs?: number, wallMs?: number): { text: string; se
   return { text, sec };
 }
 
+function findResolvedModel(value: unknown, depth = 0): string | undefined {
+  if (depth > 4 || value == null) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^(claude-|sonnet|opus|haiku|default|best|opusplan)/.test(trimmed)) {
+      return trimmed;
+    }
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const hit = findResolvedModel(item, depth + 1);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    for (const key of ['model', 'model_id', 'modelId', 'resolved_model', 'resolvedModel']) {
+      const hit = findResolvedModel(record[key], depth + 1);
+      if (hit) return hit;
+    }
+    for (const nested of Object.values(record)) {
+      const hit = findResolvedModel(nested, depth + 1);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
 // ============================================================================
 // ClaudeCodeEngineWrapper
 // ============================================================================
@@ -559,11 +589,15 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
       const streamToolBlocks = new Map<number, { id: string; name: string; inputJson: string }>();
       const toolCallsById = new Map<string, { name: string; inputJson: string }>();
       let capturedSessionId: string | undefined;
+      let resolvedModel: string | undefined;
       let sawStreamEvent = false;
       let lastAssistantSnapshot = '';
       let lastBlockWasTool = false;
 
       for await (const msg of iter) {
+        if (!resolvedModel) {
+          resolvedModel = findResolvedModel(msg);
+        }
         if (streamDebug) {
           const mt = String((msg as { type?: unknown })?.type || 'unknown');
           if (!seenMsgTypes.has(mt)) {
@@ -778,6 +812,7 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
               success: true,
               output: isPlan ? (this._capturedDeliverable || finalOutput) : finalOutput,
               sessionId: r.session_id || capturedSessionId,
+              metadata: resolvedModel ? { resolvedModel } : undefined,
             };
           }
           const err = msg as { errors?: string[] };
@@ -809,6 +844,7 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
         success: true,
         output: isPlan ? (this._capturedDeliverable || accumulated) : accumulated,
         sessionId: capturedSessionId,
+        metadata: resolvedModel ? { resolvedModel } : undefined,
       };
     } catch (e: unknown) {
       const isAborted = this._abortController?.signal.aborted;

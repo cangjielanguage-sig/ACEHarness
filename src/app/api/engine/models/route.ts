@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ACPEngine } from '@/lib/engines/acp-engine';
+import { discoverClaudeCodeModels } from '@/lib/engines/claude-code-model-discovery';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,8 +17,30 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'engine parameter required' }, { status: 400 });
   }
 
+  if (engineType === 'claude-code') {
+    try {
+      const result = await discoverClaudeCodeModels();
+      return NextResponse.json({
+        engine: engineType,
+        source: result.fallback,
+        usedAnthropicApi: result.usedAnthropicApi,
+        models: result.models.map((m) => ({
+          modelId: m.modelId,
+          name: m.name,
+          source: m.source,
+          recommended: Boolean(m.recommended),
+        })),
+      });
+    } catch (error) {
+      console.error('[engine/models] Failed to discover models for claude-code:', error);
+      return NextResponse.json({
+        error: `Failed to discover models: ${error instanceof Error ? error.message : String(error)}`,
+      }, { status: 500 });
+    }
+  }
+
   // These engines don't use ACP or are not available on this system
-  if (engineType === 'claude-code' || engineType === 'cangjie-magic' || engineType === 'codex') {
+  if (engineType === 'cangjie-magic' || engineType === 'codex') {
     return NextResponse.json({ models: [], message: `${engineType} does not support ACP model discovery` });
   }
 
