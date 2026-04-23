@@ -53,3 +53,8 @@ export function getConcreteEngines(): EngineMeta[] {
 export function getEngineMeta(id: string): EngineMeta | undefined {
   return ENGINE_META[id as EngineType]
 }
+
+export function getEngineDisplayName(id?: string): string {
+  if (!id) return ''
+  return getEngineMeta(id)?.name || id
+}

@@ -67,3 +67,4 @@ configs/unreachable.yaml
 
 # Runtime uploaded assets
 /public/uploads/
+package-lock.json
