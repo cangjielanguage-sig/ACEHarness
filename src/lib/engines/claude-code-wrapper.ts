@@ -399,6 +399,7 @@ function formatElapsedSec(usageMs?: number, wallMs?: number): { text: string; se
 
 export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
   private _abortController: AbortController | null = null;
+  private _abortReason: 'user' | 'timeout' | 'retry_limit' | 'unknown' | null = null;
 
   // Plan mode state
   private _capturedDeliverable = '';
@@ -416,8 +417,26 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
     } catch { return false; }
   }
 
-  cancel(): void {
+  private abortWithReason(reason: 'user' | 'timeout' | 'retry_limit' | 'unknown'): void {
+    this._abortReason = reason;
     try { this._abortController?.abort(); } catch {}
+  }
+
+  private getAbortMessage(timeoutMs: number): string {
+    switch (this._abortReason) {
+      case 'user':
+        return 'Claude Code engine execution cancelled by user';
+      case 'timeout':
+        return `Claude Code engine execution timed out after ${timeoutMs}ms`;
+      case 'retry_limit':
+        return 'Claude Code engine execution aborted after SDK API retry limit was reached';
+      default:
+        return 'Claude Code engine execution aborted';
+    }
+  }
+
+  cancel(): void {
+    this.abortWithReason('user');
   }
 
   cleanup(): void {
@@ -455,8 +474,11 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
   async execute(options: EngineOptions): Promise<EngineResult> {
     const isPlan = options.mode === 'plan';
     this._abortController = new AbortController();
+    this._abortReason = null;
     const timeoutMs = options.timeoutMs ?? 60 * 60 * 1000;
-    const timer = setTimeout(() => { try { this._abortController?.abort(); } catch {} }, timeoutMs);
+    const timer = setTimeout(() => {
+      this.abortWithReason('timeout');
+    }, timeoutMs);
 
     let accumulated = '';
     const MAX_API_RETRY_ATTEMPTS = 5;
@@ -697,7 +719,7 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
             const retry = msg as { attempt?: number; retry_delay_ms?: number; message?: string };
             const attempt = Number(retry.attempt || 0);
             if (attempt >= MAX_API_RETRY_ATTEMPTS) {
-              try { this._abortController?.abort(); } catch {}
+              this.abortWithReason('retry_limit');
               throw new Error(`SDK API 重试已达上限（${MAX_API_RETRY_ATTEMPTS} 次），已终止请求`);
             }
             // Hide SDK retry noise from end-user stream output.
@@ -789,13 +811,16 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
         sessionId: capturedSessionId,
       };
     } catch (e: unknown) {
+      const isAborted = this._abortController?.signal.aborted;
       return {
         success: false,
         output: accumulated,
-        error: e instanceof Error ? e.message : String(e),
+        error: isAborted ? this.getAbortMessage(timeoutMs) : (e instanceof Error ? e.message : String(e)),
       };
     } finally {
       clearTimeout(timer);
+      this._abortController = null;
+      this._abortReason = null;
     }
   }
 
