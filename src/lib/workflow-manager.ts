@@ -26,7 +26,7 @@ import { getEngineSkillsSubdir } from './engines/engine-config';
 import type { EngineStreamEvent } from './engines/engine-interface';
 import { getRuntimeAgentsDirPath, getRuntimeWorkflowConfigPath } from './runtime-configs';
 import { getRuntimeSkillsDirPath } from './runtime-skills';
-import { getEngineConfigPath, getWorkspaceRunsDir } from './app-paths';
+import { getEngineConfigPath, getWorkspaceRoot, getWorkspaceRunsDir } from './app-paths';
 import { resolveAgentSelection } from './agent-engine-selection';
 import {
   parseNeedInfo,
@@ -176,6 +176,11 @@ export class WorkflowManager extends EventEmitter {
     return getEngineSkillsSubdir(this.engineType);
   }
 
+  private resolveProjectRootPath(projectRoot?: string | null): string {
+    const baseDir = this._userPersonalDir || getWorkspaceRoot();
+    return projectRoot ? resolve(baseDir, projectRoot) : baseDir;
+  }
+
   // ========== Supervisor-Lite Plan 循环相关 ==========
   /** 待解答的用户问题 Promise 解析器 */
   private pendingUserQuestionResolver: ((answer: string) => void) | null = null;
@@ -187,7 +192,7 @@ export class WorkflowManager extends EventEmitter {
    */
   private async loadSkillContent(skillName: string, projectRoot: string): Promise<string | null> {
     // Try project-level skill first
-    const projectSkillPath = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir, skillName, 'SKILL.md');
+    const projectSkillPath = join(this.resolveProjectRootPath(projectRoot), this.workspaceSkillsSubdir, skillName, 'SKILL.md');
     try {
       const content = await readFile(projectSkillPath, 'utf-8');
       return content;
@@ -275,7 +280,7 @@ export class WorkflowManager extends EventEmitter {
     if (!projectRoot) return;
 
     const serverSkillsDir = await getRuntimeSkillsDirPath();
-    const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir);
+    const workspaceSkillsDir = join(this.resolveProjectRootPath(projectRoot), this.workspaceSkillsSubdir);
     if (!existsSync(serverSkillsDir)) return;
 
     const needed = new Set<string>();
@@ -521,7 +526,7 @@ export class WorkflowManager extends EventEmitter {
    * Also tracks skill names for deduplication with step-level skills.
    */
   private async discoverWorkspaceSkills(projectRoot: string): Promise<string> {
-    const absRoot = resolve(process.cwd(), projectRoot);
+    const absRoot = this.resolveProjectRootPath(projectRoot);
     const skillsDir = join(absRoot, this.workspaceSkillsSubdir);
     try {
       const skillIndex = resolve(skillsDir, 'SKILL.md');
@@ -586,15 +591,13 @@ export class WorkflowManager extends EventEmitter {
       console.log(`[WorkflowManager] 使用引擎: ${this.engineType}`);
       this.emit('log', `使用引擎: ${this.engineType}`);
 
-      // Only create engine instance for non-Claude Code engines
-      if (this.engineType !== 'claude-code') {
-        this.currentEngine = await createEngine(this.engineType);
-        if (!this.currentEngine) {
-          throw new Error(`引擎 ${this.engineType} 不可用`);
-        } else {
-          console.log(`[WorkflowManager] 引擎 ${this.engineType} 初始化成功`);
-          this.emit('log', `引擎 ${this.engineType} 初始化成功`);
-        }
+      // Always initialize currentEngine for the selected engine, including claude-code.
+      this.currentEngine = await createEngine(this.engineType);
+      if (!this.currentEngine) {
+        throw new Error(`引擎 ${this.engineType} 不可用`);
+      } else {
+        console.log(`[WorkflowManager] 引擎 ${this.engineType} 初始化成功`);
+        this.emit('log', `引擎 ${this.engineType} 初始化成功`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -810,7 +813,7 @@ export class WorkflowManager extends EventEmitter {
       this.currentWorkflow = workflowConfig;
       // Resolve projectRoot to absolute path relative to user's personal dir
       this.currentProjectRoot = workflowConfig.context.projectRoot
-        ? (this._userPersonalDir ? resolve(this._userPersonalDir, workflowConfig.context.projectRoot) : resolve(workflowConfig.context.projectRoot))
+        ? this.resolveProjectRootPath(workflowConfig.context.projectRoot)
         : null;
 
       // === Create run FIRST so frontend can see it immediately ===
@@ -860,7 +863,7 @@ export class WorkflowManager extends EventEmitter {
       if (workspaceMode === 'isolated-copy' && this._userPersonalDir && workflowConfig.context.projectRoot) {
         await reportPreparingProgress('准备中：复制工作目录...', '复制工作目录');
         if (this.shouldStop) return;
-        const srcDir = resolve(this._userPersonalDir, workflowConfig.context.projectRoot);
+        const srcDir = this.resolveProjectRootPath(workflowConfig.context.projectRoot);
         if (!existsSync(srcDir)) {
           this.emit('log', { message: `项目目录不存在: ${srcDir}，跳过目录隔离` });
         } else {
@@ -2872,8 +2875,8 @@ export class WorkflowManager extends EventEmitter {
         model,
         {
           workingDirectory: workflowConfig.context?.projectRoot
-            ? resolve(process.cwd(), workflowConfig.context.projectRoot)
-            : process.cwd(),
+            ? this.resolveProjectRootPath(workflowConfig.context.projectRoot)
+            : this.resolveProjectRootPath(),
           timeoutMs: 60000,
           mcpServers: roleConfig.mcpServers,
         }
@@ -2896,7 +2899,7 @@ export class WorkflowManager extends EventEmitter {
         '你是一个路由器，根据问题选择最合适的 Agent。',
         'claude-sonnet-4-6',
         {
-          workingDirectory: process.cwd(),
+          workingDirectory: this.resolveProjectRootPath(),
           timeoutMs: 120000, // 2 分钟超时
         }
       );

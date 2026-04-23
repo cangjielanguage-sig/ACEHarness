@@ -29,7 +29,7 @@ import type { EngineStreamEvent } from './engines/engine-interface';
 import type { SdkPlanSubtaskTelemetry } from './engines/claude-code-wrapper';
 import { getRuntimeAgentsDirPath, getRuntimeWorkflowConfigPath } from './runtime-configs';
 import { getRuntimeSkillsDirPath } from './runtime-skills';
-import { getWorkspaceRunsDir } from './app-paths';
+import { getWorkspaceRoot, getWorkspaceRunsDir } from './app-paths';
 import {
   parseNeedInfo,
   isPlanDone,
@@ -143,6 +143,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private get workspaceSkillsSubdir(): string {
     return getEngineSkillsSubdir(this.engineType);
   }
+
+  private resolveProjectRootPath(projectRoot?: string | null): string {
+    const baseDir = this._userPersonalDir || getWorkspaceRoot();
+    return projectRoot ? resolve(baseDir, projectRoot) : baseDir;
+  }
   /** Lightweight router model, configurable from workflow context.routerModel */
   private lightweightRouterModel: string = 'claude-sonnet-4-6';
 
@@ -213,7 +218,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     // Try project-level first, then server-level skills directory
     const candidates = [
-      join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir),
+      join(this.resolveProjectRootPath(projectRoot), this.workspaceSkillsSubdir),
       await getRuntimeSkillsDirPath(),
     ];
 
@@ -251,7 +256,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
    * Load a single skill's content from project or system skills directory
    */
   private async loadSkillContent(skillName: string, projectRoot: string): Promise<string | null> {
-    const projectSkillPath = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir, skillName, 'SKILL.md');
+    const projectSkillPath = join(this.resolveProjectRootPath(projectRoot), this.workspaceSkillsSubdir, skillName, 'SKILL.md');
     try {
       return await readFile(projectSkillPath, 'utf-8');
     } catch { /* not found in project */ }
@@ -294,7 +299,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     if (!projectRoot) return;
 
     const serverSkillsDir = await getRuntimeSkillsDirPath();
-    const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir);
+    const workspaceSkillsDir = join(this.resolveProjectRootPath(projectRoot), this.workspaceSkillsSubdir);
 
     if (!existsSync(serverSkillsDir)) return;
 
@@ -603,7 +608,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.currentRequirements = requirements || workflowConfig.context?.requirements || '';
       // Resolve projectRoot to absolute path relative to user's personal dir
       this.currentProjectRoot = workflowConfig.context?.projectRoot
-        ? (this._userPersonalDir ? resolve(this._userPersonalDir, workflowConfig.context.projectRoot) : resolve(workflowConfig.context.projectRoot))
+        ? this.resolveProjectRootPath(workflowConfig.context.projectRoot)
         : null;
 
       if (workflowConfig.workflow.mode !== 'state-machine') {
@@ -660,8 +665,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       // === Preparing phase: directory isolation (cp for independence) ===
       if (workspaceMode === 'isolated-copy' && this._userPersonalDir && workflowConfig.context?.projectRoot) {
         await reportPreparingProgress('准备中：复制工作目录...', '复制工作目录');
-        // Resolve projectRoot relative to user's personal dir (not server cwd)
-        const srcDir = resolve(this._userPersonalDir, workflowConfig.context.projectRoot);
+        // Resolve projectRoot relative to personalDir or runtime root, not install cwd
+        const srcDir = this.resolveProjectRootPath(workflowConfig.context.projectRoot);
         if (this.shouldStop) return;
         if (!existsSync(srcDir)) {
           this.emit('log', { message: `项目目录不存在: ${srcDir}，跳过目录隔离` });
@@ -1811,8 +1816,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
   ): Promise<string> {
     const { exec } = await import('child_process');
     const cwd = config.context?.projectRoot
-      ? resolve(process.cwd(), config.context.projectRoot)
-      : process.cwd();
+      ? this.resolveProjectRootPath(config.context.projectRoot)
+      : this.resolveProjectRootPath();
 
     const results: string[] = [];
 
@@ -1879,8 +1884,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const model = resolveAgentModel(roleConfig, config.context);
     const systemPrompt = roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
     const workingDirectory = config.context?.projectRoot
-      ? resolve(process.cwd(), config.context.projectRoot)
-      : process.cwd();
+      ? this.resolveProjectRootPath(config.context.projectRoot)
+      : this.resolveProjectRootPath();
 
     let currentProcessId = stepId || randomUUID();
     let currentPrompt = context;
@@ -2917,8 +2922,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
         model,
         {
           workingDirectory: config.context?.projectRoot
-            ? resolve(process.cwd(), config.context.projectRoot)
-            : process.cwd(),
+            ? this.resolveProjectRootPath(config.context.projectRoot)
+            : this.resolveProjectRootPath(),
           timeoutMs: 60000,
         }
       );
@@ -2972,7 +2977,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         '你是一个路由器，根据问题选择最合适的 Agent。',
         this.lightweightRouterModel,
         {
-          workingDirectory: process.cwd(),
+          workingDirectory: this.resolveProjectRootPath(),
           timeoutMs: 120000, // 增加超时时间到 2 分钟
         }
       );
@@ -3109,8 +3114,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const systemPrompt =
         roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
       const workingDirectory = config.context?.projectRoot
-        ? resolve(process.cwd(), config.context.projectRoot)
-        : process.cwd();
+        ? this.resolveProjectRootPath(config.context.projectRoot)
+        : this.resolveProjectRootPath();
 
       const result = await planEngine.execute({
         agent: step.agent,
@@ -3319,8 +3324,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const systemPrompt =
         roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
       const workingDirectory = config.context?.projectRoot
-        ? resolve(process.cwd(), config.context.projectRoot)
-        : process.cwd();
+        ? this.resolveProjectRootPath(config.context.projectRoot)
+        : this.resolveProjectRootPath();
 
       const retryPrompt = `${context}\n\n---\n\n# 用户对上一版 Plan 的修改意见\n\n${feedback}\n\n# 上一版 Plan（需修改）\n\n${currentPlan}\n\n请根据用户意见修改 plan 并重新输出。`;
 

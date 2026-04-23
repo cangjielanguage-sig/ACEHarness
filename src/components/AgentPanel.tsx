@@ -39,16 +39,62 @@ interface Log {
   time: string;
 }
 
+interface PersistedStepLog {
+  id: string;
+  stepName: string;
+  agent: string;
+  status: 'completed' | 'failed';
+  output: string;
+  error: string;
+  costUsd: number;
+  durationMs: number;
+  timestamp: string;
+}
+
 interface AgentPanelProps {
   agent: Agent;
   logs: Log[];
   onClearLogs: (agentName: string) => void;
   stepSummary?: string;
+  persistedStepLogs?: PersistedStepLog[];
+  selectedStepName?: string | null;
+  selectedStepExecutionId?: string | null;
+  runStatus?: string;
+  runStatusReason?: string | null;
+  currentStepName?: string | null;
+  onSelectPersistedStep?: (stepName: string) => void;
+  onViewPersistedStepOutput?: (log: PersistedStepLog) => void;
 }
 
-export default function AgentPanel({ agent, logs, onClearLogs, stepSummary }: AgentPanelProps) {
+export default function AgentPanel({
+  agent,
+  logs,
+  onClearLogs,
+  stepSummary,
+  persistedStepLogs = [],
+  selectedStepName,
+  selectedStepExecutionId,
+  runStatus,
+  runStatusReason,
+  currentStepName,
+  onSelectPersistedStep,
+  onViewPersistedStepOutput,
+}: AgentPanelProps) {
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const agentLogs = logs.filter((log) => log.agent === agent.name);
+  const relevantPersistedLogs = (selectedStepName
+    ? persistedStepLogs.filter((log) => {
+        if (selectedStepExecutionId && log.id === selectedStepExecutionId) return true;
+        return log.agent === agent.name && (
+          log.stepName === selectedStepName ||
+          log.stepName.endsWith(`-${selectedStepName}`)
+        );
+      })
+    : persistedStepLogs.filter((log) => log.agent === agent.name)
+  ).slice().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const showRunStatusReason = Boolean(
+    runStatusReason && ['failed', 'stopped', 'crashed'].includes(runStatus || '')
+  );
 
   useEffect(() => {
     if (logsContainerRef.current) {
@@ -134,6 +180,21 @@ export default function AgentPanel({ agent, logs, onClearLogs, stepSummary }: Ag
         </div>
       )}
 
+      {showRunStatusReason && (
+        <div>
+          <div className="text-xs text-muted-foreground uppercase mb-1">运行异常</div>
+          <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-xs leading-relaxed text-red-200">
+            <div className="mb-1 flex items-center gap-2">
+              <Badge variant="destructive" className="text-[10px]">
+                {runStatus === 'stopped' ? '已停止' : '失败'}
+              </Badge>
+              {currentStepName ? <span className="opacity-80">当前步骤: {currentStepName}</span> : null}
+            </div>
+            <div className="whitespace-pre-wrap break-words">{runStatusReason}</div>
+          </div>
+        </div>
+      )}
+
       {agent.changes && agent.changes.length > 0 && (
         <div>
           <div className="text-xs text-muted-foreground uppercase mb-1">变更记录</div>
@@ -163,6 +224,71 @@ export default function AgentPanel({ agent, logs, onClearLogs, stepSummary }: Ag
             </div>
           ))}
           {agentLogs.length === 0 && <div className="text-muted-foreground text-center py-4">暂无日志</div>}
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-muted-foreground uppercase">持久化步骤记录</span>
+          <Badge variant="outline" className="text-[10px]">
+            {relevantPersistedLogs.length}
+          </Badge>
+        </div>
+        <div className="space-y-2">
+          {relevantPersistedLogs.map((log) => {
+            const preview = log.status === 'failed'
+              ? log.error
+              : log.output.length > 240
+                ? `${log.output.slice(0, 240)}...`
+                : log.output;
+            return (
+              <div key={log.id || `${log.stepName}-${log.timestamp}`} className="rounded-md border bg-muted/40 p-2.5">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-medium">{log.stepName}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {new Date(log.timestamp).toLocaleString('zh-CN')}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={log.status === 'failed' ? 'destructive' : 'outline'} className="text-[10px]">
+                      {log.status === 'failed' ? '失败' : '完成'}
+                    </Badge>
+                    {onViewPersistedStepOutput ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[10px]"
+                        onClick={() => onViewPersistedStepOutput(log)}
+                      >
+                        查看完整日志
+                      </Button>
+                    ) : null}
+                    {onSelectPersistedStep ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[10px]"
+                        onClick={() => onSelectPersistedStep(log.stepName)}
+                      >
+                        定位步骤
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                <div className={`whitespace-pre-wrap break-words rounded bg-background/70 p-2 text-[11px] leading-relaxed ${
+                  log.status === 'failed' ? 'text-red-300' : 'text-muted-foreground'
+                }`}>
+                  {preview || (log.status === 'failed' ? '执行失败，但没有记录到错误详情' : '无输出')}
+                </div>
+              </div>
+            );
+          })}
+          {relevantPersistedLogs.length === 0 && (
+            <div className="rounded-md bg-muted p-3 text-center text-xs text-muted-foreground">
+              暂无持久化记录
+            </div>
+          )}
         </div>
       </div>
 

@@ -4,9 +4,9 @@
  */
 
 import { readFile } from 'fs/promises';
-import { resolve } from 'path';
 import { generateActionTypesDocs } from './chat-actions';
 import { getRuntimeSkillPath, getRuntimeSkillsDirPath } from './runtime-skills';
+import { getRepoRoot, getWorkspaceRoot } from './app-paths';
 
 const CODE = '```';
 const SEP = '\n\n---\n\n';
@@ -28,9 +28,10 @@ async function loadSkillDocs(skillName: string): Promise<string> {
 
 /** 构建完整的 dashboard 模式系统提示词 */
 export async function buildDashboardSystemPrompt(enabledSkills?: string[]): Promise<string> {
-  const aceflowRoot = process.cwd();
+  const installRoot = getRepoRoot();
+  const runtimeRoot = getWorkspaceRoot();
   const runtimeSkillsDir = await getRuntimeSkillsDirPath();
-  const envInfo = `\n\n## 环境信息\n\nACEFlow 项目根目录: ${aceflowRoot}\nSkills 运行目录位于 ${runtimeSkillsDir}。运行时配置与技能均使用运行时目录，操作文件时请使用绝对路径。`;
+  const envInfo = `\n\n## 环境信息\n\nACEFlow 安装目录: ${installRoot}\nACEHarness 运行时根目录: ${runtimeRoot}\nSkills 运行目录位于 ${runtimeSkillsDir}。默认应以运行时根目录作为工作根目录；运行时配置与技能均使用运行时目录，操作文件时请优先使用绝对路径。`;
 
   let skillDocs = '';
 

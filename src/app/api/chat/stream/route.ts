@@ -14,7 +14,7 @@ import {
   getEngineStreamByFrontendSessionId,
   removeEngineStream,
 } from '@/lib/chat-stream-state';
-import { getWorkspaceDataFile, getWorkspaceRoot } from '@/lib/app-paths';
+import { getRepoRoot, getWorkspaceDataFile, getWorkspaceRoot } from '@/lib/app-paths';
 import { getRuntimeSkillsDirPath } from '@/lib/runtime-skills';
 import { readFile } from 'fs/promises';
 import { resolve } from 'path';
@@ -110,11 +110,12 @@ export async function POST(request: NextRequest) {
 
     const chatSettings = mode === 'dashboard' ? await loadChatSettings() : null;
     const requestedWorkingDirectory = typeof workingDirectory === 'string' ? workingDirectory.trim() : '';
-    const resolvedWorkingDirectory = requestedWorkingDirectory || chatSettings?.workingDirectory || process.cwd();
     const engineRuntimeDirectory = getWorkspaceRoot();
+    const resolvedWorkingDirectory = requestedWorkingDirectory || chatSettings?.workingDirectory || engineRuntimeDirectory;
     const runtimeEnvPrompt = [
       '## 运行目录信息',
-      `ACEFlow 根目录: ${process.cwd()}`,
+      `ACEFlow 安装目录: ${getRepoRoot()}`,
+      `ACEHarness 运行时根目录: ${engineRuntimeDirectory}`,
       `当前工作目录(用户语义目录): ${resolvedWorkingDirectory}`,
       `AI 运行目录(实际 cwd): ${engineRuntimeDirectory}`,
       '执行文件读写/命令时，请优先基于“当前工作目录(用户语义目录)”使用绝对路径。',
