@@ -33,13 +33,13 @@ export async function getConfiguredEngine(): Promise<EngineType> {
     try {
       const content = await readFile(configPath, 'utf-8');
       const config: EngineConfig = JSON.parse(content);
-      return config.engine || 'claude-code';
+      if (config.engine) return config.engine;
     } catch (error) {
-      console.warn('Failed to read engine config, using default:', error);
+      console.warn('Failed to read engine config:', error);
     }
   }
 
-  return 'claude-code';
+  throw new Error('默认引擎未配置，请先完成初始化设置');
 }
 
 // Engine pool: reuse engine instances across messages in the same chat session

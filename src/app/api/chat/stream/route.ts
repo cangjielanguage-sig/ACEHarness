@@ -14,6 +14,8 @@ import {
   getEngineStreamByFrontendSessionId,
   removeEngineStream,
 } from '@/lib/chat-stream-state';
+import { getWorkspaceDataFile, getWorkspaceRoot } from '@/lib/app-paths';
+import { getRuntimeSkillsDirPath } from '@/lib/runtime-skills';
 import { readFile } from 'fs/promises';
 import { resolve } from 'path';
 import { EventEmitter } from 'events';
@@ -22,7 +24,7 @@ export const dynamic = 'force-dynamic';
 
 const DEFAULT_PROMPT = '你是一个 AI 助手，简洁回答问题。';
 
-const SESSIONS_DIR = resolve(process.cwd(), 'data', 'chat-sessions');
+const SESSIONS_DIR = getWorkspaceDataFile('chat-sessions');
 const MAX_HISTORY_CHARS = 6000;
 
 /**
@@ -109,7 +111,7 @@ export async function POST(request: NextRequest) {
     const chatSettings = mode === 'dashboard' ? await loadChatSettings() : null;
     const requestedWorkingDirectory = typeof workingDirectory === 'string' ? workingDirectory.trim() : '';
     const resolvedWorkingDirectory = requestedWorkingDirectory || chatSettings?.workingDirectory || process.cwd();
-    const engineRuntimeDirectory = process.cwd();
+    const engineRuntimeDirectory = getWorkspaceRoot();
     const runtimeEnvPrompt = [
       '## 运行目录信息',
       `ACEFlow 根目录: ${process.cwd()}`,
@@ -129,9 +131,9 @@ export async function POST(request: NextRequest) {
         const { join, resolve } = await import('path');
         const engineConfigDir = getEngineConfigDir(configuredEngine);
         const configDir = join(resolve(workDir), engineConfigDir);
+        const skillsDir = await getRuntimeSkillsDirPath();
         if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
         const skillsLink = join(configDir, 'skills');
-        const skillsDir = join(process.cwd(), 'skills');
         if (existsSync(skillsDir) && !existsSync(skillsLink)) {
           symlinkSync(skillsDir, skillsLink);
         }
@@ -140,7 +142,7 @@ export async function POST(request: NextRequest) {
 
     // Non-Claude engines: stream through Engine wrapper events
     if (engine) {
-      registerEngineStream(chatId, frontendSessionId, configuredEngine);
+      registerEngineStream(chatId, frontendSessionId, configuredEngine, useModel);
 
       // Register in processManager so recovery endpoint can find it
       const proc = processManager.registerExternalProcess(chatId, 'chat', 'chat');
@@ -250,6 +252,7 @@ export async function GET(request: NextRequest) {
         streamContent: engineState.streamContent || '',
         status: engineState.status,
         engine: engineState.engine || '',
+        model: engineState.model || '',
       });
     }
 
@@ -262,6 +265,7 @@ export async function GET(request: NextRequest) {
         streamContent: proc?.streamContent || '',
         status: proc?.status || 'running',
         engine: '',
+        model: '',
       });
     }
     return NextResponse.json({ active: false });

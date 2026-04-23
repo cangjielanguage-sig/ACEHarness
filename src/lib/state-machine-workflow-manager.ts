@@ -9,10 +9,6 @@ import { readFile, readdir, stat, mkdir, cp, rm, writeFile, copyFile } from 'fs/
 import { resolve, join, dirname } from 'path';
 import { existsSync } from 'fs';
 import { cpus } from 'os';
-
-// Skills directory path segments - constructed at runtime to prevent
-// webpack/Next.js file tracing from over-matching the skills directory
-const SKILLS_SUBDIR = 'skills';
 import { parse } from 'yaml';
 import { resolveAgentModel } from './workflow-manager';
 import { processManager } from './process-manager';
@@ -31,6 +27,9 @@ import { createEngine, getConfiguredEngine, type Engine, type EngineType } from 
 import { getEngineSkillsSubdir } from './engines/engine-config';
 import type { EngineStreamEvent } from './engines/engine-interface';
 import type { SdkPlanSubtaskTelemetry } from './engines/claude-code-wrapper';
+import { getRuntimeAgentsDirPath, getRuntimeWorkflowConfigPath } from './runtime-configs';
+import { getRuntimeSkillsDirPath } from './runtime-skills';
+import { getWorkspaceRunsDir } from './app-paths';
 import {
   parseNeedInfo,
   isPlanDone,
@@ -73,6 +72,17 @@ export interface StateTransitionRecord {
   reason: string;
   issues: Issue[];
   timestamp: string;
+}
+
+function stripNonAiStreamArtifacts(text: string): string {
+  return text
+    .replace(/\n?\s*<!-- chunk-boundary -->\s*\n?/g, '\n')
+    .replace(/\n?\s*<!-- human-feedback:[\s\S]*?-->\s*\n?/g, '\n')
+    .trim();
+}
+
+function hasMeaningfulAiOutput(...parts: Array<string | null | undefined>): boolean {
+  return parts.some((part) => typeof part === 'string' && stripNonAiStreamArtifacts(part).length > 0);
 }
 
 export class StateMachineWorkflowManager extends EventEmitter {
@@ -174,7 +184,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   async loadAgentConfigs(): Promise<void> {
-    const agentsDir = resolve(process.cwd(), 'configs/agents');
+    const agentsDir = await getRuntimeAgentsDirPath();
     this.agentConfigs = [];
     try {
       const files = await readdir(agentsDir);
@@ -204,7 +214,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     // Try project-level first, then server-level skills directory
     const candidates = [
       join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir),
-      join(process.cwd(), SKILLS_SUBDIR),
+      await getRuntimeSkillsDirPath(),
     ];
 
     for (const skillsDir of candidates) {
@@ -246,7 +256,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       return await readFile(projectSkillPath, 'utf-8');
     } catch { /* not found in project */ }
 
-    const systemSkillPath = join(process.cwd(), SKILLS_SUBDIR, skillName, 'SKILL.md');
+    const systemSkillPath = join(await getRuntimeSkillsDirPath(), skillName, 'SKILL.md');
     try {
       return await readFile(systemSkillPath, 'utf-8');
     } catch { /* not found in system */ }
@@ -283,7 +293,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const projectRoot = config.context?.projectRoot;
     if (!projectRoot) return;
 
-    const serverSkillsDir = join(process.cwd(), SKILLS_SUBDIR);
+    const serverSkillsDir = await getRuntimeSkillsDirPath();
     const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir);
 
     if (!existsSync(serverSkillsDir)) return;
@@ -586,7 +596,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.liveFeedback = [];
 
       // Load config
-      const configPath = resolve(process.cwd(), 'configs', configFile);
+      const configPath = await getRuntimeWorkflowConfigPath(configFile);
       const configContent = await readFile(configPath, 'utf-8');
       const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
       this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
@@ -947,15 +957,9 @@ export class StateMachineWorkflowManager extends EventEmitter {
       // Always initialize currentEngine for the selected engine, including claude-code.
       this.currentEngine = await createEngine(this.engineType);
       if (!this.currentEngine) {
-        if (this.engineType !== 'claude-code') {
-          this.engineType = 'claude-code';
-          this.currentEngine = await createEngine('claude-code');
-        }
-      }
-
-      if (!this.currentEngine) {
         throw new Error(`引擎初始化失败: ${this.engineType} 不可用`);
       }
+
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       throw error;
@@ -1651,7 +1655,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     // Add document output path
     if (this.currentRunId && config.context?.projectRoot) {
-      const outputPath = `${process.cwd()}/runs/${this.currentRunId}/outputs/`;
+      const outputPath = `${join(getWorkspaceRunsDir(), this.currentRunId, 'outputs')}/`;
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const safeName = `${state.name}-${step.name}`.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
       const fullPath = `${outputPath}${ts}-${safeName}.md`;
@@ -1667,7 +1671,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     if (config.context?.projectRoot) {
       const skills = await this.loadWorkspaceSkills(config.context.projectRoot);
       if (skills) {
-        const skillsAbsPath = join(process.cwd(), SKILLS_SUBDIR);
+        const skillsAbsPath = await getRuntimeSkillsDirPath();
         parts.push(`\n# 可用 Skills\n\nSkills 目录绝对路径: \`${skillsAbsPath}/\`\n\n如需使用某个 Skill，请先用 Read 工具读取对应的 SKILL.md 文件获取详细说明。例如：\`${skillsAbsPath}/build-cangjie/SKILL.md\`\n\n${skills}`);
       }
     }
@@ -2070,6 +2074,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
     } finally {
       processManager.off('stream', streamFlushHandler);
     }
+
+    if (!hasMeaningfulAiOutput(accumulatedOutput, accumulatedStream)) {
+      throw new Error(`AI 服务中断：步骤 "${streamStepName}" 未产生任何输出`);
+    }
+
     return { output: accumulatedOutput, lastRoundOutput, costUsd: accumulatedCost, durationMs: accumulatedDuration, sessionId: currentSessionId };
   }
 
@@ -2347,7 +2356,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     await this.persistState();
 
     // Load config and continue execution
-    const configPath = resolve(process.cwd(), 'configs', runState.configFile);
+    const configPath = await getRuntimeWorkflowConfigPath(runState.configFile);
     const configContent = await readFile(configPath, 'utf-8');
     const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
     this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
@@ -2664,7 +2673,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     await this.persistState();
 
     // Load config and continue execution
-    const configPath = resolve(process.cwd(), 'configs', runState.configFile);
+    const configPath = await getRuntimeWorkflowConfigPath(runState.configFile);
     const configContent = await readFile(configPath, 'utf-8');
     const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
     this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
@@ -3129,7 +3138,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         const planText = planContent || result.output;
         if (planText?.trim()) {
           try {
-            const planDir = resolve(process.cwd(), 'runs', this.currentRunId, 'plans');
+            const planDir = resolve(getWorkspaceRunsDir(), this.currentRunId, 'plans');
             await mkdir(planDir, { recursive: true });
             await writeFile(resolve(planDir, `${stepKey}.md`), planText, 'utf-8');
           } catch { /* best-effort */ }
@@ -3148,7 +3157,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
           // Overwrite persisted plan with edited version
           if (this.currentRunId) {
             try {
-              const planDir = resolve(process.cwd(), 'runs', this.currentRunId, 'plans');
+              const planDir = resolve(getWorkspaceRunsDir(), this.currentRunId, 'plans');
               await writeFile(resolve(planDir, `${stepKey}.md`), reviewResult.content, 'utf-8');
             } catch { /* best-effort */ }
           }
@@ -3331,7 +3340,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         // Persist updated plan
         if (this.currentRunId && currentPlan?.trim()) {
           try {
-            const planDir = resolve(process.cwd(), 'runs', this.currentRunId, 'plans');
+            const planDir = resolve(getWorkspaceRunsDir(), this.currentRunId, 'plans');
             await mkdir(planDir, { recursive: true });
             await writeFile(resolve(planDir, `${stepKey}.md`), currentPlan, 'utf-8');
           } catch { /* best-effort */ }

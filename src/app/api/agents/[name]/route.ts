@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFile, writeFile, unlink } from 'fs/promises';
-import { resolve } from 'path';
 import { parse, stringify } from 'yaml';
 import { roleConfigSchema } from '@/lib/schemas';
+import { getRuntimeAgentConfigPath } from '@/lib/runtime-configs';
 
 export async function GET(
   request: NextRequest,
@@ -10,7 +10,7 @@ export async function GET(
 ) {
   try {
     const name = (await params).name;
-    const filepath = resolve(process.cwd(), 'configs', 'agents', `${name}.yaml`);
+    const filepath = await getRuntimeAgentConfigPath(name);
     const content = await readFile(filepath, 'utf-8');
     const agent = parse(content);
     return NextResponse.json({ agent, raw: content });
@@ -39,7 +39,7 @@ export async function POST(
       );
     }
 
-    const filepath = resolve(process.cwd(), 'configs', 'agents', `${name}.yaml`);
+    const filepath = await getRuntimeAgentConfigPath(name);
     const yamlContent = stringify(agent);
     await writeFile(filepath, yamlContent, 'utf-8');
 
@@ -61,7 +61,7 @@ export async function DELETE(
     if (name.includes('..') || name.includes('/')) {
       return NextResponse.json({ error: '无效名称' }, { status: 400 });
     }
-    const filepath = resolve(process.cwd(), 'configs', 'agents', `${name}.yaml`);
+    const filepath = await getRuntimeAgentConfigPath(name);
     await unlink(filepath);
     return NextResponse.json({ success: true, message: 'Agent 配置已删除' });
   } catch (error: any) {

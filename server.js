@@ -3,6 +3,9 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 
+process.env.ACE_INSTALL_ROOT = process.env.ACE_INSTALL_ROOT || __dirname;
+process.chdir(__dirname);
+
 /**
  * Custom server 不会自动加载 Next 在 `next dev` 下注入的 .env*，需在 require('next') 之前合并进 process.env。
  * 与 Next 常见规则一致：已在操作系统环境中存在的变量不会被文件覆盖；多文件时后者覆盖前者。
@@ -55,6 +58,24 @@ function loadProjectEnvFiles() {
 }
 
 loadProjectEnvFiles();
+
+function normalizeRoutesManifest() {
+  const manifestPath = path.join(__dirname, '.next', 'routes-manifest.json');
+  if (!fs.existsSync(manifestPath)) return;
+
+  try {
+    const content = fs.readFileSync(manifestPath, 'utf8');
+    const manifest = JSON.parse(content);
+    if (Array.isArray(manifest.onMatchHeaders)) return;
+
+    manifest.onMatchHeaders = [];
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  } catch (error) {
+    console.warn('[ACEHarness] Failed to normalize routes-manifest.json:', error);
+  }
+}
+
+normalizeRoutesManifest();
 
 const next = require('next');
 const { WebSocketServer } = require('ws');

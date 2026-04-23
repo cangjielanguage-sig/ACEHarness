@@ -1,5 +1,5 @@
 {
-  "name": "aceharness",
+  "name": "@cangjielang/aceharness",
   "version": "1.0.0-beta.0",
   "description": "ACEHarness - Agent Centric Engineering Harness (From Cangjie Team)",
   "scripts": {
@@ -7,7 +7,7 @@
     "dev": "node server.js dev",
     "build": "npm run build:cli && next build",
     "clean": "rm -rf dist .next dist-build",
-    "start": "node server.js",
+    "start": "NODE_ENV=production node server.js",
     "lint": "next lint",
     "ace": "node ./bin/ace.js",
     "prepare": "node scripts/build-cli.js",
@@ -20,8 +20,19 @@
     "orchestration",
     "claude"
   ],
-  "author": "",
+  "author": "CangjieLang",
+  "repository": {
+    "type": "git",
+    "url": "https://gitcode.com/Cangjie-SIG/ACEHarness.git"
+  },
+  "homepage": "https://gitcode.com/Cangjie-SIG/ACEHarness",
+  "bugs": {
+    "url": "https://gitcode.com/Cangjie-SIG/ACEHarness/issues"
+  },
   "license": "Apache 2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.18.2",
     "@anthropic-ai/claude-agent-sdk": "^0.2.90",
@@ -132,11 +143,29 @@
   },
   "main": "server.js",
   "files": [
+    ".npmignore",
     "bin",
     "dist",
     "server.js",
     "public",
-    ".next",
+    ".next/BUILD_ID",
+    ".next/app-path-routes-manifest.json",
+    ".next/build",
+    ".next/build-manifest.json",
+    ".next/export-marker.json",
+    ".next/fallback-build-manifest.json",
+    ".next/images-manifest.json",
+    ".next/next-minimal-server.js.nft.json",
+    ".next/next-server.js.nft.json",
+    ".next/package.json",
+    ".next/prerender-manifest.json",
+    ".next/required-server-files.js",
+    ".next/required-server-files.json",
+    ".next/routes-manifest.json",
+    ".next/server",
+    ".next/static",
+    ".next/trace-build",
+    ".next/turbopack",
     "skills",
     "configs",
     "messages"

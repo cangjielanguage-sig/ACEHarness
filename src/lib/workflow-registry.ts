@@ -6,9 +6,9 @@ import { EventEmitter } from 'events';
 import { WorkflowManager } from './workflow-manager';
 import { StateMachineWorkflowManager } from './state-machine-workflow-manager';
 import { readFile } from 'fs/promises';
-import { resolve } from 'path';
 import { parse } from 'yaml';
 import { loadRunState } from './run-state-persistence';
+import { ensureRuntimeConfigsSeeded, getBundledWorkflowConfigPath, getRuntimeWorkflowConfigPath } from './runtime-configs';
 
 export type AnyWorkflowManager = WorkflowManager | StateMachineWorkflowManager;
 
@@ -113,9 +113,10 @@ class WorkflowRegistry extends EventEmitter {
 
   private async detectStateMachine(configFile: string): Promise<boolean> {
     try {
-      let p = resolve(process.cwd(), 'configs', configFile);
+      await ensureRuntimeConfigsSeeded();
+      let p = await getRuntimeWorkflowConfigPath(configFile);
       const { existsSync } = await import('fs');
-      if (!existsSync(p)) p = resolve(process.cwd(), configFile);
+      if (!existsSync(p)) p = getBundledWorkflowConfigPath(configFile);
       const content = await readFile(p, 'utf-8');
       const config = parse(content);
       return config.workflow?.mode === 'state-machine';

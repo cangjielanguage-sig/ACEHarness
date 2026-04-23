@@ -4,11 +4,12 @@
  */
 
 import { readFile, writeFile, mkdir, readdir } from 'fs/promises';
-import { resolve, dirname, join } from 'path';
+import { dirname, resolve } from 'path';
 import { parse, stringify } from 'yaml';
+import { getWorkspaceDataFile } from '@/lib/app-paths';
+import { getRuntimeSkillsDirPath } from '@/lib/runtime-skills';
 
-const SETTINGS_PATH = resolve(process.cwd(), 'data', 'chat-settings.yaml');
-const SKILLS_DIR = join(process.cwd(), 'skills');
+const SETTINGS_PATH = getWorkspaceDataFile('chat-settings.yaml');
 
 export interface SkillInfo {
   name: string;        // 目录名，如 power-gitcode
@@ -65,12 +66,13 @@ function parseFrontmatter(content: string): Record<string, any> | null {
 export async function discoverSkills(): Promise<SkillInfo[]> {
   const skills: SkillInfo[] = [];
   try {
-    const entries = await readdir(SKILLS_DIR, { withFileTypes: true });
+    const skillsDir = await getRuntimeSkillsDirPath();
+    const entries = await readdir(skillsDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const name = entry.name;
       try {
-        const content = await readFile(resolve(SKILLS_DIR, name, 'SKILL.md'), 'utf-8');
+        const content = await readFile(resolve(skillsDir, name, 'SKILL.md'), 'utf-8');
         const fm = parseFrontmatter(content);
         if (!fm || !fm.name) continue; // Must have frontmatter with name
 

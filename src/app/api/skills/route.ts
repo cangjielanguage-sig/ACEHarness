@@ -3,8 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { parse } from 'yaml';
 import { existsSync } from 'fs';
-
-const SKILLS_DIR = path.join(process.cwd(), 'skills');
+import { getRuntimeSkillsDirPath, getSkillsTempPath } from '@/lib/runtime-skills';
 
 /** Parse YAML frontmatter from SKILL.md content */
 function parseFrontmatter(content: string): Record<string, any> | null {
@@ -22,17 +21,18 @@ function parseFrontmatter(content: string): Record<string, any> | null {
 async function discoverSkills() {
   const skills: any[] = [];
   try {
-    const entries = await fs.readdir(SKILLS_DIR, { withFileTypes: true });
+    const skillsDir = await getRuntimeSkillsDirPath();
+    const entries = await fs.readdir(skillsDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const skillMdPath = path.join(SKILLS_DIR, entry.name, 'SKILL.md');
+      const skillMdPath = path.join(skillsDir, entry.name, 'SKILL.md');
       try {
         const content = await fs.readFile(skillMdPath, 'utf-8');
         const fm = parseFrontmatter(content);
         if (!fm || !fm.name) continue; // Must have frontmatter with name
 
         // Check for PROMPT.md
-        const promptMdPath = path.join(SKILLS_DIR, entry.name, 'PROMPT.md');
+        const promptMdPath = path.join(skillsDir, entry.name, 'PROMPT.md');
         const hasPromptMd = existsSync(promptMdPath);
 
         skills.push({
@@ -54,7 +54,8 @@ async function discoverSkills() {
 // GET: List all skills
 export async function GET() {
   try {
-    const dirExists = existsSync(SKILLS_DIR);
+    const skillsDir = await getRuntimeSkillsDirPath();
+    const dirExists = existsSync(skillsDir);
     if (!dirExists) {
       return NextResponse.json({ skills: [], isCloned: true, message: 'Skills 目录不存在' });
     }
@@ -81,7 +82,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Save zip to temp
-    const tmpDir = path.join(process.cwd(), '.tmp_skill_upload');
+    const skillsDir = await getRuntimeSkillsDirPath();
+    const tmpDir = getSkillsTempPath('upload');
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     await fs.mkdir(tmpDir, { recursive: true });
 
@@ -107,7 +109,7 @@ export async function POST(request: NextRequest) {
       if (!hasSkillMd) continue;
 
       // Copy to skills/
-      const dest = path.join(SKILLS_DIR, entry.name);
+      const dest = path.join(skillsDir, entry.name);
       await fs.cp(path.join(extractDir, entry.name), dest, { recursive: true });
       imported.push(entry.name);
     }
@@ -118,7 +120,7 @@ export async function POST(request: NextRequest) {
       if (existsSync(rootSkillMd)) {
         // Use the zip filename (without .zip) as skill name
         const skillName = file.name.replace(/\.zip$/i, '');
-        const dest = path.join(SKILLS_DIR, skillName);
+        const dest = path.join(skillsDir, skillName);
         await fs.cp(extractDir, dest, { recursive: true });
         imported.push(skillName);
       }
@@ -147,10 +149,11 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: '请选择要导出的 Skill' }, { status: 400 });
     }
 
+    const skillsDir = await getRuntimeSkillsDirPath();
     // Verify all skills exist
     const missing: string[] = [];
     for (const name of skillNames) {
-      if (!existsSync(path.join(SKILLS_DIR, name, 'SKILL.md'))) {
+      if (!existsSync(path.join(skillsDir, name, 'SKILL.md'))) {
         missing.push(name);
       }
     }
@@ -159,16 +162,16 @@ export async function PUT(request: NextRequest) {
     }
 
     // Create zip
-    const tmpDir = path.join(process.cwd(), '.tmp_skill_export');
+    const tmpDir = getSkillsTempPath('export');
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     await fs.mkdir(tmpDir, { recursive: true });
 
     // Copy skills to tmp
     for (const name of skillNames) {
-      await fs.cp(path.join(SKILLS_DIR, name), path.join(tmpDir, name), { recursive: true });
+      await fs.cp(path.join(skillsDir, name), path.join(tmpDir, name), { recursive: true });
     }
 
-    const zipPath = path.join(process.cwd(), '.tmp_skills_export.zip');
+    const zipPath = getSkillsTempPath('skills-export.zip');
     const { exec } = await import('child_process');
     const { promisify } = await import('util');
     const execAsync = promisify(exec);

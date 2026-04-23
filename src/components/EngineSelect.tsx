@@ -15,7 +15,7 @@ interface EngineSelectProps {
 }
 
 export function EngineSelect({ value, onChange, className = '', allowGlobal = false }: EngineSelectProps) {
-  const [globalEngine, setGlobalEngine] = useState('claude-code');
+  const [globalEngine, setGlobalEngine] = useState('');
 
   useEffect(() => {
     if (!allowGlobal) return;
@@ -70,7 +70,7 @@ export function EngineSelect({ value, onChange, className = '', allowGlobal = fa
 
 /** Hook to get the effective engine (per-chat override or global) */
 export function useCurrentEngine(override?: string): string {
-  const [globalEngine, setGlobalEngine] = useState('claude-code');
+  const [globalEngine, setGlobalEngine] = useState('');
 
   useEffect(() => {
     const refresh = () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { roleConfigSchema } from '@/lib/schemas';
@@ -12,6 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import { resolveAgentSelection } from '@/lib/agent-engine-selection';
+import { getEngineMeta } from '@/lib/engine-metadata';
 
 interface AgentConfigPanelProps {
   agents: RoleConfig[];
@@ -34,7 +36,19 @@ const teamBadgeClass: Record<string, string> = {
 export default function AgentConfigPanel({ agents, onSaveAgent, onDeleteAgent }: AgentConfigPanelProps) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [globalEngine, setGlobalEngine] = useState('');
+  const [globalDefaultModel, setGlobalDefaultModel] = useState('');
   const { confirm, dialogProps } = useConfirmDialog();
+
+  useEffect(() => {
+    fetch('/api/engine')
+      .then((res) => res.json())
+      .then((data) => {
+        setGlobalEngine(data.engine || '');
+        setGlobalDefaultModel(data.defaultModel || '');
+      })
+      .catch(() => {});
+  }, []);
 
   const handleSave = (data: RoleConfig) => {
     onSaveAgent(data);
@@ -89,7 +103,18 @@ export default function AgentConfigPanel({ agents, onSaveAgent, onDeleteAgent }:
                   <Badge className={teamBadgeClass[role.team]}>{role.team}</Badge>
                 </div>
                 <div className="flex gap-2 mt-1">
-                  <Badge variant="secondary" className="text-xs">{role.engineModels?.[role.activeEngine] || Object.values(role.engineModels || {})[0] || '未配置'}</Badge>
+                  {(() => {
+                    const resolved = resolveAgentSelection(role, {
+                      engine: globalEngine,
+                      defaultModel: globalDefaultModel,
+                    });
+                    return (
+                      <>
+                        <Badge variant="secondary" className="text-xs">{getEngineMeta(resolved.effectiveEngine)?.name || resolved.effectiveEngine || '未配置引擎'}</Badge>
+                        <Badge variant="secondary" className="text-xs">{resolved.effectiveModel || '未配置模型'}</Badge>
+                      </>
+                    );
+                  })()}
                   {role.temperature !== undefined && (
                     <Badge variant="secondary" className="text-xs">temp: {role.temperature}</Badge>
                   )}
@@ -142,7 +167,7 @@ function RoleEditForm({
     defaultValues: role || {
       name: '',
       team: 'blue',
-      engineModels: { '': 'claude-sonnet-4-20250514' },
+      engineModels: {},
       activeEngine: '',
       capabilities: [],
       systemPrompt: '',

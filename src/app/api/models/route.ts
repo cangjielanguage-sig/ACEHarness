@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
-import path from 'path';
 import { parse, stringify } from 'yaml';
 import { getModelOptions, clearModelsCache, type ModelOption } from '@/lib/models';
-
-const MODELS_CONFIG_FILE = path.join(process.cwd(), 'configs', 'models', 'models.yaml');
+import { getRuntimeModelsConfigPath } from '@/lib/runtime-configs';
 
 export async function GET() {
   try {
@@ -23,7 +21,7 @@ export async function POST(request: NextRequest) {
     // Read current config
     let config: { models: ModelOption[] };
     try {
-      const content = await fs.readFile(MODELS_CONFIG_FILE, 'utf-8');
+      const content = await fs.readFile(await getRuntimeModelsConfigPath(), 'utf-8');
       config = parse(content) || { models: [] };
     } catch {
       config = { models: [] };
@@ -34,7 +32,7 @@ export async function POST(request: NextRequest) {
 
     // Write back to YAML
     const yamlContent = stringify(config, { lineWidth: 0 });
-    await fs.writeFile(MODELS_CONFIG_FILE, yamlContent, 'utf-8');
+    await fs.writeFile(await getRuntimeModelsConfigPath(), yamlContent, 'utf-8');
 
     // Clear cache so next read gets fresh data
     clearModelsCache();

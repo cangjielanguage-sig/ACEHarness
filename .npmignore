@@ -1,0 +1,10 @@
+.next/cache
+.next/dev
+.next/trace
+.next/diagnostics
+.next/types
+.next/**/*.map
+data
+runs
+logs
+cache

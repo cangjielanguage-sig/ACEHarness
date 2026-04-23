@@ -4,13 +4,15 @@ import { resolve } from 'path';
 import { parse } from 'yaml';
 import { requireAuth } from '@/lib/auth-middleware';
 import { listConfigsWithMeta } from '@/lib/config-metadata';
+import { ensureRuntimeConfigsSeeded, getRuntimeConfigsDirPath } from '@/lib/runtime-configs';
 
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
     if (auth instanceof NextResponse) return auth;
 
-    const configsDir = resolve(process.cwd(), 'configs');
+    await ensureRuntimeConfigsSeeded();
+    const configsDir = await getRuntimeConfigsDirPath();
     const entries = await readdir(configsDir, { withFileTypes: true });
     const metaMap = await listConfigsWithMeta('workflow');
 

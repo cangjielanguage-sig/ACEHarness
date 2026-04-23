@@ -5,6 +5,7 @@ import { resolve } from 'path';
 import { parse, stringify } from 'yaml';
 import { requireAuth } from '@/lib/auth-middleware';
 import { getConfigMeta, setConfigMeta } from '@/lib/config-metadata';
+import { ensureRuntimeConfigsSeeded, getRuntimeConfigsDirPath } from '@/lib/runtime-configs';
 
 function normalizeConfigFilename(filename: string): string {
   const normalized = filename.replace(/\\/g, '/').replace(/^\/+/, '');
@@ -33,8 +34,10 @@ export async function POST(
       return NextResponse.json({ error: '无权限访问该工作流' }, { status: 403 });
     }
 
-    const sourcePath = resolve(process.cwd(), 'configs', normalizeConfigFilename(filename));
-    const destPath = resolve(process.cwd(), 'configs', newFilename);
+    await ensureRuntimeConfigsSeeded();
+    const configsDir = await getRuntimeConfigsDirPath();
+    const sourcePath = resolve(configsDir, normalizeConfigFilename(filename));
+    const destPath = resolve(configsDir, newFilename);
 
     if (existsSync(destPath)) {
       return NextResponse.json({ error: '目标文件已存在' }, { status: 409 });

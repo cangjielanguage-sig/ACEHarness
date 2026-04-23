@@ -1,15 +1,50 @@
+import { homedir } from 'os';
 import { dirname, join, resolve } from 'path';
 
 export type AppDirectoryKind = 'config' | 'data' | 'cache' | 'logs' | 'workspace';
 
-const MODULE_DIR = __dirname;
+function resolveInstallRoot(): string {
+  const envInstallRoot = process.env.ACE_INSTALL_ROOT?.trim();
+  if (envInstallRoot) return resolve(envInstallRoot);
 
-export function getWorkspaceRoot(): string {
   return resolve(process.cwd());
 }
 
+const INSTALL_ROOT = resolveInstallRoot();
+
+function resolveRuntimeRoot(): string {
+  const aceHome = process.env.ACE_HOME?.trim();
+  if (aceHome) return resolve(aceHome);
+
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA?.trim();
+    if (appData) return resolve(appData, 'ACEHarness');
+  }
+
+  const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
+  if (xdgDataHome) return resolve(xdgDataHome, 'aceharness');
+
+  return resolve(homedir(), '.aceharness');
+}
+
+export function getWorkspaceRoot(): string {
+  return resolveRuntimeRoot();
+}
+
 export function getRepoRoot(): string {
-  return resolve(MODULE_DIR, '..', '..');
+  return INSTALL_ROOT;
+}
+
+export function getInstallPath(...segments: string[]): string {
+  return join(INSTALL_ROOT, ...segments);
+}
+
+export function getInstallConfigsDir(): string {
+  return join(INSTALL_ROOT, 'configs');
+}
+
+export function getInstallConfigPath(...segments: string[]): string {
+  return join(getInstallConfigsDir(), ...segments);
 }
 
 export function getWorkspaceDirectory(kind: AppDirectoryKind): string {
@@ -54,6 +89,30 @@ export function getEngineConfigPath(): string {
 
 export function getWorkspaceDataDir(): string {
   return getWorkspaceDirectory('data');
+}
+
+export function getWorkspaceRunsDir(): string {
+  return join(getWorkspaceRoot(), 'runs');
+}
+
+export function getWorkspaceConfigsDir(): string {
+  return join(getWorkspaceRoot(), 'configs');
+}
+
+export function getWorkspaceConfigPath(...segments: string[]): string {
+  return join(getWorkspaceConfigsDir(), ...segments);
+}
+
+export function getWorkspaceAgentsDir(): string {
+  return getWorkspaceConfigPath('agents');
+}
+
+export function getWorkspaceSkillsDir(): string {
+  return join(getWorkspaceRoot(), 'skills');
+}
+
+export function getWorkspaceSkillPath(...segments: string[]): string {
+  return join(getWorkspaceSkillsDir(), ...segments);
 }
 
 export function getWorkspaceNotebookRoot(): string {

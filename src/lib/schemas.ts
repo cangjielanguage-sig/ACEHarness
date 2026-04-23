@@ -49,7 +49,7 @@ export const workflowPhaseSchema = z.object({
 export const roleConfigSchema = z.object({
   name: z.string().min(1, '角色名称不能为空'),
   team: z.enum(['blue', 'red', 'judge']),
-  engineModels: z.record(z.string(), z.string()), // 引擎→模型映射 { "": "claude-sonnet-4-20250514", "opencode": "gpt-4o" }（""=跟随全局）
+  engineModels: z.record(z.string(), z.string()), // 引擎→模型映射，仅保存具体引擎；跟随全局时不保存模型
   activeEngine: z.string(), // 当前启用的引擎 key（""=跟随全局）
   temperature: z.number().optional(),
   capabilities: z.array(z.string()).min(1, '至少需要一个能力'),

@@ -44,7 +44,16 @@ import { useAttentionSignal } from '@/hooks/useAttentionSignal';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { RobotLogo } from '@/components/chat/ChatMessage';
+import { resolveAgentSelection } from '@/lib/agent-engine-selection';
+import { getEngineMeta } from '@/lib/engine-metadata';
 import styles from './page.module.css';
+
+const WINDOWS_DRIVE_ABSOLUTE_PATH = /^[A-Za-z]:[\\/]/;
+const UNC_ABSOLUTE_PATH = /^(?:\\\\|\/\/)/;
+
+function isAbsoluteProjectPath(path: string) {
+  return path.startsWith('/') || WINDOWS_DRIVE_ABSOLUTE_PATH.test(path) || UNC_ABSOLUTE_PATH.test(path);
+}
 
 export default function WorkbenchPage() {
   const params = useParams();
@@ -109,6 +118,8 @@ export default function WorkbenchPage() {
   const [saving, setSaving] = useState(false);
   const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>([]);
   const [starting, setStarting] = useState(false);
+  const [globalEngine, setGlobalEngine] = useState('');
+  const [globalDefaultModel, setGlobalDefaultModel] = useState('');
   const [showAgentDrawer, setShowAgentDrawer] = useState(false);
   const [showDesignRequirements, setShowDesignRequirements] = useState(true);
   const [showRunRequirements, setShowRunRequirements] = useState(true);
@@ -214,10 +225,20 @@ export default function WorkbenchPage() {
   const isRunMode = state.viewMode === 'run';
   const isHistoryMode = state.viewMode === 'history';
 
+  useEffect(() => {
+    fetch('/api/engine')
+      .then((res) => res.json())
+      .then((data) => {
+        setGlobalEngine(data.engine || '');
+        setGlobalDefaultModel(data.defaultModel || '');
+      })
+      .catch(() => {});
+  }, []);
+
   // Resolve projectRoot to absolute path using user's personalDir
   const resolvedProjectRoot = useMemo(() => {
     if (!projectRoot) return '';
-    if (projectRoot.startsWith('/')) return projectRoot;
+    if (isAbsoluteProjectPath(projectRoot)) return projectRoot;
     try {
       const stored = localStorage.getItem('auth-user');
       if (stored) {
@@ -251,6 +272,17 @@ export default function WorkbenchPage() {
     const configuredName = workflowConfig?.workflow?.name?.trim();
     return configuredName || configFile.split('/').pop() || configFile;
   }, [workflowConfig?.workflow?.name, configFile]);
+  const selectedRoleConfig = selectedStep
+    ? agentConfigs.find((role: any) => role.name === selectedStep.agent)
+    : null;
+  const selectedRoleSelection = useMemo(() => {
+    if (!selectedRoleConfig) return null;
+    return resolveAgentSelection(
+      selectedRoleConfig,
+      { engine: globalEngine, defaultModel: globalDefaultModel },
+      engine,
+    );
+  }, [selectedRoleConfig, globalEngine, globalDefaultModel, engine]);
   const workflowTitle = useMemo(() => {
     if (humanApprovalData) return `待人工审查 · ${workflowBaseTitle}`;
     if (viewingHistoryRun) return `查看运行 · ${workflowBaseTitle}`;
@@ -520,8 +552,11 @@ export default function WorkbenchPage() {
         const roleConfig = agentConfigs.find((r: any) => r.name === a.name);
         let model = a.model;
         if (roleConfig?.engineModels) {
-          const eng = roleConfig.activeEngine ?? Object.keys(roleConfig.engineModels)[0];
-          model = roleConfig.engineModels[eng] || Object.values(roleConfig.engineModels)[0] || model;
+          model = resolveAgentSelection(
+            roleConfig,
+            { engine: globalEngine, defaultModel: globalDefaultModel },
+            workflowConfig?.context?.engine,
+          ).effectiveModel || model;
         }
         return {
           name: a.name,
@@ -993,7 +1028,7 @@ export default function WorkbenchPage() {
       addLog('system', 'error', '启动失败: 项目根目录不能为空');
       return;
     }
-    if (!normalizedProjectRoot.startsWith('/')) {
+    if (!isAbsoluteProjectPath(normalizedProjectRoot)) {
       toast('error', '项目根目录必须为绝对路径');
       addLog('system', 'error', `启动失败: 项目根目录必须为绝对路径（当前: ${normalizedProjectRoot}）`);
       return;
@@ -1728,10 +1763,6 @@ export default function WorkbenchPage() {
     }
   }, [liveStream]);
 
-  const selectedRoleConfig = selectedStep
-    ? agentConfigs.find((r: any) => r.name === selectedStep.agent)
-    : null;
-
   // Find the latest iteration result key for a step (e.g. "代码审计" → UUID or "代码审计-迭代3" if that's the latest)
   const getLatestStepKey = (baseName: string): string => {
     if (!baseName) return baseName;
@@ -2103,7 +2134,7 @@ export default function WorkbenchPage() {
         <div className="flex gap-0.5 bg-background/50 rounded-md p-0.5 shrink-0">
           <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${isRunMode ? 'bg-primary text-primary-foreground' : ''}`}
             onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'run' })}>
-            <span className="material-symbols-outlined text-sm">play_arrow</span><span className="hidden sm:inline ml-1">运行</span>
+            <span className="material-symbols-outlined text-sm">home</span><span className="hidden sm:inline ml-1">首页</span>
           </Button>
           <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${isDesignMode ? 'bg-primary text-primary-foreground' : ''}`}
             onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'design' })}>
@@ -2489,8 +2520,12 @@ export default function WorkbenchPage() {
                     <div className="border-t pt-2.5">
                       <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">Agent 配置</div>
                       <div className="flex gap-2 items-center mb-1.5">
+                        <span className="text-xs text-muted-foreground">引擎</span>
+                        <span className="text-xs font-mono">{getEngineMeta(selectedRoleSelection?.effectiveEngine || '')?.name || selectedRoleSelection?.effectiveEngine || '-'}</span>
+                      </div>
+                      <div className="flex gap-2 items-center mb-1.5">
                         <span className="text-xs text-muted-foreground">模型</span>
-                        <span className="text-xs font-mono">{selectedRoleConfig.engineModels?.[selectedRoleConfig.activeEngine] || Object.values(selectedRoleConfig.engineModels || {})[0] || selectedRoleConfig.model || '-'}</span>
+                        <span className="text-xs font-mono">{selectedRoleSelection?.effectiveModel || selectedRoleConfig.model || '-'}</span>
                       </div>
                       {selectedRoleConfig.temperature !== undefined && (
                         <div className="flex gap-2 items-center mb-1.5">

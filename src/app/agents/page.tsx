@@ -19,6 +19,7 @@ import { ModelOption } from '@/lib/models';
 import { SingleCombobox, type ComboboxOption, type ComboboxGroupDef } from '@/components/ui/combobox';
 import { useToast } from '@/components/ui/toast';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { resolveAgentSelection } from '@/lib/agent-engine-selection';
 
 interface AgentConfig {
   name: string;
@@ -61,7 +62,8 @@ export default function AgentsPage() {
   const [batchReplacing, setBatchReplacing] = useState(false);
   const [alertMessage, setAlertMessage] = useState('');
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
-  const [globalEngine, setGlobalEngine] = useState('claude-code');
+  const [globalEngine, setGlobalEngine] = useState('');
+  const [globalDefaultModel, setGlobalDefaultModel] = useState('');
   const { confirm, dialogProps } = useConfirmDialog();
 
   useEffect(() => {
@@ -69,6 +71,7 @@ export default function AgentsPage() {
     loadModels();
     fetch('/api/engine').then(r => r.json()).then(d => {
       if (d.engine) setGlobalEngine(d.engine);
+      setGlobalDefaultModel(d.defaultModel || '');
     }).catch(() => {});
   }, []);
 
@@ -98,7 +101,7 @@ export default function AgentsPage() {
     setEditingAgent({
       name: '',
       team: 'blue',
-      engineModels: { '': 'claude-sonnet-4-20250514' },
+      engineModels: {},
       activeEngine: '',
       tags: [],
       capabilities: [],
@@ -511,7 +514,21 @@ export default function AgentsPage() {
                             )}
 
                             <div className="text-sm text-muted-foreground mb-2">
-                              <div>模型: {agent.engineModels?.[agent.activeEngine] || Object.values(agent.engineModels || {})[0] || '未配置'}</div>
+                              {(() => {
+                                const resolved = resolveAgentSelection(agent as any, {
+                                  engine: globalEngine,
+                                  defaultModel: globalDefaultModel,
+                                });
+                                const engineLabel = resolved.effectiveEngine
+                                  ? (getEngineMeta(resolved.effectiveEngine)?.name || resolved.effectiveEngine)
+                                  : '未配置';
+                                return (
+                                  <>
+                                    <div>引擎: {engineLabel}</div>
+                                    <div>模型: {resolved.effectiveModel || '未配置'}</div>
+                                  </>
+                                );
+                              })()}
                               {agent.temperature !== undefined && (
                                 <div>Temperature: {agent.temperature}</div>
                               )}

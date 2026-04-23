@@ -1,7 +1,7 @@
 // 模型配置 - 从 configs/models.yaml 读取
 import fs from 'fs/promises';
-import path from 'path';
 import { parse } from 'yaml';
+import { getRuntimeModelsConfigPath } from '@/lib/runtime-configs';
 
 export interface ModelOption {
   value: string;
@@ -20,7 +20,7 @@ let cachedModels: ModelOption[] | null = null;
 async function loadModels(): Promise<ModelOption[]> {
   if (cachedModels) return cachedModels;
 
-  const configPath = path.join(process.cwd(), 'configs', 'models', 'models.yaml');
+  const configPath = await getRuntimeModelsConfigPath();
   try {
     const content = await fs.readFile(configPath, 'utf-8');
     const config = parse(content) as ModelsConfig;

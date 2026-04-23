@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { useTranslations } from '@/hooks/useTranslations';
-import { Search, Plus, Play, Edit, Copy, Trash2, ArrowLeft, FileText, History } from 'lucide-react';
+import { Search, Plus, LogIn, Edit, Copy, Trash2, ArrowLeft, FileText, History } from 'lucide-react';
 import NewConfigModal from '@/components/NewConfigModal';
 import CopyConfigModal from '@/components/CopyConfigModal';
 import { useToast } from '@/components/ui/toast';
@@ -202,8 +202,8 @@ export default function WorkflowsPage() {
                     onClick={() => router.push(`/workbench/${encodeURIComponent(workflow.filename)}?mode=run`)}
                     className="flex-1"
                   >
-                    <Play className="w-3 h-3 mr-1" />
-                    运行
+                    <LogIn className="w-3 h-3 mr-1" />
+                    进入
                   </Button>
                   <Button
                     size="sm"

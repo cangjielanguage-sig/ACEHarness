@@ -6,9 +6,9 @@
 import { EventEmitter } from 'events';
 import cron from 'node-cron';
 import { readFile, writeFile, mkdir } from 'fs/promises';
-import { resolve } from 'path';
 import { parse, stringify } from 'yaml';
 import { randomUUID } from 'crypto';
+import { getWorkspaceDataDir, getWorkspaceDataFile } from './app-paths';
 
 export interface ScheduleJob {
   id: string;
@@ -27,8 +27,8 @@ export interface ScheduleJob {
   runHistory: { runId: string; time: string; status: string }[];
 }
 
-const DATA_DIR = resolve(process.cwd(), 'data');
-const SCHEDULES_FILE = resolve(DATA_DIR, 'schedules.yaml');
+const DATA_DIR = getWorkspaceDataDir();
+const SCHEDULES_FILE = getWorkspaceDataFile('schedules.yaml');
 
 class SchedulerService extends EventEmitter {
   private jobs: Map<string, ScheduleJob> = new Map();

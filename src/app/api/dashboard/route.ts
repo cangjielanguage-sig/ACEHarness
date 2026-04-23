@@ -4,11 +4,11 @@ import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { parse } from 'yaml';
 import { requireAuth } from '@/lib/auth-middleware';
+import { getWorkspaceRunsDir } from '@/lib/app-paths';
 import { listConfigsWithMeta } from '@/lib/config-metadata';
+import { ensureRuntimeConfigsSeeded, getRuntimeAgentsDirPath, getRuntimeConfigsDirPath } from '@/lib/runtime-configs';
 
-const RUNS_DIR = resolve(process.cwd(), 'runs');
-const CONFIGS_DIR = resolve(process.cwd(), 'configs');
-const AGENTS_DIR = resolve(CONFIGS_DIR, 'agents');
+const RUNS_DIR = getWorkspaceRunsDir();
 
 // ── In-memory cache with background refresh ──
 let cachedResult: any = null;
@@ -16,6 +16,7 @@ let cacheTimestamp = 0;
 const CACHE_TTL = 10_000; // 10s — background refresh interval
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let isRefreshing = false;
+const IS_BUILD_PHASE = process.env.NEXT_PHASE === 'phase-production-build';
 
 function getSafeTime(value: unknown): number {
   if (typeof value !== 'string' || !value) return 0;
@@ -104,14 +105,16 @@ async function refreshCache() {
     cachedResult = await computeDashboardData();
     cacheTimestamp = Date.now();
   } catch (e) {
-    console.error('[dashboard cache] refresh failed:', e);
+    if (!IS_BUILD_PHASE) {
+      console.error('[dashboard cache] refresh failed:', e);
+    }
   } finally {
     isRefreshing = false;
   }
 }
 
 // Start background refresh timer on first import
-if (!refreshTimer) {
+if (!IS_BUILD_PHASE && !refreshTimer) {
   refreshTimer = setInterval(() => {
     refreshCache().catch(() => {});
   }, CACHE_TTL);
@@ -138,6 +141,8 @@ export async function GET(request: NextRequest) {
 async function readConfigsSummary(userId: string, role: 'admin' | 'user') {
   const configNameMap: Record<string, string> = {};
   const configs: any[] = [];
+  await ensureRuntimeConfigsSeeded();
+  const CONFIGS_DIR = await getRuntimeConfigsDirPath();
   const metaMap = await listConfigsWithMeta('workflow');
   try {
     const entries = await readdir(CONFIGS_DIR, { withFileTypes: true });
@@ -174,6 +179,7 @@ async function readConfigsSummary(userId: string, role: 'admin' | 'user') {
 
 async function readAgentCount(): Promise<number> {
   try {
+    const AGENTS_DIR = await getRuntimeAgentsDirPath();
     const files = await readdir(AGENTS_DIR);
     return files.filter(f => f.endsWith('.yaml') || f.endsWith('.yml')).length;
   } catch { return 0; }

@@ -6,8 +6,9 @@
 import { mkdir, writeFile, readFile, readdir, unlink } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { getWorkspaceDataFile } from '@/lib/app-paths';
 
-const CHAT_DIR = resolve(process.cwd(), 'data', 'chat-sessions');
+const CHAT_DIR = getWorkspaceDataFile('chat-sessions');
 
 export interface PersistedAction {
   id: string;

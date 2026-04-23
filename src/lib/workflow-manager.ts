@@ -7,12 +7,8 @@ import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { readFile, readdir, stat, mkdir, cp, rm, copyFile } from 'fs/promises';
 import { resolve, join, dirname } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { cpus } from 'os';
-
-// Skills directory path segments - constructed at runtime to prevent
-// webpack/Next.js file tracing from over-matching the skills directory
-const SKILLS_SUBDIR = 'skills';
 import { parse } from 'yaml';
 import { fenced } from './markdown-utils';
 import { processManager } from './process-manager';
@@ -28,6 +24,10 @@ import { formatTimestamp } from './utils';
 import { createEngine, getConfiguredEngine, type Engine, type EngineType } from './engines';
 import { getEngineSkillsSubdir } from './engines/engine-config';
 import type { EngineStreamEvent } from './engines/engine-interface';
+import { getRuntimeAgentsDirPath, getRuntimeWorkflowConfigPath } from './runtime-configs';
+import { getRuntimeSkillsDirPath } from './runtime-skills';
+import { getEngineConfigPath, getWorkspaceRunsDir } from './app-paths';
+import { resolveAgentSelection } from './agent-engine-selection';
 import {
   parseNeedInfo,
   isPlanDone,
@@ -37,9 +37,33 @@ import {
 
 /** 根据工作流引擎配置解析 Agent 实际使用的模型 */
 export function resolveAgentModel(roleConfig: any, workflowContext?: any): string {
-  if (!roleConfig?.engineModels) return 'claude-opus-4-6';
-  const engine = workflowContext?.engine || roleConfig?.activeEngine || Object.keys(roleConfig.engineModels)[0];
-  return roleConfig.engineModels[engine] || Object.values(roleConfig.engineModels)[0] as string || 'claude-opus-4-6';
+  let globalEngine = '';
+  let defaultModel = '';
+
+  try {
+    if (existsSync(getEngineConfigPath())) {
+      const config = JSON.parse(readFileSync(getEngineConfigPath(), 'utf-8'));
+      globalEngine = config.engine || globalEngine;
+      defaultModel = config.defaultModel || '';
+    }
+  } catch {
+    // ignore invalid engine config and fall back to defaults
+  }
+
+  const resolved = resolveAgentSelection(
+    roleConfig,
+    { engine: globalEngine, defaultModel },
+    workflowContext?.engine,
+  );
+
+  if (!resolved.effectiveEngine) {
+    throw new Error('未配置默认引擎，请先在首次初始化或引擎设置页面完成配置');
+  }
+  if (!resolved.effectiveModel) {
+    throw new Error('未配置默认模型，请先在首次初始化或引擎设置页面完成配置');
+  }
+
+  return resolved.effectiveModel;
 }
 
 export interface TokenUsage {
@@ -76,6 +100,17 @@ export interface IterationState {
   consecutiveCleanRounds: number;
   status: 'running' | 'completed' | 'escalated';
   bugsFoundPerRound: number[];
+}
+
+function stripNonAiStreamArtifacts(text: string): string {
+  return text
+    .replace(/\n?\s*<!-- chunk-boundary -->\s*\n?/g, '\n')
+    .replace(/\n?\s*<!-- human-feedback:[\s\S]*?-->\s*\n?/g, '\n')
+    .trim();
+}
+
+function hasMeaningfulAiOutput(...parts: Array<string | null | undefined>): boolean {
+  return parts.some((part) => typeof part === 'string' && stripNonAiStreamArtifacts(part).length > 0);
 }
 
 export class WorkflowManager extends EventEmitter {
@@ -159,7 +194,7 @@ export class WorkflowManager extends EventEmitter {
     } catch { /* not found in project */ }
 
     // Try system-level skills directory
-    const systemSkillPath = join(process.cwd(), SKILLS_SUBDIR, skillName, 'SKILL.md');
+    const systemSkillPath = join(await getRuntimeSkillsDirPath(), skillName, 'SKILL.md');
     try {
       const content = await readFile(systemSkillPath, 'utf-8');
       return content;
@@ -239,7 +274,7 @@ export class WorkflowManager extends EventEmitter {
     const projectRoot = config.context?.projectRoot;
     if (!projectRoot) return;
 
-    const serverSkillsDir = join(process.cwd(), SKILLS_SUBDIR);
+    const serverSkillsDir = await getRuntimeSkillsDirPath();
     const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir);
     if (!existsSync(serverSkillsDir)) return;
 
@@ -462,7 +497,7 @@ export class WorkflowManager extends EventEmitter {
   }
 
   private async loadAgentConfigs(): Promise<RoleConfig[]> {
-    const agentsDir = resolve(process.cwd(), 'configs', 'agents');
+    const agentsDir = await getRuntimeAgentsDirPath();
     try {
       const files = await readdir(agentsDir);
       const yamlFiles = files.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
@@ -555,19 +590,17 @@ export class WorkflowManager extends EventEmitter {
       if (this.engineType !== 'claude-code') {
         this.currentEngine = await createEngine(this.engineType);
         if (!this.currentEngine) {
-          console.log(`[WorkflowManager] 引擎 ${this.engineType} 不可用，回退到 Claude Code`);
-          this.emit('log', `引擎 ${this.engineType} 不可用，回退到 Claude Code`);
-          this.engineType = 'claude-code';
+          throw new Error(`引擎 ${this.engineType} 不可用`);
         } else {
           console.log(`[WorkflowManager] 引擎 ${this.engineType} 初始化成功`);
           this.emit('log', `引擎 ${this.engineType} 初始化成功`);
         }
       }
     } catch (error) {
-      console.log(`[WorkflowManager] 引擎初始化失败: ${error}, 使用 Claude Code`);
-      this.emit('log', `引擎初始化失败: ${error}, 使用 Claude Code`);
-      this.engineType = 'claude-code';
-      this.currentEngine = null;
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(`[WorkflowManager] 引擎初始化失败: ${message}`);
+      this.emit('log', `引擎初始化失败: ${message}`);
+      throw error;
     }
   }
 
@@ -770,7 +803,7 @@ export class WorkflowManager extends EventEmitter {
     processManager.reset();
 
     try {
-      const configPath = resolve(process.cwd(), 'configs', configFile);
+      const configPath = await getRuntimeWorkflowConfigPath(configFile);
       const content = await readFile(configPath, 'utf-8');
       const workflowConfig: WorkflowConfig = parse(content);
 
@@ -1832,6 +1865,10 @@ export class WorkflowManager extends EventEmitter {
         break;
       }
 
+      if (!hasMeaningfulAiOutput(accumulatedOutput, accumulatedStream)) {
+        throw new Error(`AI 服务中断：步骤 "${step.name}" 未产生任何输出`);
+      }
+
       // Return result with accumulated output from all rounds
       return { ...lastResult!, result: accumulatedOutput };
     } finally {
@@ -1868,7 +1905,7 @@ export class WorkflowManager extends EventEmitter {
     if (workflowConfig.context.projectRoot) {
       prompt += `## 项目路径\n${workflowConfig.context.projectRoot}\n\n`;
       if (this.currentRunId) {
-        const outputDir = `${process.cwd()}/runs/${this.currentRunId}/outputs`;
+        const outputDir = join(getWorkspaceRunsDir(), this.currentRunId, 'outputs');
         const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         prompt += `## 文档输出要求\n`;
         prompt += `请将你产出的所有文档、报告、分析结果等写入以下目录：\n`;
@@ -1902,7 +1939,7 @@ export class WorkflowManager extends EventEmitter {
       prompt += `3. **Skills 包含最佳实践**：每个 Skill 都经过验证，代表了该领域的最佳实践，偏离 Skill 指导可能导致错误或性能问题\n`;
       prompt += `4. **遇到问题先查 Skills**：如果遇到构建、测试、部署等问题，请首先检查是否有对应的 Skill 可用\n\n`;
       prompt += `### 如何使用 Skills\n\n`;
-      const skillsAbsPath = join(process.cwd(), SKILLS_SUBDIR);
+      const skillsAbsPath = await getRuntimeSkillsDirPath();
       prompt += `- **Skills 目录绝对路径**: \`${skillsAbsPath}/\`\n`;
       prompt += `- **阅读 SKILL.md**：每个 Skill 目录下的 SKILL.md 包含完整使用说明，例如 \`${skillsAbsPath}/build-cangjie/SKILL.md\`\n`;
       prompt += `- **查看 REFERENCE.md**：如需更多参数说明，参考同目录下的 REFERENCE.md\n`;
@@ -2316,7 +2353,7 @@ export class WorkflowManager extends EventEmitter {
     }
 
     // Load the original workflow config
-    const configPath = resolve(process.cwd(), 'configs', runState.configFile);
+    const configPath = await getRuntimeWorkflowConfigPath(runState.configFile);
     const content = await readFile(configPath, 'utf-8');
     const workflowConfig: WorkflowConfig = parse(content);
 
@@ -2343,7 +2380,7 @@ export class WorkflowManager extends EventEmitter {
     // Recover missing completed steps by checking log files
     // This handles cases where steps completed but state wasn't persisted (e.g. crash/restart)
     try {
-      const logsDir = resolve(process.cwd(), 'runs', runId, 'logs');
+      const logsDir = resolve(getWorkspaceRunsDir(), runId, 'logs');
       const logFiles = await readdir(logsDir).catch(() => []);
       for (const file of logFiles) {
         if (!file.endsWith('.log')) continue;
@@ -2518,7 +2555,7 @@ export class WorkflowManager extends EventEmitter {
     runState.failedSteps = (runState.failedSteps || []).filter(s => s !== stepName && s !== baseStepName);
 
     // Adjust iteration state for the phase containing this step
-    const configPath = resolve(process.cwd(), 'configs', runState.configFile);
+    const configPath = await getRuntimeWorkflowConfigPath(runState.configFile);
     const content = await readFile(configPath, 'utf-8');
     const workflowConfig: WorkflowConfig = parse(content);
     for (const phase of workflowConfig.workflow.phases) {

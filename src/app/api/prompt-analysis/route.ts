@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parse } from 'yaml';
 import { readFile, readdir, stat } from 'fs/promises';
 import path from 'path';
+import { getWorkspaceRunsDir } from '@/lib/app-paths';
 
 interface PromptAnalysisResult {
   score: number;
@@ -116,7 +117,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Run ID is required' }, { status: 400 });
     }
 
-    const runsDir = path.join(process.cwd(), 'runs');
+    const runsDir = getWorkspaceRunsDir();
     const runDir = path.join(runsDir, runId);
 
     try {
