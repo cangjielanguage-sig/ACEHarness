@@ -6,6 +6,14 @@ import { parse, stringify } from 'yaml';
 import { requireAuth } from '@/lib/auth-middleware';
 import { getConfigMeta, setConfigMeta } from '@/lib/config-metadata';
 
+function normalizeConfigFilename(filename: string): string {
+  const normalized = filename.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!normalized || normalized.includes('..')) {
+    throw new Error('无效文件名');
+  }
+  return normalized;
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ filename: string }> }
@@ -25,7 +33,7 @@ export async function POST(
       return NextResponse.json({ error: '无权限访问该工作流' }, { status: 403 });
     }
 
-    const sourcePath = resolve(process.cwd(), 'configs', filename);
+    const sourcePath = resolve(process.cwd(), 'configs', normalizeConfigFilename(filename));
     const destPath = resolve(process.cwd(), 'configs', newFilename);
 
     if (existsSync(destPath)) {

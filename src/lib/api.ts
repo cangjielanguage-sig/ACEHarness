@@ -179,7 +179,7 @@ export const configApi = {
   },
 
   async getConfig(filename: string): Promise<ConfigResponse> {
-    const response = await authFetch(`${API_BASE}/configs/${filename}`);
+    const response = await authFetch(`${API_BASE}/configs/${encodeURIComponent(filename)}`);
     if (!response.ok) {
       const data = await response.json().catch(() => null);
       const available = data?.availableConfigs;
@@ -193,7 +193,7 @@ export const configApi = {
   },
 
   async saveConfig(filename: string, config: any): Promise<ApiResponse> {
-    const response = await authFetch(`${API_BASE}/configs/${filename}`, {
+    const response = await authFetch(`${API_BASE}/configs/${encodeURIComponent(filename)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config }),
@@ -207,7 +207,7 @@ export const configApi = {
   },
 
   async copyConfig(filename: string, newFilename: string): Promise<ApiResponse> {
-    const response = await authFetch(`${API_BASE}/configs/${filename}/copy`, {
+    const response = await authFetch(`${API_BASE}/configs/${encodeURIComponent(filename)}/copy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ newFilename }),
@@ -220,7 +220,7 @@ export const configApi = {
   },
 
   async deleteConfig(filename: string): Promise<ApiResponse> {
-    const response = await authFetch(`${API_BASE}/configs/${filename}`, {
+    const response = await authFetch(`${API_BASE}/configs/${encodeURIComponent(filename)}`, {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('删除配置失败');

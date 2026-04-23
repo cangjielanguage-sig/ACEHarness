@@ -59,7 +59,7 @@ export default function CopyConfigModal({
 
   const onSubmit = async (data: CopyConfigForm) => {
     try {
-      const response = await fetch(`/api/configs/${sourceFilename}/copy`, {
+      const response = await fetch(`/api/configs/${encodeURIComponent(sourceFilename)}/copy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newFilename: data.newFilename, workflowName: data.workflowName }),
