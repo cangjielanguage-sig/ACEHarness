@@ -231,7 +231,7 @@ workflow:
             ```json
             {
               "verdict": "pass|conditional_pass|fail",
-              "next_state": "生成API文档|实现编码",
+              "next_state": "生成仓颉头文件|实现编码",
               "issues": [],
               "summary": "一句话结论"
             }
@@ -242,12 +242,12 @@ workflow:
           enablePlanLoop: true
           maxPlanRounds: 2
       transitions:
-        - to: 生成API文档
+        - to: 生成仓颉头文件
           condition:
             verdict: pass
           priority: 1
           label: 验收通过
-        - to: 生成API文档
+        - to: 生成仓颉头文件
           condition:
             verdict: conditional_pass
           priority: 2
@@ -258,8 +258,45 @@ workflow:
           priority: 3
           label: 回退修复后重验
 
+    - name: 生成仓颉头文件
+      description: 使用 cjhead-assistant-skill 生成 .cj.d 头文件
+      requireHumanApproval: true
+      isInitial: false
+      isFinal: false
+      position:
+        x: 1100
+        y: 200
+      steps:
+        - name: 生成仓颉头文件
+          agent: oh-cangjie-head-gen
+          task: >
+            基于当前批次已完成的仓颉接口实现，使用 cjhead-assistant-skill 生成仓颉 API 的 .cj.d 头文件。
+            头文件生成输出目录默认为 .ace-outputs/{runId}/。 将结果报告写入
+            .ace-outputs/{runId}/仓颉API头文件生成.md。
+            报告需包含：实际执行命令、输出目录、关键产物路径、失败原因（如有）。 同时必须将本次生成出的全部 Markdown 文档正文完整汇总写入
+            .ace-outputs/{runId}/仓颉API文档完整输出.md （按原始文件路径分节展示，禁止仅写摘要）。
+          role: defender
+          skills:
+            - cjhead-assistant
+      transitions:
+        - to: 生成API文档
+          condition:
+            verdict: pass
+          priority: 1
+          label: 头文件生成完成
+        - to: 生成API文档
+          condition:
+            verdict: conditional_pass
+          priority: 2
+          label: 有条件完成
+        - to: 生成仓颉头文件
+          condition:
+            verdict: fail
+          priority: 3
+          label: 头文件生成失败，重试
+
     - name: 生成API文档
-      description: 使用 ohos-cangjie-md-skill 生成 md-sys API 文档
+      description: 使用 cangjie-doc-generator-skill 生成 md-sys API 文档
       requireHumanApproval: true
       isInitial: false
       isFinal: false
@@ -271,14 +308,14 @@ workflow:
           agent: oh-cangjie-md-writer
           role: defender
           task: >
-            基于当前批次已完成的仓颉接口实现，使用 ohos-cangjie-md-skill 生成仓颉 API 的 md-sys 文档。
+            基于当前批次已完成的仓颉接口实现，使用 cangjie-doc-generator-skill 生成仓颉 API 的 md-sys 文档。
             文档生成输出目录默认为 .ace-outputs/{runId}/仓颉API文档。
-            必须通过 cjcom 命令执行文档生成，并将结果报告写入 .ace-outputs/{runId}/仓颉API文档生成.md。
+            将结果报告写入 .ace-outputs/{runId}/仓颉API文档生成.md。
             报告需包含：实际执行命令、输出目录、关键产物路径、失败原因（如有）。
             同时必须将本次生成出的全部 Markdown 文档正文完整汇总写入 .ace-outputs/{runId}/仓颉API文档完整输出.md
             （按原始文件路径分节展示，禁止仅写摘要）。
           skills:
-            - ohos-cangjie-md-skill
+            - cangjie-doc-generator-skill
           enablePlanLoop: true
           maxPlanRounds: 2
       transitions:
