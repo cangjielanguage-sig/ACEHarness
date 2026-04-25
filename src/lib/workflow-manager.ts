@@ -1995,13 +1995,13 @@ export class WorkflowManager extends EventEmitter {
 
     // Inject previous step outputs as context (only completed steps are passed in)
     if (previousOutputs && Object.keys(previousOutputs).length > 0) {
-      const projectRoot = workflowConfig.context.projectRoot || '';
       prompt += `## 前序步骤产出\n`;
       prompt += `以下是已完成步骤的产出摘要。如需查看完整内容，请读取对应文件路径。\n\n`;
       for (const [stepName, output] of Object.entries(previousOutputs)) {
         const safeName = stepName.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
-        const fullPath = projectRoot
-          ? `${projectRoot}/.ace-outputs/${this.currentRunId}/${safeName}.md`
+        // 与 loadStepOutputs / saveProcessOutput 一致：数据目录下 runs/{runId}/outputs/，非 projectRoot/.ace-outputs
+        const fullPath = this.currentRunId
+          ? join(getWorkspaceRunsDir(), this.currentRunId, 'outputs', `${safeName}.md`)
           : '';
         // Extract the tail of the output as summary (AI typically summarizes at the end)
         const summary = output.length > 3000
