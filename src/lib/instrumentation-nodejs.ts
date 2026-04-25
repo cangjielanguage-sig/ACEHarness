@@ -7,10 +7,11 @@ export async function runNodejsInstrumentation() {
   const { existsSync, symlinkSync, mkdirSync, lstatSync, readlinkSync } = await import('fs');
   const { join } = await import('path');
   const { getEngineConfigDir } = await import('./engines/engine-config');
-  const { getEngineConfigPath } = await import('./app-paths');
+  const { getEngineConfigPath, getWorkspaceRoot } = await import('./app-paths');
+  const { getRuntimeSkillsDirPath } = await import('./runtime-skills');
 
-  const WORKSPACE_ROOT = process.cwd();
-  const SKILLS_DIR = join(WORKSPACE_ROOT, 'skills');
+  const WORKSPACE_ROOT = getWorkspaceRoot();
+  const SKILLS_DIR = await getRuntimeSkillsDirPath();
 
   // Determine engine-aware config directory from persisted engine config
   let engineConfigDir = '.claude';
@@ -44,7 +45,7 @@ export async function runNodejsInstrumentation() {
         } catch { /* ignore */ }
       } else {
         symlinkSync(SKILLS_DIR, skillsLink);
-        console.log(`[ACEHarness] Linked ${engineConfigDir}/skills -> skills/`);
+        console.log(`[ACEHarness] Linked ${engineConfigDir}/skills -> ${SKILLS_DIR}`);
       }
     }
   } catch (error) {

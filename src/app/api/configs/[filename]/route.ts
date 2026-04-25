@@ -5,6 +5,15 @@ import { parse, stringify } from 'yaml';
 import { unifiedWorkflowConfigSchema } from '@/lib/schemas';
 import { requireAuth } from '@/lib/auth-middleware';
 import { getConfigMeta, deleteConfigMeta } from '@/lib/config-metadata';
+import { ensureRuntimeConfigsSeeded, getRuntimeAgentsDirPath, getRuntimeConfigsDirPath, getRuntimeWorkflowConfigPath } from '@/lib/runtime-configs';
+
+function normalizeConfigFilename(filename: string): string {
+  const normalized = filename.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!normalized || normalized.includes('..')) {
+    throw new Error('无效文件名');
+  }
+  return normalized;
+}
 
 async function canAccessWorkflow(filename: string, userId: string, role: 'admin' | 'user') {
   const meta = await getConfigMeta(filename, 'workflow');
@@ -27,14 +36,14 @@ export async function GET(
       return NextResponse.json({ error: '无权限访问该工作流' }, { status: 403 });
     }
 
-    const filepath = resolve(process.cwd(), 'configs', filename);
+    const filepath = await getRuntimeWorkflowConfigPath(filename);
     const content = await readFile(filepath, 'utf-8');
     const config = parse(content);
 
     // Load agents from configs/agents/*.yaml
     const agents: any[] = [];
     try {
-      const agentsDir = resolve(process.cwd(), 'configs', 'agents');
+      const agentsDir = await getRuntimeAgentsDirPath();
       const files = await readdir(agentsDir);
       for (const file of files.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'))) {
         try {
@@ -50,7 +59,8 @@ export async function GET(
     // List available configs to help AI self-correct
     let available: string[] = [];
     try {
-      const configsDir = resolve(process.cwd(), 'configs');
+      await ensureRuntimeConfigsSeeded();
+      const configsDir = await getRuntimeConfigsDirPath();
       const files = await readdir(configsDir);
       available = files.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
     } catch { /* ignore */ }
@@ -97,7 +107,7 @@ export async function POST(
       );
     }
 
-    const filepath = resolve(process.cwd(), 'configs', filename);
+    const filepath = await getRuntimeWorkflowConfigPath(filename);
     const yamlContent = stringify(configWithoutRoles);
     await writeFile(filepath, yamlContent, 'utf-8');
 
@@ -119,13 +129,11 @@ export async function DELETE(
     if (auth instanceof NextResponse) return auth;
 
     const filename = (await params).filename;
-    if (filename.includes('..') || filename.includes('/')) {
-      return NextResponse.json({ error: '无效文件名' }, { status: 400 });
-    }
+    normalizeConfigFilename(filename);
     if (!(await canAccessWorkflow(filename, auth.id, auth.role))) {
       return NextResponse.json({ error: '无权限删除该工作流' }, { status: 403 });
     }
-    const filepath = resolve(process.cwd(), 'configs', filename);
+    const filepath = await getRuntimeWorkflowConfigPath(filename);
     await unlink(filepath);
     await deleteConfigMeta(filename, 'workflow');
     return NextResponse.json({ success: true, message: '配置已删除' });

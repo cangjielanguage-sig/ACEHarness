@@ -9,10 +9,6 @@ import { readFile, readdir, stat, mkdir, cp, rm, writeFile, copyFile } from 'fs/
 import { resolve, join, dirname } from 'path';
 import { existsSync } from 'fs';
 import { cpus } from 'os';
-
-// Skills directory path segments - constructed at runtime to prevent
-// webpack/Next.js file tracing from over-matching the skills directory
-const SKILLS_SUBDIR = 'skills';
 import { parse } from 'yaml';
 import { resolveAgentModel } from './workflow-manager';
 import { processManager } from './process-manager';
@@ -31,6 +27,9 @@ import { createEngine, getConfiguredEngine, type Engine, type EngineType } from 
 import { getEngineSkillsSubdir } from './engines/engine-config';
 import type { EngineStreamEvent } from './engines/engine-interface';
 import type { SdkPlanSubtaskTelemetry } from './engines/claude-code-wrapper';
+import { getRuntimeAgentsDirPath, getRuntimeWorkflowConfigPath } from './runtime-configs';
+import { getRuntimeSkillsDirPath } from './runtime-skills';
+import { getWorkspaceRoot, getWorkspaceRunsDir } from './app-paths';
 import {
   parseNeedInfo,
   isPlanDone,
@@ -39,14 +38,6 @@ import {
   type InfoRequest,
   type RouteDecision,
 } from './supervisor-router';
-
-/** 用户停止后打断仍在 await 的步骤；非引擎错误，executeState 应中止本状态循环。 */
-class WorkflowStoppedInterrupt extends Error {
-  constructor() {
-    super('工作流已停止');
-    this.name = 'WorkflowStoppedInterrupt';
-  }
-}
 
 export interface TokenUsage {
   inputTokens: number;
@@ -81,6 +72,17 @@ export interface StateTransitionRecord {
   reason: string;
   issues: Issue[];
   timestamp: string;
+}
+
+function stripNonAiStreamArtifacts(text: string): string {
+  return text
+    .replace(/\n?\s*<!-- chunk-boundary -->\s*\n?/g, '\n')
+    .replace(/\n?\s*<!-- human-feedback:[\s\S]*?-->\s*\n?/g, '\n')
+    .trim();
+}
+
+function hasMeaningfulAiOutput(...parts: Array<string | null | undefined>): boolean {
+  return parts.some((part) => typeof part === 'string' && stripNonAiStreamArtifacts(part).length > 0);
 }
 
 export class StateMachineWorkflowManager extends EventEmitter {
@@ -141,6 +143,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
   private get workspaceSkillsSubdir(): string {
     return getEngineSkillsSubdir(this.engineType);
   }
+
+  private resolveProjectRootPath(projectRoot?: string | null): string {
+    const baseDir = this._userPersonalDir || getWorkspaceRoot();
+    return projectRoot ? resolve(baseDir, projectRoot) : baseDir;
+  }
   /** Lightweight router model, configurable from workflow context.routerModel */
   private lightweightRouterModel: string = 'claude-sonnet-4-6';
 
@@ -172,7 +179,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     stepName: string;
   } | null = null;
   private pendingPlanReviewResolver: ((result: {
-    action: 'approve' | 'edit' | 'reject' | 'stop';
+    action: 'approve' | 'edit' | 'reject';
     content?: string;
     feedback?: string;
   }) => void) | null = null;
@@ -182,7 +189,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   async loadAgentConfigs(): Promise<void> {
-    const agentsDir = resolve(process.cwd(), 'configs/agents');
+    const agentsDir = await getRuntimeAgentsDirPath();
     this.agentConfigs = [];
     try {
       const files = await readdir(agentsDir);
@@ -211,8 +218,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     // Try project-level first, then server-level skills directory
     const candidates = [
-      join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir),
-      join(process.cwd(), SKILLS_SUBDIR),
+      join(this.resolveProjectRootPath(projectRoot), this.workspaceSkillsSubdir),
+      await getRuntimeSkillsDirPath(),
     ];
 
     for (const skillsDir of candidates) {
@@ -249,12 +256,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
    * Load a single skill's content from project or system skills directory
    */
   private async loadSkillContent(skillName: string, projectRoot: string): Promise<string | null> {
-    const projectSkillPath = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir, skillName, 'SKILL.md');
+    const projectSkillPath = join(this.resolveProjectRootPath(projectRoot), this.workspaceSkillsSubdir, skillName, 'SKILL.md');
     try {
       return await readFile(projectSkillPath, 'utf-8');
     } catch { /* not found in project */ }
 
-    const systemSkillPath = join(process.cwd(), SKILLS_SUBDIR, skillName, 'SKILL.md');
+    const systemSkillPath = join(await getRuntimeSkillsDirPath(), skillName, 'SKILL.md');
     try {
       return await readFile(systemSkillPath, 'utf-8');
     } catch { /* not found in system */ }
@@ -291,8 +298,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const projectRoot = config.context?.projectRoot;
     if (!projectRoot) return;
 
-    const serverSkillsDir = join(process.cwd(), SKILLS_SUBDIR);
-    const workspaceSkillsDir = join(resolve(process.cwd(), projectRoot), this.workspaceSkillsSubdir);
+    const serverSkillsDir = await getRuntimeSkillsDirPath();
+    const workspaceSkillsDir = join(this.resolveProjectRootPath(projectRoot), this.workspaceSkillsSubdir);
 
     if (!existsSync(serverSkillsDir)) return;
 
@@ -551,7 +558,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
       supervisorFlow: this.supervisorFlow,
       agentFlow: this.agentFlow,
       stepLogs: this.stepLogs,
-      pendingQuestion: this.pendingUserQuestion,
       pendingSdkPlanQuestion: this.pendingSdkPlanQuestionPayload,
       pendingSdkPlanSubtask: this.pendingSdkPlanSubtaskPayload,
       pendingPlanReview: this.pendingPlanReviewPayload,
@@ -595,14 +601,14 @@ export class StateMachineWorkflowManager extends EventEmitter {
       this.liveFeedback = [];
 
       // Load config
-      const configPath = resolve(process.cwd(), 'configs', configFile);
+      const configPath = await getRuntimeWorkflowConfigPath(configFile);
       const configContent = await readFile(configPath, 'utf-8');
       const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
       this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
       this.currentRequirements = requirements || workflowConfig.context?.requirements || '';
       // Resolve projectRoot to absolute path relative to user's personal dir
       this.currentProjectRoot = workflowConfig.context?.projectRoot
-        ? (this._userPersonalDir ? resolve(this._userPersonalDir, workflowConfig.context.projectRoot) : resolve(workflowConfig.context.projectRoot))
+        ? this.resolveProjectRootPath(workflowConfig.context.projectRoot)
         : null;
 
       if (workflowConfig.workflow.mode !== 'state-machine') {
@@ -659,8 +665,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       // === Preparing phase: directory isolation (cp for independence) ===
       if (workspaceMode === 'isolated-copy' && this._userPersonalDir && workflowConfig.context?.projectRoot) {
         await reportPreparingProgress('准备中：复制工作目录...', '复制工作目录');
-        // Resolve projectRoot relative to user's personal dir (not server cwd)
-        const srcDir = resolve(this._userPersonalDir, workflowConfig.context.projectRoot);
+        // Resolve projectRoot relative to personalDir or runtime root, not install cwd
+        const srcDir = this.resolveProjectRootPath(workflowConfig.context.projectRoot);
         if (this.shouldStop) return;
         if (!existsSync(srcDir)) {
           this.emit('log', { message: `项目目录不存在: ${srcDir}，跳过目录隔离` });
@@ -696,7 +702,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
       await reportPreparingProgress('准备中：构建 Agent 视图...', '构建 Agent 视图');
       this.initializeAgents(workflowConfig);
       await reportPreparingProgress('准备中：初始化执行引擎...', '初始化执行引擎');
-      await this.initializeEngine();
+      await this.initializeEngine(workflowConfig.context?.engine);
       if (this.shouldStop) return;
       await reportPreparingProgress('准备中：同步 Skills...', '同步 Skills');
       await this.syncSkillsToWorkspace(workflowConfig);
@@ -761,25 +767,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
   async stop(): Promise<void> {
     this.shouldStop = true;
     this.status = 'stopped';
-    // 必须先 resolve 再清空，否则 waitForUserAnswer / waitForPlanApproval 中的 Promise 永不结束。
-    if (this.pendingUserQuestionResolver) {
-      const resolveUq = this.pendingUserQuestionResolver;
-      this.pendingUserQuestionResolver = null;
-      this.pendingUserQuestion = null;
-      resolveUq('[已停止] 工作流已中断');
-    } else {
-      this.pendingUserQuestion = null;
-    }
-    if (this.pendingPlanReviewResolver) {
-      const resolvePr = this.pendingPlanReviewResolver;
-      this.pendingPlanReviewResolver = null;
-      this.pendingPlanReviewPayload = null;
-      resolvePr({ action: 'stop' });
-    } else {
-      this.pendingPlanReviewPayload = null;
-    }
-    this.pendingSdkPlanQuestionPayload = null;
-    this.pendingSdkPlanSubtaskPayload = null;
     this.emit('status', {
       status: 'stopped',
       message: '工作流已停止',
@@ -951,25 +938,33 @@ export class StateMachineWorkflowManager extends EventEmitter {
   }
 
   /**
-   * Initialize the AI engine based on .engine.json configuration
+   * Initialize the AI engine based on workflow config first, then global config.
    */
-  private async initializeEngine(): Promise<void> {
+  private async initializeEngine(workflowEngine?: string): Promise<void> {
     try {
-      this.engineType = await getConfiguredEngine();
+      const requestedEngine = workflowEngine?.trim();
+      const supportedEngines: EngineType[] = ['claude-code', 'kiro-cli', 'codex', 'cursor', 'cangjie-magic', 'opencode', 'trae-cli'];
+      const isSupportedEngine = (value: string): value is EngineType => supportedEngines.includes(value as EngineType);
+
+      if (requestedEngine) {
+        if (isSupportedEngine(requestedEngine)) {
+          this.engineType = requestedEngine;
+        } else {
+          const globalEngine = await getConfiguredEngine();
+          this.emit('log', `工作流配置的引擎无效: ${requestedEngine}，回退到全局引擎 ${globalEngine}`);
+          this.engineType = globalEngine;
+        }
+      } else {
+        this.engineType = await getConfiguredEngine();
+      }
       this.emit('log', `使用引擎: ${this.engineType}`);
 
       // Always initialize currentEngine for the selected engine, including claude-code.
       this.currentEngine = await createEngine(this.engineType);
       if (!this.currentEngine) {
-        if (this.engineType !== 'claude-code') {
-          this.engineType = 'claude-code';
-          this.currentEngine = await createEngine('claude-code');
-        }
-      }
-
-      if (!this.currentEngine) {
         throw new Error(`引擎初始化失败: ${this.engineType} 不可用`);
       }
+
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       throw error;
@@ -1005,6 +1000,13 @@ export class StateMachineWorkflowManager extends EventEmitter {
       options.runId,
       options.stepId
     );
+    (proc as any)._cancelFn = () => {
+      try {
+        this.currentEngine?.cancel();
+      } catch {
+        // Best-effort cancellation; process state is still marked as killed.
+      }
+    };
 
     const streamHandler = (event: EngineStreamEvent) => {
       // 'thought' events are forwarded separately (matching Claude Code's { thinking } field),
@@ -1156,20 +1158,15 @@ export class StateMachineWorkflowManager extends EventEmitter {
         if (stateConfig.steps.length > 0) {
           await this.executeState(stateConfig, config, requirements);
         }
-        if (!this.shouldStop) {
-          this.emit('state-change', {
-            state: this.currentState,
-            message: `到达终止状态: ${this.currentState}`,
-          });
-        }
+        this.emit('state-change', {
+          state: this.currentState,
+          message: `到达终止状态: ${this.currentState}`,
+        });
         break;
       }
 
       // Execute current state
       const result = await this.executeState(stateConfig, config, requirements);
-      if (this.shouldStop) {
-        break;
-      }
 
       // Evaluate transitions
       // Remember whether this transition was forced by the user so we can skip human approval
@@ -1328,6 +1325,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
         }
 
         this.currentState = humanSelectedState;
+        this.emit('state-change', {
+          state: this.currentState,
+          message: `进入状态: ${this.currentState}`,
+        });
       } else {
         // No human approval needed, proceed automatically
         // Record transition
@@ -1370,6 +1371,10 @@ export class StateMachineWorkflowManager extends EventEmitter {
         }
 
         this.currentState = nextState;
+        this.emit('state-change', {
+          state: this.currentState,
+          message: `进入状态: ${this.currentState}`,
+        });
       }
     }
   }
@@ -1424,9 +1429,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
           }
         }
       } catch (stepError: any) {
-        if (stepError instanceof WorkflowStoppedInterrupt) {
-          break;
-        }
         const errorMsg = stepError.message || String(stepError);
         stepOutputs.push(`ERROR: ${errorMsg}`);
         const isEngineLevelFailure =
@@ -1658,7 +1660,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
     // Add document output path
     if (this.currentRunId && config.context?.projectRoot) {
-      const outputPath = `${process.cwd()}/runs/${this.currentRunId}/outputs/`;
+      const outputPath = `${join(getWorkspaceRunsDir(), this.currentRunId, 'outputs')}/`;
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const safeName = `${state.name}-${step.name}`.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, '_');
       const fullPath = `${outputPath}${ts}-${safeName}.md`;
@@ -1674,7 +1676,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     if (config.context?.projectRoot) {
       const skills = await this.loadWorkspaceSkills(config.context.projectRoot);
       if (skills) {
-        const skillsAbsPath = join(process.cwd(), SKILLS_SUBDIR);
+        const skillsAbsPath = await getRuntimeSkillsDirPath();
         parts.push(`\n# 可用 Skills\n\nSkills 目录绝对路径: \`${skillsAbsPath}/\`\n\n如需使用某个 Skill，请先用 Read 工具读取对应的 SKILL.md 文件获取详细说明。例如：\`${skillsAbsPath}/build-cangjie/SKILL.md\`\n\n${skills}`);
       }
     }
@@ -1814,8 +1816,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
   ): Promise<string> {
     const { exec } = await import('child_process');
     const cwd = config.context?.projectRoot
-      ? resolve(process.cwd(), config.context.projectRoot)
-      : process.cwd();
+      ? this.resolveProjectRootPath(config.context.projectRoot)
+      : this.resolveProjectRootPath();
 
     const results: string[] = [];
 
@@ -1882,8 +1884,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
     const model = resolveAgentModel(roleConfig, config.context);
     const systemPrompt = roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
     const workingDirectory = config.context?.projectRoot
-      ? resolve(process.cwd(), config.context.projectRoot)
-      : process.cwd();
+      ? this.resolveProjectRootPath(config.context.projectRoot)
+      : this.resolveProjectRootPath();
 
     let currentProcessId = stepId || randomUUID();
     let currentPrompt = context;
@@ -2077,6 +2079,11 @@ export class StateMachineWorkflowManager extends EventEmitter {
     } finally {
       processManager.off('stream', streamFlushHandler);
     }
+
+    if (!hasMeaningfulAiOutput(accumulatedOutput, accumulatedStream)) {
+      throw new Error(`AI 服务中断：步骤 "${streamStepName}" 未产生任何输出`);
+    }
+
     return { output: accumulatedOutput, lastRoundOutput, costUsd: accumulatedCost, durationMs: accumulatedDuration, sessionId: currentSessionId };
   }
 
@@ -2354,7 +2361,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     await this.persistState();
 
     // Load config and continue execution
-    const configPath = resolve(process.cwd(), 'configs', runState.configFile);
+    const configPath = await getRuntimeWorkflowConfigPath(runState.configFile);
     const configContent = await readFile(configPath, 'utf-8');
     const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
     this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
@@ -2364,7 +2371,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     this.initializeAgents(workflowConfig);
 
     // Initialize engine
-    await this.initializeEngine();
+    await this.initializeEngine(workflowConfig.context?.engine);
 
     // If resuming from __human_approval__, restore the approval wait flow
     if (this.currentState === '__human_approval__') {
@@ -2671,7 +2678,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     await this.persistState();
 
     // Load config and continue execution
-    const configPath = resolve(process.cwd(), 'configs', runState.configFile);
+    const configPath = await getRuntimeWorkflowConfigPath(runState.configFile);
     const configContent = await readFile(configPath, 'utf-8');
     const workflowConfig = parse(configContent) as StateMachineWorkflowConfig;
     this.lightweightRouterModel = workflowConfig.context?.routerModel?.trim() || 'claude-sonnet-4-6';
@@ -2775,9 +2782,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
           });
           this.emit('agent-flow', { agentFlow: this.agentFlow });
           const answer = await this.waitForUserAnswer(req.question, step.agent, round);
-          if (this.shouldStop) {
-            throw new WorkflowStoppedInterrupt();
-          }
           extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
         } else {
           const agentSummaries = this.buildAgentSummaries();
@@ -2825,9 +2829,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
             });
             this.emit('agent-flow', { agentFlow: this.agentFlow });
             const answer = await this.waitForUserAnswer(req.question, step.agent, round);
-            if (this.shouldStop) {
-              throw new WorkflowStoppedInterrupt();
-            }
             extraContext += `\n\n[用户回答] ${req.question}\n${answer}`;
           } else {
             this.emit('route-decision', { ...decision, round, fromAgent: step.agent });
@@ -2921,8 +2922,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
         model,
         {
           workingDirectory: config.context?.projectRoot
-            ? resolve(process.cwd(), config.context.projectRoot)
-            : process.cwd(),
+            ? this.resolveProjectRootPath(config.context.projectRoot)
+            : this.resolveProjectRootPath(),
           timeoutMs: 60000,
         }
       );
@@ -2976,7 +2977,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         '你是一个路由器，根据问题选择最合适的 Agent。',
         this.lightweightRouterModel,
         {
-          workingDirectory: process.cwd(),
+          workingDirectory: this.resolveProjectRootPath(),
           timeoutMs: 120000, // 增加超时时间到 2 分钟
         }
       );
@@ -3113,8 +3114,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const systemPrompt =
         roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
       const workingDirectory = config.context?.projectRoot
-        ? resolve(process.cwd(), config.context.projectRoot)
-        : process.cwd();
+        ? this.resolveProjectRootPath(config.context.projectRoot)
+        : this.resolveProjectRootPath();
 
       const result = await planEngine.execute({
         agent: step.agent,
@@ -3142,7 +3143,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         const planText = planContent || result.output;
         if (planText?.trim()) {
           try {
-            const planDir = resolve(process.cwd(), 'runs', this.currentRunId, 'plans');
+            const planDir = resolve(getWorkspaceRunsDir(), this.currentRunId, 'plans');
             await mkdir(planDir, { recursive: true });
             await writeFile(resolve(planDir, `${stepKey}.md`), planText, 'utf-8');
           } catch { /* best-effort */ }
@@ -3156,15 +3157,12 @@ export class StateMachineWorkflowManager extends EventEmitter {
         const reviewResult = await this.waitForPlanApproval(
           stepKey, step, state, config, planForReview, planEngine, requirements
         );
-        if (reviewResult.action === 'stop') {
-          throw new WorkflowStoppedInterrupt();
-        }
         if (reviewResult.action === 'edit' && reviewResult.content?.trim()) {
           finalOutput = reviewResult.content;
           // Overwrite persisted plan with edited version
           if (this.currentRunId) {
             try {
-              const planDir = resolve(process.cwd(), 'runs', this.currentRunId, 'plans');
+              const planDir = resolve(getWorkspaceRunsDir(), this.currentRunId, 'plans');
               await writeFile(resolve(planDir, `${stepKey}.md`), reviewResult.content, 'utf-8');
             } catch { /* best-effort */ }
           }
@@ -3235,9 +3233,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       return finalOutput;
     } catch (err: unknown) {
-      if (err instanceof WorkflowStoppedInterrupt) {
-        throw err;
-      }
       const msg = err instanceof Error ? err.message : String(err);
       this.pendingSdkPlanQuestionPayload = null;
       this.currentStep = stepKey;
@@ -3269,7 +3264,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
     planContent: string,
     planEngine: import('./engines/claude-code-wrapper').ClaudeCodeEngineWrapper,
     requirements?: string,
-  ): Promise<{ action: 'approve' | 'edit' | 'reject' | 'stop'; content?: string; feedback?: string }> {
+  ): Promise<{ action: 'approve' | 'edit' | 'reject'; content?: string; feedback?: string }> {
     const MAX_REJECT_ROUNDS = 5;
     let currentPlan = planContent;
 
@@ -3293,7 +3288,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       // Wait for user response (10 min timeout)
       const result = await new Promise<{
-        action: 'approve' | 'edit' | 'reject' | 'stop';
+        action: 'approve' | 'edit' | 'reject';
         content?: string;
         feedback?: string;
       }>((resolve) => {
@@ -3309,10 +3304,6 @@ export class StateMachineWorkflowManager extends EventEmitter {
 
       this.pendingPlanReviewPayload = null;
       this.pendingPlanReviewResolver = null;
-
-      if (result.action === 'stop') {
-        return { action: 'stop' };
-      }
 
       if (result.action === 'approve' || result.action === 'edit') {
         return result;
@@ -3333,8 +3324,8 @@ export class StateMachineWorkflowManager extends EventEmitter {
       const systemPrompt =
         roleConfig?.systemPrompt || `你是一个 ${step.role || 'assistant'} 角色的 AI 助手。`;
       const workingDirectory = config.context?.projectRoot
-        ? resolve(process.cwd(), config.context.projectRoot)
-        : process.cwd();
+        ? this.resolveProjectRootPath(config.context.projectRoot)
+        : this.resolveProjectRootPath();
 
       const retryPrompt = `${context}\n\n---\n\n# 用户对上一版 Plan 的修改意见\n\n${feedback}\n\n# 上一版 Plan（需修改）\n\n${currentPlan}\n\n请根据用户意见修改 plan 并重新输出。`;
 
@@ -3354,7 +3345,7 @@ export class StateMachineWorkflowManager extends EventEmitter {
         // Persist updated plan
         if (this.currentRunId && currentPlan?.trim()) {
           try {
-            const planDir = resolve(process.cwd(), 'runs', this.currentRunId, 'plans');
+            const planDir = resolve(getWorkspaceRunsDir(), this.currentRunId, 'plans');
             await mkdir(planDir, { recursive: true });
             await writeFile(resolve(planDir, `${stepKey}.md`), currentPlan, 'utf-8');
           } catch { /* best-effort */ }

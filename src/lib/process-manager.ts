@@ -10,8 +10,10 @@ import { EventEmitter } from 'events';
 import { writeFile, mkdir } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { getWorkspaceRunsDir } from '@/lib/app-paths';
 
-const DEBUG_DIR = resolve(process.cwd(), 'runs', '.tmp');
+const RUNS_DIR = getWorkspaceRunsDir();
+const DEBUG_DIR = resolve(RUNS_DIR, '.tmp');
 
 function ts(): string { return new Date().toISOString(); }
 function fmtMs(ms: number): string {
@@ -54,7 +56,7 @@ class ProcessManager extends EventEmitter {
   async flushLog(proc: ProcessInfo): Promise<void> {
     try {
       const logDir = proc.runId
-        ? resolve(process.cwd(), 'runs', proc.runId, 'logs')
+        ? resolve(RUNS_DIR, proc.runId, 'logs')
         : DEBUG_DIR;
       if (!existsSync(logDir)) await mkdir(logDir, { recursive: true });
       const logFile = proc.logFile || resolve(logDir, `${proc.id}.log`);

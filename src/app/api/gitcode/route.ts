@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execFile } from 'child_process';
-import { resolve } from 'path';
-
-const SCRIPT_PATH = resolve(process.cwd(), 'skills/power-gitcode/scripts/power-gitcode.py');
+import { getRuntimeSkillPath } from '@/lib/runtime-skills';
 
 const ALLOWED_COMMANDS = new Set([
   'create_pr', 'get_pr', 'get_pr_commits', 'get_pr_changed_files', 'get_pr_comments',
@@ -40,10 +38,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `不允许的命令: ${command}` }, { status: 400 });
     }
 
+    const scriptPath = await getRuntimeSkillPath('power-gitcode', 'scripts', 'power-gitcode.py');
     const cliArgs = buildArgs(command, args);
 
     const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      execFile('python3', [SCRIPT_PATH, ...cliArgs], {
+      execFile('python3', [scriptPath, ...cliArgs], {
         timeout: 30000,
         maxBuffer: 1024 * 1024,
         env: { ...process.env },

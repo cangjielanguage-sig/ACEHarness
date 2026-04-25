@@ -5,10 +5,13 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { SingleCombobox } from '@/components/ui/combobox';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { RobotLogo } from '@/components/chat/ChatMessage';
 import AvatarPicker from '@/components/AvatarPicker';
 import WorkspaceDirectoryPicker from '@/components/common/WorkspaceDirectoryPicker';
+import { getConcreteEngines } from '@/lib/engine-metadata';
+import type { ModelOption } from '@/lib/models';
 
 interface DiscoveredSkill {
   name: string;
@@ -36,6 +39,10 @@ export default function SetupPage() {
   const [answer, setAnswer] = useState('');
   const [personalDir, setPersonalDir] = useState('');
   const [avatar, setAvatar] = useState('');
+  const [engine, setEngine] = useState('');
+  const [defaultModel, setDefaultModel] = useState('');
+  const [availableModels, setAvailableModels] = useState<Array<{ value: string; label: string }>>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
 
   // Skills
   const [skills, setSkills] = useState<DiscoveredSkill[]>([]);
@@ -52,9 +59,9 @@ export default function SetupPage() {
           try {
             const settingsRes = await fetch('/api/chat/settings');
             const settingsData = await settingsRes.json();
-            setSkills(settingsData.discoveredSkills || []);
-            const defaultEnabled = ['power-gitcode', 'aceharness-chat-card', 'aceharness-workflow-creator'];
-            setSelectedSkills(new Set(defaultEnabled));
+            const discoveredSkills = settingsData.discoveredSkills || [];
+            setSkills(discoveredSkills);
+            setSelectedSkills(new Set(discoveredSkills.map((skill: DiscoveredSkill) => skill.name)));
           } catch {
             // skills 加载失败仍可继续
           }
@@ -69,6 +76,60 @@ export default function SetupPage() {
         setCloning(false);
       });
   }, [router]);
+
+  useEffect(() => {
+    if (!engine) {
+      setAvailableModels([]);
+      setDefaultModel('');
+      return;
+    }
+
+    let cancelled = false;
+    const loadModels = async () => {
+      setLoadingModels(true);
+      setError('');
+      try {
+        if (['opencode', 'kiro-cli', 'cursor', 'trae-cli'].includes(engine)) {
+          const res = await fetch(`/api/engine/models?engine=${encodeURIComponent(engine)}`);
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || '模型探测失败');
+          if (cancelled) return;
+          const options = (data.models || []).map((item: { modelId: string; name?: string }) => ({
+            value: item.modelId,
+            label: item.name || item.modelId,
+          }));
+          setAvailableModels(options);
+          setDefaultModel((current) => options.some((item: { value: string }) => item.value === current) ? current : (options[0]?.value || ''));
+          return;
+        }
+
+        const res = await fetch('/api/models');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '模型加载失败');
+        if (cancelled) return;
+        const options = ((data.models || []) as ModelOption[])
+          .filter((model) => !model.engines || model.engines.length === 0 || model.engines.includes(engine))
+          .map((model) => ({
+            value: model.value,
+            label: `${model.label} (${model.costMultiplier}x)`,
+          }));
+        setAvailableModels(options);
+        setDefaultModel((current) => options.some((item: { value: string }) => item.value === current) ? current : (options[0]?.value || ''));
+      } catch (err: any) {
+        if (cancelled) return;
+        setAvailableModels([]);
+        setDefaultModel('');
+        setError(err.message || '模型加载失败');
+      } finally {
+        if (!cancelled) setLoadingModels(false);
+      }
+    };
+
+    loadModels();
+    return () => {
+      cancelled = true;
+    };
+  }, [engine]);
 
   const handleAdminSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,6 +150,16 @@ export default function SetupPage() {
       return;
     }
 
+    if (!engine) {
+      setError('请先选择默认引擎');
+      return;
+    }
+
+    if (!defaultModel) {
+      setError('请先选择默认模型');
+      return;
+    }
+
     setStep('skills');
   };
 
@@ -97,6 +168,17 @@ export default function SetupPage() {
     setError('');
 
     try {
+      const engineRes = await fetch('/api/engine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engine, defaultModel }),
+      });
+      const engineData = await engineRes.json();
+      if (!engineRes.ok) {
+        setError(engineData.error || '保存默认引擎失败');
+        return;
+      }
+
       // First setup admin
       const setupRes = await fetch('/api/auth/setup', {
         method: 'POST',
@@ -155,6 +237,14 @@ export default function SetupPage() {
       newSelected.add(name);
     }
     setSelectedSkills(newSelected);
+  };
+
+  const toggleAllSkills = () => {
+    if (selectedSkills.size === skills.length) {
+      setSelectedSkills(new Set());
+      return;
+    }
+    setSelectedSkills(new Set(skills.map((skill) => skill.name)));
   };
 
   if (loading) {
@@ -274,6 +364,28 @@ export default function SetupPage() {
               </div>
 
               <div className="border-t pt-4">
+                <label className="text-sm font-medium mb-1.5 block">默认引擎</label>
+                <SingleCombobox
+                  value={engine}
+                  onValueChange={setEngine}
+                  options={getConcreteEngines().map((item) => ({ value: item.id, label: item.name }))}
+                  placeholder="请选择默认引擎"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">默认模型</label>
+                <SingleCombobox
+                  value={defaultModel}
+                  onValueChange={setDefaultModel}
+                  options={availableModels}
+                  placeholder={loadingModels ? '正在加载模型...' : '请选择默认模型'}
+                  disabled={!engine || loadingModels || availableModels.length === 0}
+                />
+                <p className="text-xs text-muted-foreground mt-1">首次进入和 Agent 跟随系统时都会使用这里的默认模型</p>
+              </div>
+
+              <div className="border-t pt-4">
                 <label className="text-sm font-medium mb-1.5 block">个人目录（可选）</label>
                 <Input
                   type="text"
@@ -359,43 +471,58 @@ export default function SetupPage() {
                 <p className="text-xs mt-1">请将技能放入 skills/ 目录</p>
               </div>
             ) : (
-              <div className="space-y-3 max-h-[400px] overflow-y-auto mb-6">
-                {skills.map((skill) => (
-                  <div
-                    key={skill.name}
-                    onClick={() => toggleSkill(skill.name)}
-                    className={`p-4 rounded-xl border cursor-pointer transition-colors ${
-                      selectedSkills.has(skill.name)
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
-                    }`}
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs text-muted-foreground">
+                    已选择 {selectedSkills.size} / {skills.length}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={toggleAllSkills}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                          selectedSkills.has(skill.name)
-                            ? 'border-primary bg-primary'
-                            : 'border-muted-foreground'
-                        }`}>
-                          {selectedSkills.has(skill.name) && (
-                            <span className="material-symbols-outlined text-xs text-white">check</span>
-                          )}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{skill.label}</span>
-                            {skill.source === 'anthropics' && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500">Anthropics</span>
+                    {selectedSkills.size === skills.length ? '取消全选' : '全选'}
+                  </Button>
+                </div>
+                <div className="space-y-3 max-h-[400px] overflow-y-auto mb-6">
+                  {skills.map((skill) => (
+                    <div
+                      key={skill.name}
+                      onClick={() => toggleSkill(skill.name)}
+                      className={`p-4 rounded-xl border cursor-pointer transition-colors ${
+                        selectedSkills.has(skill.name)
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                            selectedSkills.has(skill.name)
+                              ? 'border-primary bg-primary'
+                              : 'border-muted-foreground'
+                          }`}>
+                            {selectedSkills.has(skill.name) && (
+                              <span className="material-symbols-outlined text-xs text-white">check</span>
                             )}
                           </div>
-                          <p className="text-xs text-muted-foreground mt-0.5">{skill.description || '暂无描述'}</p>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{skill.label}</span>
+                              {skill.source === 'anthropics' && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500">Anthropics</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">{skill.description || '暂无描述'}</p>
+                          </div>
                         </div>
+                        <code className="text-xs text-muted-foreground">{skill.name}</code>
                       </div>
-                      <code className="text-xs text-muted-foreground">{skill.name}</code>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </>
             )}
 
             {/* Help text */}

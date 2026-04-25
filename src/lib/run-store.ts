@@ -2,9 +2,10 @@ import { readdir, readFile, mkdir, rm } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { parse } from 'yaml';
+import { getWorkspaceRunsDir } from '@/lib/app-paths';
+import { ensureRuntimeConfigsSeeded, getRuntimeConfigsDirPath } from '@/lib/runtime-configs';
 
-const RUNS_DIR = resolve(process.cwd(), 'runs');
-const CONFIGS_DIR = resolve(process.cwd(), 'configs');
+const RUNS_DIR = getWorkspaceRunsDir();
 
 export interface RunRecord {
   id: string;
@@ -26,7 +27,8 @@ async function ensureRunsDir() {
 
 async function getConfigName(configFile: string): Promise<string> {
   try {
-    const configPath = resolve(CONFIGS_DIR, configFile);
+    await ensureRuntimeConfigsSeeded();
+    const configPath = resolve(await getRuntimeConfigsDirPath(), configFile);
     const content = await readFile(configPath, 'utf-8');
     const config = parse(content);
     return config.workflow?.name || configFile;

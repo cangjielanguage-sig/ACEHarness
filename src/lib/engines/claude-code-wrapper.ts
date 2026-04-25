@@ -280,8 +280,7 @@ function formatClaudeToolBlock(toolNameRaw: string, inputJson: string, toolId?: 
 }
 
 export async function readLatestPlanFile(
-  workDir: string,
-  minMtimeMs?: number
+  workDir: string
 ): Promise<{ path: string; content: string } | null> {
   const plansDir = join(workDir, '.claude', 'plans');
   if (!existsSync(plansDir)) return null;
@@ -292,8 +291,6 @@ export async function readLatestPlanFile(
       const p = join(plansDir, name);
       const st = await stat(p).catch(() => null);
       if (st?.isFile()) {
-        // Only accept plan files created/updated during current execution window.
-        if (typeof minMtimeMs === 'number' && st.mtimeMs < minMtimeMs) continue;
         if (!best || st.mtimeMs > best.mtime) best = { path: p, mtime: st.mtimeMs };
       }
     }
@@ -396,12 +393,43 @@ function formatElapsedSec(usageMs?: number, wallMs?: number): { text: string; se
   return { text, sec };
 }
 
+function findResolvedModel(value: unknown, depth = 0): string | undefined {
+  if (depth > 4 || value == null) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^(claude-|sonnet|opus|haiku|default|best|opusplan)/.test(trimmed)) {
+      return trimmed;
+    }
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const hit = findResolvedModel(item, depth + 1);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    for (const key of ['model', 'model_id', 'modelId', 'resolved_model', 'resolvedModel']) {
+      const hit = findResolvedModel(record[key], depth + 1);
+      if (hit) return hit;
+    }
+    for (const nested of Object.values(record)) {
+      const hit = findResolvedModel(nested, depth + 1);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
 // ============================================================================
 // ClaudeCodeEngineWrapper
 // ============================================================================
 
 export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
   private _abortController: AbortController | null = null;
+  private _abortReason: 'user' | 'timeout' | 'retry_limit' | 'unknown' | null = null;
 
   // Plan mode state
   private _capturedDeliverable = '';
@@ -419,8 +447,26 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
     } catch { return false; }
   }
 
-  cancel(): void {
+  private abortWithReason(reason: 'user' | 'timeout' | 'retry_limit' | 'unknown'): void {
+    this._abortReason = reason;
     try { this._abortController?.abort(); } catch {}
+  }
+
+  private getAbortMessage(timeoutMs: number): string {
+    switch (this._abortReason) {
+      case 'user':
+        return 'Claude Code engine execution cancelled by user';
+      case 'timeout':
+        return `Claude Code engine execution timed out after ${timeoutMs}ms`;
+      case 'retry_limit':
+        return 'Claude Code engine execution aborted after SDK API retry limit was reached';
+      default:
+        return 'Claude Code engine execution aborted';
+    }
+  }
+
+  cancel(): void {
+    this.abortWithReason('user');
   }
 
   cleanup(): void {
@@ -458,8 +504,11 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
   async execute(options: EngineOptions): Promise<EngineResult> {
     const isPlan = options.mode === 'plan';
     this._abortController = new AbortController();
+    this._abortReason = null;
     const timeoutMs = options.timeoutMs ?? 60 * 60 * 1000;
-    const timer = setTimeout(() => { try { this._abortController?.abort(); } catch {} }, timeoutMs);
+    const timer = setTimeout(() => {
+      this.abortWithReason('timeout');
+    }, timeoutMs);
 
     let accumulated = '';
     const MAX_API_RETRY_ATTEMPTS = 5;
@@ -540,11 +589,15 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
       const streamToolBlocks = new Map<number, { id: string; name: string; inputJson: string }>();
       const toolCallsById = new Map<string, { name: string; inputJson: string }>();
       let capturedSessionId: string | undefined;
+      let resolvedModel: string | undefined;
       let sawStreamEvent = false;
       let lastAssistantSnapshot = '';
       let lastBlockWasTool = false;
 
       for await (const msg of iter) {
+        if (!resolvedModel) {
+          resolvedModel = findResolvedModel(msg);
+        }
         if (streamDebug) {
           const mt = String((msg as { type?: unknown })?.type || 'unknown');
           if (!seenMsgTypes.has(mt)) {
@@ -700,13 +753,25 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
             const retry = msg as { attempt?: number; retry_delay_ms?: number; message?: string };
             const attempt = Number(retry.attempt || 0);
             if (attempt >= MAX_API_RETRY_ATTEMPTS) {
-              try { this._abortController?.abort(); } catch {}
+              this.abortWithReason('retry_limit');
               throw new Error(`SDK API 重试已达上限（${MAX_API_RETRY_ATTEMPTS} 次），已终止请求`);
             }
             // Hide SDK retry noise from end-user stream output.
             continue;
-          } else if (sys.subtype === 'init' || sys.subtype === 'session_start') {
-            // Skip init/session_start messages — not useful for output
+          } else if (
+            sys.subtype === 'init' ||
+            sys.subtype === 'session_start' ||
+            sys.subtype === 'hook_started' ||
+            sys.subtype === 'hook_response'
+          ) {
+            if (sys.subtype === 'hook_started' || sys.subtype === 'hook_response') {
+              console.debug('[ClaudeCode SDK hook]', {
+                subtype: sys.subtype,
+                message: sys.message,
+                toolName: sys.tool_name,
+              });
+            }
+            // Skip SDK lifecycle noise — not useful for end-user output
           } else if (sys.message) {
             info = `[SDK] ${sys.subtype ?? 'system'}: ${sys.message}`;
           } else if (sys.subtype) {
@@ -740,13 +805,14 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
               ? (accumulated || resultText)
               : (resultText || accumulated);
             if (isPlan) {
-              const fsHit = await readLatestPlanFile(options.workingDirectory, execStartedAt);
+              const fsHit = await readLatestPlanFile(options.workingDirectory);
               if (fsHit?.content?.trim()) this.setCapturedDeliverable(fsHit.content, fsHit.path, 'filesystem');
             }
             return {
               success: true,
               output: isPlan ? (this._capturedDeliverable || finalOutput) : finalOutput,
               sessionId: r.session_id || capturedSessionId,
+              metadata: resolvedModel ? { resolvedModel } : undefined,
             };
           }
           const err = msg as { errors?: string[] };
@@ -760,7 +826,7 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
 
       // Post-loop: filesystem fallback + persist plan
       if (isPlan) {
-        const fsHit = await readLatestPlanFile(options.workingDirectory, execStartedAt);
+        const fsHit = await readLatestPlanFile(options.workingDirectory);
         if (fsHit?.content?.trim()) {
           this.setCapturedDeliverable(fsHit.content, fsHit.path, 'filesystem');
         }
@@ -778,15 +844,19 @@ export class ClaudeCodeEngineWrapper extends EventEmitter implements Engine {
         success: true,
         output: isPlan ? (this._capturedDeliverable || accumulated) : accumulated,
         sessionId: capturedSessionId,
+        metadata: resolvedModel ? { resolvedModel } : undefined,
       };
     } catch (e: unknown) {
+      const isAborted = this._abortController?.signal.aborted;
       return {
         success: false,
         output: accumulated,
-        error: e instanceof Error ? e.message : String(e),
+        error: isAborted ? this.getAbortMessage(timeoutMs) : (e instanceof Error ? e.message : String(e)),
       };
     } finally {
       clearTimeout(timer);
+      this._abortController = null;
+      this._abortReason = null;
     }
   }
 

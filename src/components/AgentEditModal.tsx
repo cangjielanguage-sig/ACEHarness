@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { ModelSelect } from '@/components/ModelSelect';
 import { SingleCombobox } from '@/components/ui/combobox';
 import { EngineSelect } from '@/components/EngineSelect';
+import { getEngineMeta } from '@/lib/engine-metadata';
 
 interface SubAgent {
   description: string;
@@ -52,18 +53,37 @@ interface AgentEditModalProps {
 const CATEGORIES = ['测试', '编码', '设计', '压力测试', '审查', '文档', '其他'];
 
 export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentEditModalProps) {
-  // Normalize: ensure engineModels exists (backward compat with old model field)
+  // Normalize: ensure engineModels exists and strip legacy global-model entry
+  const normalizedEngineModels = { ...(agent.engineModels || {}) };
+  if ((agent as any).model && !(agent.activeEngine || '').trim()) {
+    delete normalizedEngineModels[''];
+  }
+  if (normalizedEngineModels['']) {
+    delete normalizedEngineModels[''];
+  }
   const normalizedAgent = {
     ...agent,
-    engineModels: agent.engineModels || ((agent as any).model ? { '': (agent as any).model } : { '': 'claude-sonnet-4-20250514' }),
+    engineModels: normalizedEngineModels,
     activeEngine: agent.activeEngine ?? '',
   };
   const [formData, setFormData] = useState<AgentConfig>(normalizedAgent);
   const [newTag, setNewTag] = useState('');
   const [newCapability, setNewCapability] = useState('');
   const [newConstraint, setNewConstraint] = useState('');
+  const [globalEngine, setGlobalEngine] = useState('');
+  const [globalDefaultModel, setGlobalDefaultModel] = useState('');
   const [editingSubAgent, setEditingSubAgent] = useState<{ name: string; config: SubAgent } | null>(null);
   const [newSubAgentName, setNewSubAgentName] = useState('');
+
+  useEffect(() => {
+    fetch('/api/engine')
+      .then((res) => res.json())
+      .then((data) => {
+        setGlobalEngine(data.engine || '');
+        setGlobalDefaultModel(data.defaultModel || '');
+      })
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,8 +99,15 @@ export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentE
       alert('至少需要添加一个能力');
       return;
     }
+    if (formData.activeEngine && !formData.engineModels[formData.activeEngine]) {
+      alert('当前启用的引擎必须选择模型');
+      return;
+    }
 
     const dataToSave = { ...formData };
+    if (dataToSave.engineModels['']) {
+      delete dataToSave.engineModels[''];
+    }
     if (dataToSave.reviewPanel && Object.keys(dataToSave.reviewPanel.subAgents || {}).length > 0) {
       dataToSave.reviewPanel.enabled = true;
     }
@@ -214,8 +241,24 @@ export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentE
           {/* 模型配置 */}
           <div>
             <Label>模型配置 *</Label>
-            <p className="text-xs text-muted-foreground mb-2">配置各引擎使用的模型，选中的为当前启用</p>
+            <p className="text-xs text-muted-foreground mb-2">选择当前使用的引擎。若跟随系统，则模型也跟随全局默认模型。</p>
             <div className="space-y-2">
+              <div className="flex gap-2 items-center">
+                <button
+                  type="button"
+                  className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center ${formData.activeEngine === '' ? 'border-primary bg-primary' : 'border-muted-foreground/40'}`}
+                  onClick={() => setFormData({ ...formData, activeEngine: '' })}
+                  title="跟随系统"
+                >
+                  {formData.activeEngine === '' && <span className="w-2 h-2 rounded-full bg-white" />}
+                </button>
+                <div className="w-[130px] shrink-0 text-sm text-muted-foreground">跟随系统</div>
+                <div className="flex-1 text-sm">
+                  <span className="font-medium">{getEngineMeta(globalEngine)?.name || globalEngine || '未设置默认引擎'}</span>
+                  <span className="text-muted-foreground"> / </span>
+                  <span className="font-mono">{globalDefaultModel || '未设置默认模型'}</span>
+                </div>
+              </div>
               {Object.entries(formData.engineModels).map(([eng, mod]) => (
                 <div key={eng} className="flex gap-2 items-center">
                   <button
@@ -242,11 +285,15 @@ export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentE
                     />
                   </div>
                   <div className="flex-1">
-                    <ModelSelect
-                      value={mod}
-                      onChange={(v) => setFormData({ ...formData, engineModels: { ...formData.engineModels, [eng]: v } })}
-                      engine={eng || undefined}
-                    />
+                    {eng ? (
+                      <ModelSelect
+                        value={mod}
+                        onChange={(v) => setFormData({ ...formData, engineModels: { ...formData.engineModels, [eng]: v } })}
+                        engine={eng}
+                      />
+                    ) : (
+                      <div className="text-sm text-muted-foreground">跟随系统时不支持单独设置模型</div>
+                    )}
                   </div>
                   {Object.keys(formData.engineModels).length > 1 && (
                     <Button
@@ -271,7 +318,7 @@ export default function AgentEditModal({ agent, isNew, onSave, onClose }: AgentE
                 size="sm"
                 onClick={() => {
                   const usedEngines = Object.keys(formData.engineModels);
-                  const allEngines = ['', 'claude-code', 'kiro-cli', 'opencode', 'codex', 'cursor', 'cangjie-magic'];
+                  const allEngines = ['claude-code', 'kiro-cli', 'opencode', 'codex', 'cursor', 'cangjie-magic', 'trae-cli'];
                   const available = allEngines.find(e => !usedEngines.includes(e));
                   if (available === undefined) return;
                   const defaultModel = Object.values(formData.engineModels)[0] || '';

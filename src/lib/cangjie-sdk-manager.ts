@@ -9,13 +9,14 @@ import * as unzipper from 'unzipper';
 import tar from 'tar-stream';
 import { createGunzip } from 'zlib';
 import { parse, stringify } from 'yaml';
+import { getWorkspaceDataFile } from '@/lib/app-paths';
+import { getRuntimeSdkSettingsPath } from '@/lib/runtime-configs';
 import { loadSystemSettings } from '@/lib/system-settings';
 
 const streamPipeline = promisify(pipeline);
 
-const CONFIG_PATH = resolve(process.cwd(), 'configs', 'settings', 'cangjie-sdks.yaml');
-const STATE_PATH = resolve(process.cwd(), 'data', 'cangjie-sdk-state.yaml');
-const DATA_ROOT = resolve(process.cwd(), 'data', 'cangjie');
+const STATE_PATH = getWorkspaceDataFile('cangjie-sdk-state.yaml');
+const DATA_ROOT = getWorkspaceDataFile('cangjie');
 const CACHE_ROOT = resolve(DATA_ROOT, 'cache');
 const STAGING_ROOT = resolve(DATA_ROOT, 'staging');
 const INSTALL_ROOT = resolve(DATA_ROOT, 'sdk');
@@ -138,7 +139,7 @@ async function fetchJson(url: string) {
 
 async function loadConfig(): Promise<ConfigFileShape> {
   try {
-    const content = await readFile(CONFIG_PATH, 'utf-8');
+    const content = await readFile(await getRuntimeSdkSettingsPath(), 'utf-8');
     const parsed = parse(content);
     return parsed && typeof parsed === 'object' ? parsed as ConfigFileShape : {};
   } catch {

@@ -5,7 +5,7 @@ const path = require('path');
 const ts = require('typescript');
 
 const root = path.resolve(__dirname, '..');
-const distDir = path.join(root, 'dist');
+let distDir = path.join(root, 'dist');
 const srcDir = path.join(root, 'src');
 
 const files = [
@@ -17,8 +17,49 @@ function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
+function makeWritableRecursive(targetPath) {
+  if (!fs.existsSync(targetPath)) return;
+
+  let stat;
+  try {
+    stat = fs.lstatSync(targetPath);
+  } catch {
+    return;
+  }
+
+  try {
+    fs.chmodSync(targetPath, 0o700);
+  } catch {
+    // Best effort only — some platforms/files may still reject chmod.
+  }
+
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+
+  for (const entry of fs.readdirSync(targetPath)) {
+    makeWritableRecursive(path.join(targetPath, entry));
+  }
+}
+
 function cleanDir(dirPath) {
-  fs.rmSync(dirPath, { recursive: true, force: true });
+  if (!fs.existsSync(dirPath)) return;
+
+  try {
+    fs.rmSync(dirPath, { recursive: true, force: true });
+    return;
+  } catch (error) {
+    if (!error || (error.code !== 'EPERM' && error.code !== 'EACCES')) {
+      throw error;
+    }
+  }
+
+  try {
+    makeWritableRecursive(dirPath);
+    fs.rmSync(dirPath, { recursive: true, force: true });
+  } catch {
+    // Cannot clean — use an alternate dist directory to avoid the permission issue
+    console.warn(`[build-cli] Warning: could not clean ${dirPath}, using alternate output dir`);
+    distDir = path.join(root, 'dist-build');
+  }
 }
 
 function transpileFile(inputPath) {

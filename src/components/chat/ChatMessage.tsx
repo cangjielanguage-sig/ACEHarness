@@ -4,16 +4,35 @@ import { ActionState } from '@/lib/chat-actions';
 import Markdown from '@/components/Markdown';
 import ActionCard from './ActionCard';
 import UniversalCard from './cards/UniversalCard';
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
+import { getEngineDisplayName } from '@/lib/engine-metadata';
 
-const ENGINE_LABELS: Record<string, string> = {
-  'claude-code': 'Claude Code',
-  'kiro-cli': 'Kiro CLI',
-  'opencode': 'OpenCode',
-  'codex': 'Codex',
-  'cursor': 'Cursor',
-  'cangjie-magic': 'CangjieMagic',
-};
+let modelLabelCache: Map<string, string> | null = null;
+let modelLabelPromise: Promise<Map<string, string>> | null = null;
+
+async function loadModelLabels(): Promise<Map<string, string>> {
+  if (modelLabelCache) return modelLabelCache;
+  if (!modelLabelPromise) {
+    modelLabelPromise = fetch('/api/models')
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Failed to load models: ${res.status}`);
+        const data = await res.json();
+        const labels = new Map<string, string>();
+        for (const model of data.models || []) {
+          if (model?.value) {
+            labels.set(model.value, model.label || model.value);
+          }
+        }
+        modelLabelCache = labels;
+        return labels;
+      })
+      .catch(() => {
+        modelLabelPromise = null;
+        return new Map<string, string>();
+      });
+  }
+  return modelLabelPromise;
+}
 
 interface ChatMessageProps {
   message: {
@@ -177,6 +196,29 @@ export function RobotLogo({ size = 32, className = '' }: { size?: number; classN
 }
 
 export default memo(function ChatMessage({ message, isStreaming, onConfirmAction, onRejectAction, onUndoAction, onRetryAction, onAction, onDelete, onRetryFromMessage, onEditMessage, onContinue, onSaveAsNotebook }: ChatMessageProps) {
+  const [modelLabel, setModelLabel] = useState(message.model || '');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!message.model) {
+      setModelLabel('');
+      return;
+    }
+
+    setModelLabel(message.model);
+
+    loadModelLabels().then((labels) => {
+      if (!cancelled) {
+        setModelLabel(labels.get(message.model!) || message.model!);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [message.model]);
+
   if (message.role === 'user') {
     return (
       <div className="group flex justify-end mb-4 items-start gap-1">
@@ -273,12 +315,12 @@ export default memo(function ChatMessage({ message, isStreaming, onConfirmAction
           <div className="text-xs text-muted-foreground px-1 opacity-60 flex items-center gap-1 flex-wrap">
             {message.engine && (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted/80 font-medium">
-                {ENGINE_LABELS[message.engine] || message.engine}
+                {getEngineDisplayName(message.engine)}
               </span>
             )}
             {message.model && (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted/80">
-                {message.model}
+                {modelLabel}
               </span>
             )}
             {message.usage && <span>{message.usage.input_tokens}↓ {message.usage.output_tokens}↑</span>}

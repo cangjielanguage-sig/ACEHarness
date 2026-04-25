@@ -3,6 +3,7 @@
  */
 
 import { configApi, agentApi, runsApi, workflowApi, scheduleApi } from './api';
+import { getWorkspaceSkillPath } from './app-paths';
 
 // Action 类型枚举
 export type ActionType =
@@ -202,8 +203,7 @@ const VALID_ICONS: Set<string> = (() => {
   }
   try {
     const fs = require('fs');
-    const path = require('path');
-    const jsonPath = path.resolve(process.cwd(), 'skills', 'aceharness-chat-card', 'scripts', 'material-icons.json');
+    const jsonPath = getWorkspaceSkillPath('aceharness-chat-card', 'scripts', 'material-icons.json');
     const icons: string[] = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
     return new Set(icons);
   } catch {

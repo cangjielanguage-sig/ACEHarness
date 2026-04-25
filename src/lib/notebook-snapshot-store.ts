@@ -1,9 +1,9 @@
 import { existsSync } from 'fs';
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import { resolve } from 'path';
 import { randomUUID } from 'crypto';
+import { getWorkspaceDataDir, getWorkspaceDataFile } from '@/lib/app-paths';
 
-const SNAPSHOT_FILE = resolve(process.cwd(), 'data', 'notebook-snapshots.json');
+const SNAPSHOT_FILE = getWorkspaceDataFile('notebook-snapshots.json');
 const MAX_SNAPSHOTS_PER_DOC = 50;
 
 export type NotebookSnapshotSource = 'manual' | 'auto' | 'system';
@@ -53,7 +53,7 @@ function hashContent(content: string): string {
 }
 
 async function saveSnapshots(items: NotebookSnapshot[]): Promise<void> {
-  await mkdir(resolve(process.cwd(), 'data'), { recursive: true });
+  await mkdir(getWorkspaceDataDir(), { recursive: true });
   await writeFile(SNAPSHOT_FILE, JSON.stringify(items, null, 2), 'utf-8');
 }
 

@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
         'state-change': 'phase',
         'step-start': 'step',
         'step-complete': 'result',
+        transition: 'sm-transition',
       };
 
       for (const evt of eventTypes) {

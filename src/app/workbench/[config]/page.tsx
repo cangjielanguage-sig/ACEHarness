@@ -44,7 +44,16 @@ import { useAttentionSignal } from '@/hooks/useAttentionSignal';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { RobotLogo } from '@/components/chat/ChatMessage';
+import { resolveAgentSelection } from '@/lib/agent-engine-selection';
+import { getEngineMeta } from '@/lib/engine-metadata';
 import styles from './page.module.css';
+
+const WINDOWS_DRIVE_ABSOLUTE_PATH = /^[A-Za-z]:[\\/]/;
+const UNC_ABSOLUTE_PATH = /^(?:\\\\|\/\/)/;
+
+function isAbsoluteProjectPath(path: string) {
+  return path.startsWith('/') || WINDOWS_DRIVE_ABSOLUTE_PATH.test(path) || UNC_ABSOLUTE_PATH.test(path);
+}
 
 export default function WorkbenchPage() {
   const params = useParams();
@@ -102,6 +111,7 @@ export default function WorkbenchPage() {
     result: any;
     availableStates: string[];
   } | null>(null);
+  const [openLatestAiDocRequest, setOpenLatestAiDocRequest] = useState(0);
   const [liveStream, setLiveStream] = useState<string[]>([]);
   const [showLiveStream, setShowLiveStream] = useState(false);
   const [liveStreamFullscreen, setLiveStreamFullscreen] = useState(false);
@@ -109,6 +119,8 @@ export default function WorkbenchPage() {
   const [saving, setSaving] = useState(false);
   const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>([]);
   const [starting, setStarting] = useState(false);
+  const [globalEngine, setGlobalEngine] = useState('');
+  const [globalDefaultModel, setGlobalDefaultModel] = useState('');
   const [showAgentDrawer, setShowAgentDrawer] = useState(false);
   const [showDesignRequirements, setShowDesignRequirements] = useState(true);
   const [showRunRequirements, setShowRunRequirements] = useState(true);
@@ -136,6 +148,18 @@ export default function WorkbenchPage() {
     timestamp: string;
   }[]>([]);
   const [currentPlanRound, setCurrentPlanRound] = useState<number>(0);
+  const [persistedStepLogs, setPersistedStepLogs] = useState<Array<{
+    id: string;
+    stepName: string;
+    agent: string;
+    status: 'completed' | 'failed';
+    output: string;
+    error: string;
+    costUsd: number;
+    durationMs: number;
+    timestamp: string;
+  }>>([]);
+  const [runStatusReason, setRunStatusReason] = useState<string | null>(null);
   const [planAnswer, setPlanAnswer] = useState('');
   const [sendingPlanAnswer, setSendingPlanAnswer] = useState(false);
   /** Claude Agent SDK AskUserQuestion */
@@ -214,10 +238,20 @@ export default function WorkbenchPage() {
   const isRunMode = state.viewMode === 'run';
   const isHistoryMode = state.viewMode === 'history';
 
+  useEffect(() => {
+    fetch('/api/engine')
+      .then((res) => res.json())
+      .then((data) => {
+        setGlobalEngine(data.engine || '');
+        setGlobalDefaultModel(data.defaultModel || '');
+      })
+      .catch(() => {});
+  }, []);
+
   // Resolve projectRoot to absolute path using user's personalDir
   const resolvedProjectRoot = useMemo(() => {
     if (!projectRoot) return '';
-    if (projectRoot.startsWith('/')) return projectRoot;
+    if (isAbsoluteProjectPath(projectRoot)) return projectRoot;
     try {
       const stored = localStorage.getItem('auth-user');
       if (stored) {
@@ -251,6 +285,17 @@ export default function WorkbenchPage() {
     const configuredName = workflowConfig?.workflow?.name?.trim();
     return configuredName || configFile.split('/').pop() || configFile;
   }, [workflowConfig?.workflow?.name, configFile]);
+  const selectedRoleConfig = selectedStep
+    ? agentConfigs.find((role: any) => role.name === selectedStep.agent)
+    : null;
+  const selectedRoleSelection = useMemo(() => {
+    if (!selectedRoleConfig) return null;
+    return resolveAgentSelection(
+      selectedRoleConfig,
+      { engine: globalEngine, defaultModel: globalDefaultModel },
+      engine,
+    );
+  }, [selectedRoleConfig, globalEngine, globalDefaultModel, engine]);
   const workflowTitle = useMemo(() => {
     if (humanApprovalData) return `待人工审查 · ${workflowBaseTitle}`;
     if (viewingHistoryRun) return `查看运行 · ${workflowBaseTitle}`;
@@ -293,6 +338,7 @@ export default function WorkbenchPage() {
       }
 
       dispatch({ type: 'SET_WORKFLOW_STATUS', payload: status.status });
+      setRunStatusReason(status.statusReason || null);
       const statusIsActive = status.status === 'running' || status.status === 'preparing';
       if (status.status === 'failed' && status.statusReason) {
         addLog('system', 'error', `工作流启动失败: ${status.statusReason}`);
@@ -329,17 +375,6 @@ export default function WorkbenchPage() {
         setPendingSdkPlanQuestion(status.pendingSdkPlanQuestion as any);
       } else {
         setPendingSdkPlanQuestion(null);
-      }
-
-      const pendingQuestion = (status as any).pendingQuestion;
-      if (pendingQuestion && pendingQuestion.question) {
-        setPendingPlanQuestion({
-          question: pendingQuestion.question,
-          fromAgent: pendingQuestion.fromAgent || '',
-          round: typeof pendingQuestion.round === 'number' ? pendingQuestion.round : 0,
-        });
-      } else {
-        setPendingPlanQuestion(null);
       }
 
       if (status.pendingPlanReview) {
@@ -379,6 +414,9 @@ export default function WorkbenchPage() {
       }
 
       {
+        if (Array.isArray(status.stepLogs)) {
+          setPersistedStepLogs(status.stepLogs as any[]);
+        }
         if (status.stepLogs?.length) {
           const restoredResults: Record<string, { output: string; error?: string; costUsd?: number; durationMs?: number }> = {};
           const restoredIdMap: Record<string, string> = {};
@@ -531,8 +569,11 @@ export default function WorkbenchPage() {
         const roleConfig = agentConfigs.find((r: any) => r.name === a.name);
         let model = a.model;
         if (roleConfig?.engineModels) {
-          const eng = roleConfig.activeEngine ?? Object.keys(roleConfig.engineModels)[0];
-          model = roleConfig.engineModels[eng] || Object.values(roleConfig.engineModels)[0] || model;
+          model = resolveAgentSelection(
+            roleConfig,
+            { engine: globalEngine, defaultModel: globalDefaultModel },
+            workflowConfig?.context?.engine,
+          ).effectiveModel || model;
         }
         return {
           name: a.name,
@@ -550,6 +591,7 @@ export default function WorkbenchPage() {
 
       // Restore all state into the run view
       dispatch({ type: 'SET_WORKFLOW_STATUS', payload: detail.status === 'crashed' ? 'failed' : detail.status });
+      setRunStatusReason(detail.statusReason || null);
       dispatch({ type: 'SET_RUN_ID', payload: runId });
       dispatch({ type: 'SET_AGENTS', payload: agents });
       dispatch({ type: 'SET_COMPLETED_STEPS', payload: detail.completedSteps || [] });
@@ -567,6 +609,7 @@ export default function WorkbenchPage() {
       const restoredResults: Record<string, any> = {};
       const restoredIdMap: Record<string, string> = {};
       if (detail.stepLogs) {
+        setPersistedStepLogs(detail.stepLogs);
         for (const log of detail.stepLogs) {
           // Use step ID as key if available, fall back to stepName for legacy data
           const key = log.id || log.stepName;
@@ -1004,7 +1047,7 @@ export default function WorkbenchPage() {
       addLog('system', 'error', '启动失败: 项目根目录不能为空');
       return;
     }
-    if (!normalizedProjectRoot.startsWith('/')) {
+    if (!isAbsoluteProjectPath(normalizedProjectRoot)) {
       toast('error', '项目根目录必须为绝对路径');
       addLog('system', 'error', `启动失败: 项目根目录必须为绝对路径（当前: ${normalizedProjectRoot}）`);
       return;
@@ -1015,6 +1058,8 @@ export default function WorkbenchPage() {
       setViewingHistoryRun(false);
       dispatch({ type: 'RESET_RUN' });
       dispatch({ type: 'SET_WORKFLOW_STATUS', payload: 'preparing' });
+      setPersistedStepLogs([]);
+      setRunStatusReason(null);
       setSmStateHistory([]);
       setSmIssueTracker([]);
       setSmTransitionCount(0);
@@ -1367,6 +1412,24 @@ export default function WorkbenchPage() {
     }
   };
 
+  const selectStepByLogName = (logStepName: string) => {
+    const allSteps = workflowConfig?.workflow?.mode === 'state-machine'
+      ? (workflowConfig.workflow.states || []).flatMap((state: any) =>
+          (state.steps || []).map((step: any) => ({ ...step, __stateName: state.name }))
+        )
+      : (workflowConfig?.workflow?.phases || []).flatMap((phase: any) => phase.steps || []);
+
+    const matchedStep = allSteps.find((step: any) =>
+      step.name === logStepName ||
+      logStepName.endsWith(`-${step.name}`) ||
+      (step.__stateName && logStepName === `${step.__stateName}-${step.name}`)
+    );
+
+    if (matchedStep) {
+      selectStep(matchedStep);
+    }
+  };
+
   const loadFullOutput = async (stepName: string) => {
     const rid = runId || selectedRun?.id;
     if (!rid) return;
@@ -1404,6 +1467,42 @@ export default function WorkbenchPage() {
       } catch { /* fall through to local */ }
     }
     setMarkdownModal({ title: fileName, chunks: [result.output] });
+  };
+
+  const openPersistedStepLogModal = async (log: {
+    id: string;
+    stepName: string;
+    status: 'completed' | 'failed';
+    output: string;
+    error: string;
+  }) => {
+    const resultKey = log.id || log.stepName;
+    const result = stepResults[resultKey];
+    const fileName = Object.entries(stepIdMap).find(([, id]) => id === resultKey)?.[0] || log.stepName;
+    const rid = runId || selectedRun?.id;
+
+    if (rid && log.status !== 'failed') {
+      try {
+        const streamContent = await streamApi.getStreamContent(rid, fileName);
+        if (streamContent) {
+          const chunks = streamContent.split(CHUNK_SEP).filter(Boolean);
+          if (chunks.length > 1) {
+            setMarkdownModal({ title: fileName, chunks });
+            return;
+          }
+        }
+        const { content } = await runsApi.getStepOutput(rid, fileName);
+        setMarkdownModal({ title: fileName, chunks: [content] });
+        return;
+      } catch { /* fall back below */ }
+    }
+
+    if (log.status === 'failed') {
+      setMarkdownModal({ title: `${fileName}（错误详情）`, chunks: [log.error || result?.error || '执行失败，但没有记录到错误详情'] });
+      return;
+    }
+
+    setMarkdownModal({ title: fileName, chunks: [result?.output || log.output || '无输出'] });
   };
 
   // Chunk separator used in persisted stream files
@@ -1499,39 +1598,31 @@ export default function WorkbenchPage() {
     // Try SSE live stream if we have runId + step
     if (rid && activeStep) {
       let sseBuffer = '';
+      let sseRaw = '';
       const es = streamApi.connectLiveStream(
         rid,
         activeStep,
         (content) => {
-          // Accumulate into buffer, only split on CHUNK_SEP boundaries
-          sseBuffer += content;
-          const parts = sseBuffer.split(CHUNK_SEP);
-          // Last part is incomplete (no trailing separator) — keep in buffer
+          // SSE may replay the full accumulated content after reconnect.
+          // Normalize it into a monotonic raw stream before splitting chunks.
+          const nextRaw = sseRaw && content.startsWith(sseRaw)
+            ? content
+            : content.length >= sseRaw.length && content.startsWith(sseRaw)
+              ? content
+              : sseRaw && sseRaw.startsWith(content)
+                ? sseRaw
+                : sseRaw + content;
+
+          if (nextRaw === sseRaw) return;
+
+          sseRaw = nextRaw;
+          liveStreamRawRef.current = sseRaw;
+          liveStreamLenRef.current = sseRaw.length;
+
+          const parts = sseRaw.split(CHUNK_SEP);
           sseBuffer = parts.pop() || '';
-          if (parts.length > 0) {
-            const newChunks = parts.filter(Boolean);
-            if (newChunks.length > 0) {
-              liveStreamLenRef.current += content.length;
-              setLiveStream(prev => [...prev, ...newChunks]);
-            }
-          }
-          // Always update the last (in-progress) chunk
-          if (sseBuffer) {
-            setLiveStream(prev => {
-              // Replace or append the trailing incomplete chunk
-              const last = prev.length > 0 ? prev[prev.length - 1] : null;
-              // If last chunk was the previous buffer tail, replace it
-              if (last !== null && sseBuffer.startsWith(last)) {
-                return [...prev.slice(0, -1), sseBuffer];
-              }
-              // First chunk or after a separator
-              if (prev.length === 0 || parts.length > 0) {
-                return [...prev, sseBuffer];
-              }
-              // Append to last chunk (streaming continuation)
-              return [...prev.slice(0, -1), sseBuffer];
-            });
-          }
+          const rebuilt = [...parts.filter(Boolean), ...(sseBuffer ? [sseBuffer] : [])];
+          setLiveStream(rebuilt);
         },
         (_status) => {
           // Stream done — don't auto-close panel, user may still be reading
@@ -1746,10 +1837,6 @@ export default function WorkbenchPage() {
       liveStreamScrollRef.current.scrollTop = liveStreamScrollRef.current.scrollHeight;
     }
   }, [liveStream]);
-
-  const selectedRoleConfig = selectedStep
-    ? agentConfigs.find((r: any) => r.name === selectedStep.agent)
-    : null;
 
   // Find the latest iteration result key for a step (e.g. "代码审计" → UUID or "代码审计-迭代3" if that's the latest)
   const getLatestStepKey = (baseName: string): string => {
@@ -2122,7 +2209,7 @@ export default function WorkbenchPage() {
         <div className="flex gap-0.5 bg-background/50 rounded-md p-0.5 shrink-0">
           <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${isRunMode ? 'bg-primary text-primary-foreground' : ''}`}
             onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'run' })}>
-            <span className="material-symbols-outlined text-sm">play_arrow</span><span className="hidden sm:inline ml-1">运行</span>
+            <span className="material-symbols-outlined text-sm">home</span><span className="hidden sm:inline ml-1">首页</span>
           </Button>
           <Button variant="ghost" size="sm" className={`h-7 px-2 text-xs ${isDesignMode ? 'bg-primary text-primary-foreground' : ''}`}
             onClick={() => dispatch({ type: 'SET_VIEW_MODE', payload: 'design' })}>
@@ -2385,7 +2472,10 @@ export default function WorkbenchPage() {
 {isDesignMode && <TabsContent value="config" className="mt-0 overflow-y-auto h-full p-4"><div><h4 className="text-sm font-semibold mb-4">高级配置</h4>
           </div></TabsContent>}
 <TabsContent value="documents" className="mt-0 h-full">
-                  <DocumentsPanel runId={runId || selectedRun?.id || null} />
+                  <DocumentsPanel
+                    runId={runId || selectedRun?.id || null}
+                    openLatestTimestampedRequest={openLatestAiDocRequest}
+                  />
                 </TabsContent>
                 <TabsContent value="schedules" className="mt-0 h-full">
                   <SchedulesPanel configFile={configFile} />
@@ -2508,8 +2598,12 @@ export default function WorkbenchPage() {
                     <div className="border-t pt-2.5">
                       <div className="text-xs text-muted-foreground font-medium mb-1 uppercase tracking-wider">Agent 配置</div>
                       <div className="flex gap-2 items-center mb-1.5">
+                        <span className="text-xs text-muted-foreground">引擎</span>
+                        <span className="text-xs font-mono">{getEngineMeta(selectedRoleSelection?.effectiveEngine || '')?.name || selectedRoleSelection?.effectiveEngine || '-'}</span>
+                      </div>
+                      <div className="flex gap-2 items-center mb-1.5">
                         <span className="text-xs text-muted-foreground">模型</span>
-                        <span className="text-xs font-mono">{selectedRoleConfig.engineModels?.[selectedRoleConfig.activeEngine] || Object.values(selectedRoleConfig.engineModels || {})[0] || selectedRoleConfig.model || '-'}</span>
+                        <span className="text-xs font-mono">{selectedRoleSelection?.effectiveModel || selectedRoleConfig.model || '-'}</span>
                       </div>
                       {selectedRoleConfig.temperature !== undefined && (
                         <div className="flex gap-2 items-center mb-1.5">
@@ -2714,7 +2808,15 @@ export default function WorkbenchPage() {
                 </div>
               )}
               {selectedAgent ? (<AgentPanel agent={selectedAgent} logs={logs} onClearLogs={(name) => dispatch({ type: 'CLEAR_AGENT_LOGS', payload: name })}
-                stepSummary={selectedStep && stepResult?.output ? stepResult.output : undefined} />
+                stepSummary={selectedStep && stepResult?.output ? stepResult.output : undefined}
+                persistedStepLogs={persistedStepLogs}
+                selectedStepName={selectedStep?.name || null}
+                selectedStepExecutionId={selectedStep ? stepKey : null}
+                runStatus={workflowStatus}
+                runStatusReason={runStatusReason}
+                currentStepName={currentStep || null}
+                onSelectPersistedStep={selectStepByLogName}
+                onViewPersistedStepOutput={openPersistedStepLogModal} />
               ) : (<div className="flex flex-col items-center justify-center h-full text-muted-foreground"><span className="material-symbols-outlined text-5xl mb-4">smart_toy</span><p>选择一个 Agent 查看详情</p></div>)}
             </div>
                   </>);
@@ -3721,7 +3823,7 @@ export default function WorkbenchPage() {
 
       {/* 人工审查对话框 */}
       {humanApprovalData && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" onClick={() => setHumanApprovalData(null)}>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80" onClick={() => setHumanApprovalData(null)}>
           <div className="bg-card rounded-lg w-[700px] max-w-[90%] border shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-5 border-b bg-orange-50 dark:bg-orange-950">
               <div className="flex items-center justify-between">
@@ -3772,8 +3874,22 @@ export default function WorkbenchPage() {
 
               {/* AI 建议的下一步 */}
               <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
-                <div className="text-sm font-medium mb-1 text-blue-700 dark:text-blue-400">
-                  AI 建议
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium text-blue-700 dark:text-blue-400">
+                    AI 建议
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      dispatch({ type: 'SET_ACTIVE_TAB', payload: 'documents' });
+                      setOpenLatestAiDocRequest((value) => value + 1);
+                    }}
+                  >
+                    <span className="material-symbols-outlined mr-1" style={{ fontSize: '14px' }}>description</span>
+                    查看分析报告
+                  </Button>
                 </div>
                 <div className="text-sm">
                   → {humanApprovalData.nextState}

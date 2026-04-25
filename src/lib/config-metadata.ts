@@ -6,6 +6,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { ensureRuntimeConfigsSeeded, getRuntimeAgentsDirPath, getRuntimeConfigsDirPath } from '@/lib/runtime-configs';
 
 export interface ConfigMeta {
   createdBy?: string;
@@ -31,30 +32,34 @@ async function saveMetadata(metaPath: string, data: MetadataMap): Promise<void> 
   await writeFile(metaPath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
-const CONFIGS_META = resolve(process.cwd(), 'configs', '.metadata.json');
-const AGENTS_META = resolve(process.cwd(), 'configs', 'agents', '.metadata.json');
+async function getMetaPath(type: 'workflow' | 'agent'): Promise<string> {
+  await ensureRuntimeConfigsSeeded();
+  return type === 'agent'
+    ? resolve(await getRuntimeAgentsDirPath(), '.metadata.json')
+    : resolve(await getRuntimeConfigsDirPath(), '.metadata.json');
+}
 
 export async function getConfigMeta(configFile: string, type: 'workflow' | 'agent' = 'workflow'): Promise<ConfigMeta | undefined> {
-  const metaPath = type === 'agent' ? AGENTS_META : CONFIGS_META;
+  const metaPath = await getMetaPath(type);
   const data = await loadMetadata(metaPath);
   return data[configFile];
 }
 
 export async function setConfigMeta(configFile: string, meta: Partial<ConfigMeta>, type: 'workflow' | 'agent' = 'workflow'): Promise<void> {
-  const metaPath = type === 'agent' ? AGENTS_META : CONFIGS_META;
+  const metaPath = await getMetaPath(type);
   const data = await loadMetadata(metaPath);
   data[configFile] = { ...data[configFile], ...meta } as ConfigMeta;
   await saveMetadata(metaPath, data);
 }
 
 export async function deleteConfigMeta(configFile: string, type: 'workflow' | 'agent' = 'workflow'): Promise<void> {
-  const metaPath = type === 'agent' ? AGENTS_META : CONFIGS_META;
+  const metaPath = await getMetaPath(type);
   const data = await loadMetadata(metaPath);
   delete data[configFile];
   await saveMetadata(metaPath, data);
 }
 
 export async function listConfigsWithMeta(type: 'workflow' | 'agent' = 'workflow'): Promise<MetadataMap> {
-  const metaPath = type === 'agent' ? AGENTS_META : CONFIGS_META;
+  const metaPath = await getMetaPath(type);
   return loadMetadata(metaPath);
 }

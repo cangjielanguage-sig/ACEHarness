@@ -6,26 +6,29 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { resolve, dirname, isAbsolute, join } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir } from 'os';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-function isProjectRoot(dir) {
-  return existsSync(join(dir, 'configs', 'agents')) && existsSync(join(dir, 'package.json'));
-}
+function resolveRuntimeRoot() {
+  const aceHome = process.env.ACE_HOME?.trim();
+  if (aceHome) return resolve(aceHome);
 
-function findProjectRoot(startDir) {
-  let current = resolve(startDir);
-  while (true) {
-    if (isProjectRoot(current)) return current;
-    const parent = dirname(current);
-    if (parent === current) return null;
-    current = parent;
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA?.trim();
+    if (appData) return resolve(appData, 'ACEHarness');
   }
+
+  const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
+  if (xdgDataHome) return resolve(xdgDataHome, 'aceharness');
+
+  return resolve(homedir(), '.aceharness');
 }
 
-const PROJECT_ROOT = findProjectRoot(__dirname) || findProjectRoot(process.cwd()) || process.cwd();
+const RUNTIME_ROOT = resolveRuntimeRoot();
+const RUNTIME_CONFIGS_DIR = resolve(RUNTIME_ROOT, 'configs');
 
 // --- Schemas (mirror of src/lib/schemas.ts) ---
 
@@ -160,7 +163,7 @@ const unifiedSchema = z.union([phaseBasedSchema, stateMachineSchema]);
 // --- Validation Logic ---
 
 function getAvailableAgents() {
-  const agentsDir = resolve(PROJECT_ROOT, 'configs', 'agents');
+  const agentsDir = resolve(RUNTIME_CONFIGS_DIR, 'agents');
   if (!existsSync(agentsDir)) return [];
   return readdirSync(agentsDir)
     .filter(f => f.endsWith('.yaml'))
@@ -243,7 +246,7 @@ function validate(configPath) {
 
   for (const agent of referencedAgents) {
     if (!availableAgents.includes(agent)) {
-      errors.push(`Agent "${agent}" 不存在于 configs/agents/，可用: ${availableAgents.join(', ')}`);
+      errors.push(`Agent "${agent}" 不存在于运行时 configs/agents/，可用: ${availableAgents.join(', ')}`);
     }
   }
 
@@ -313,8 +316,10 @@ if (!configPath) {
 }
 const resolvedConfigPath = isAbsolute(configPath)
   ? configPath
-  : (existsSync(resolve(PROJECT_ROOT, configPath))
-      ? resolve(PROJECT_ROOT, configPath)
+  : (existsSync(resolve(RUNTIME_ROOT, configPath))
+      ? resolve(RUNTIME_ROOT, configPath)
+      : existsSync(resolve(RUNTIME_CONFIGS_DIR, configPath))
+        ? resolve(RUNTIME_CONFIGS_DIR, configPath)
       : resolve(process.cwd(), configPath));
 
 validate(resolvedConfigPath);

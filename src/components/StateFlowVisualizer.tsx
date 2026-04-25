@@ -15,11 +15,13 @@ function formatStateName(name: string): string {
 interface StateFlowVisualizerProps {
   stateHistory: StateTransitionRecord[];
   currentState: string | null;
+  onStateClick?: (stateName: string) => void;
 }
 
 export default function StateFlowVisualizer({
   stateHistory,
   currentState,
+  onStateClick,
 }: StateFlowVisualizerProps) {
   // 分析状态流转模式
   const flowAnalysis = useMemo(() => {
@@ -144,7 +146,13 @@ export default function StateFlowVisualizer({
                           {isHumanApproval && (
                             <span className="material-symbols-outlined text-orange-500" style={{ fontSize: 20 }}>person</span>
                           )}
-                          {displayName}
+                          <button
+                            type="button"
+                            onClick={() => onStateClick?.(state)}
+                            className="text-left underline-offset-4 hover:underline"
+                          >
+                            {displayName}
+                          </button>
                         </div>
                         <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                           <span>访问 {visitCount} 次</span>
@@ -199,12 +207,16 @@ export default function StateFlowVisualizer({
                             <ArrowRight className="w-5 h-5 text-blue-500 flex-shrink-0" />
                           )}
                           <div className="flex-1 flex items-center justify-between">
-                            <span className="text-sm font-medium">
+                            <button
+                              type="button"
+                              onClick={() => onStateClick?.(targetState)}
+                              className="text-sm font-medium underline-offset-4 hover:underline"
+                            >
                               → {targetDisplayName}
-                            </span>
-                            <Badge variant="outline" className="text-xs">
-                              {count} 次
-                            </Badge>
+                            </button>
+                          <Badge variant="outline" className="text-xs">
+                            {count} 次
+                          </Badge>
                           </div>
                           {isBackward && (
                             <Badge variant="outline" className="text-xs text-orange-600 border-orange-600">
@@ -254,9 +266,21 @@ export default function StateFlowVisualizer({
                 <div className="flex items-center gap-3">
                   <RotateCcw className="w-4 h-4 text-orange-500" />
                   <span className="text-sm">
-                    <span className="font-medium">{formatStateName(transition.from)}</span>
+                    <button
+                      type="button"
+                      onClick={() => onStateClick?.(transition.from)}
+                      className="font-medium underline-offset-4 hover:underline"
+                    >
+                      {formatStateName(transition.from)}
+                    </button>
                     <ArrowRight className="w-4 h-4 inline mx-2 text-gray-400" />
-                    <span className="font-medium text-orange-600">{formatStateName(transition.to)}</span>
+                    <button
+                      type="button"
+                      onClick={() => onStateClick?.(transition.to)}
+                      className="font-medium text-orange-600 underline-offset-4 hover:underline"
+                    >
+                      {formatStateName(transition.to)}
+                    </button>
                   </span>
                 </div>
                 <Badge variant="outline" className="text-xs">

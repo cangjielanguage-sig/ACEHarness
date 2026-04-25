@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import { resolve } from 'path';
 import { parse } from 'yaml';
+import { getRuntimeAgentsDirPath } from '@/lib/runtime-configs';
 
 export async function GET() {
   try {
-    const agentsDir = resolve(process.cwd(), 'configs', 'agents');
+    const agentsDir = await getRuntimeAgentsDirPath();
     const files = await readdir(agentsDir);
     const yamlFiles = files.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
 

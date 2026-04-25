@@ -2,8 +2,9 @@ import { mkdir, writeFile, readFile, readdir } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { stringify, parse } from 'yaml';
+import { getWorkspaceRunsDir } from '@/lib/app-paths';
 
-const RUNS_DIR = resolve(process.cwd(), 'runs');
+const RUNS_DIR = getWorkspaceRunsDir();
 
 /** Separator used to delimit output chunks in persisted stream files */
 export const STREAM_CHUNK_SEPARATOR = '\n\n<!-- chunk-boundary -->\n\n';

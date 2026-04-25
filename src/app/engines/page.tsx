@@ -22,14 +22,26 @@ interface ModelOption {
   label: string;
   costMultiplier: number;
   engines?: string[];
+  endpoints?: string[];
 }
 
 interface DetectedModel {
   modelId: string;
   name: string;
+  source?: string;
+  recommended?: boolean;
   selected: boolean;
   label: string;
   costMultiplier: number;
+}
+
+interface ClaudeModelSmokeResult {
+  model: string;
+  ok: boolean;
+  resolvedModel?: string;
+  error?: string;
+  durationMs: number;
+  preview?: string;
 }
 
 interface Engine {
@@ -90,7 +102,24 @@ const engines: Engine[] = [
     features: ['ACP 协议', '智能补全', '代码重构', '命令行集成', '上下文感知'],
     endpoints: ['anthropic', 'openai'],
   },
+  {
+    id: 'trae-cli',
+    name: 'Trae CLI',
+    description: 'Trae 命令行 AI 编程助手，支持 ACP 协议，提供智能代码编辑和执行能力',
+    status: 'available',
+    features: ['ACP 协议', '智能代码编辑', '代码执行', 'MCP 工具支持', '插件系统'],
+    endpoints: ['anthropic', 'openai'],
+  },
 ];
+
+const CLAUDE_ALIAS_LABELS: Record<string, string> = {
+  default: 'Auto (default)',
+  best: 'Best',
+  sonnet: 'Claude Sonnet',
+  opus: 'Claude Opus',
+  haiku: 'Claude Haiku',
+  opusplan: 'Claude Opus Plan',
+};
 
 export default function EnginesPage() {
   const router = useRouter();
@@ -177,6 +206,7 @@ export default function EnginesPage() {
         'claude-code': '安装方法：npm install -g @anthropic-ai/claude-code',
         'cangjie-magic': '请在环境变量中配置 CANGJIE_HOME、CANGJIE_MAGIC_PATH、OPENSSL_PATH、CANGJIE_STDX_PATH',
         'opencode': '安装方法：npm install -g opencode-ai',
+        'trae-cli': '安装方法：curl -fsSL https://trae.cn/install | bash',
       };
       const hint = hints[engineId] || '请确保已安装相应的命令行工具';
       toast('error', `引擎 ${engine?.name} 不可用。${hint}`);
@@ -232,6 +262,9 @@ export default function EnginesPage() {
   const [detectedModels, setDetectedModels] = useState<DetectedModel[]>([]);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [detectingEngine, setDetectingEngine] = useState('');
+  const [smokeTesting, setSmokeTesting] = useState(false);
+  const [showSmokeDialog, setShowSmokeDialog] = useState(false);
+  const [smokeResults, setSmokeResults] = useState<ClaudeModelSmokeResult[]>([]);
 
   const handleDetectModels = async (engineId: string) => {
     setDetecting(true);
@@ -247,9 +280,11 @@ export default function EnginesPage() {
       const detected: DetectedModel[] = (data.models || []).map((m: any) => ({
         modelId: m.modelId,
         name: m.name,
+        source: m.source,
+        recommended: Boolean(m.recommended),
         selected: !existing.has(m.modelId),
         label: m.name || m.modelId,
-        costMultiplier: 0.1,
+        costMultiplier: models.find(existingModel => existingModel.value === m.modelId)?.costMultiplier || 0.1,
       }));
       setDetectedModels(detected);
       setShowImportDialog(true);
@@ -266,29 +301,111 @@ export default function EnginesPage() {
       toast('warning', '请至少选择一个模型');
       return;
     }
-    const newModels: ModelOption[] = toImport.map(m => ({
-      value: m.modelId,
-      label: m.label,
-      costMultiplier: m.costMultiplier,
-      endpoints: [],
-      engines: [detectingEngine],
-    }));
-    const merged = [...models, ...newModels];
+    const mergedMap = new Map(models.map(model => [model.value, { ...model }]));
+    for (const model of toImport) {
+      const existing = mergedMap.get(model.modelId);
+      if (existing) {
+        mergedMap.set(model.modelId, {
+          ...existing,
+          label: model.label || existing.label,
+          costMultiplier: model.costMultiplier || existing.costMultiplier,
+          engines: Array.from(new Set([...(existing.engines || []), detectingEngine])),
+        });
+      } else {
+        mergedMap.set(model.modelId, {
+          value: model.modelId,
+          label: model.label,
+          costMultiplier: model.costMultiplier,
+          endpoints: [],
+          engines: [detectingEngine],
+        });
+      }
+    }
+    const merged = Array.from(mergedMap.values());
     try {
-      const res = await fetch('/api/models', {
+      await saveMergedModels(merged, `已导入 ${toImport.length} 个模型`);
+      setShowImportDialog(false);
+    } catch (error) {
+      toast('error', error instanceof Error ? error.message : '保存模型失败');
+    }
+  };
+
+  const saveMergedModels = async (merged: ModelOption[], successMessage: string) => {
+    const res = await fetch('/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models: merged }),
+    });
+    if (!res.ok) {
+      throw new Error('保存模型失败');
+    }
+    setModels(merged);
+    toast('success', successMessage);
+  };
+
+  const handleSmokeTestClaudeModels = async () => {
+    setSmokeTesting(true);
+    try {
+      const response = await fetch('/api/engine/models/smoke', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ models: merged }),
+        body: JSON.stringify({
+          models: ['default', 'best', 'sonnet', 'opus', 'haiku', 'opusplan'],
+        }),
       });
-      if (res.ok) {
-        setModels(merged);
-        toast('success', `已导入 ${toImport.length} 个模型`);
-        setShowImportDialog(false);
-      } else {
-        toast('error', '保存模型失败');
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        toast('error', data.error || 'Claude Code 模型测试失败');
+        return;
       }
-    } catch {
-      toast('error', '保存模型失败');
+      setSmokeResults(data.results || []);
+      setShowSmokeDialog(true);
+      const passed = (data.results || []).filter((item: ClaudeModelSmokeResult) => item.ok).length;
+      toast('success', `Claude Code 模型测试完成：${passed}/${(data.results || []).length} 可用`);
+    } catch (error) {
+      toast('error', `Claude Code 模型测试失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSmokeTesting(false);
+    }
+  };
+
+  const handleImportSmokePassedModels = async () => {
+    const passed = smokeResults.filter((result) => result.ok);
+    if (passed.length === 0) {
+      toast('warning', '没有可导入的通过模型');
+      return;
+    }
+
+    const mergedMap = new Map(models.map((model) => [model.value, { ...model }]));
+    for (const result of passed) {
+      const existing = mergedMap.get(result.model);
+      const label = CLAUDE_ALIAS_LABELS[result.model] || result.resolvedModel || result.model;
+      if (existing) {
+        mergedMap.set(result.model, {
+          ...existing,
+          label: existing.label || label,
+          engines: Array.from(new Set([...(existing.engines || []), 'claude-code'])),
+          endpoints: Array.from(new Set([...(existing.endpoints || []), 'anthropic'])),
+        });
+      } else {
+        mergedMap.set(result.model, {
+          value: result.model,
+          label,
+          costMultiplier: 0.1,
+          endpoints: ['anthropic'],
+          engines: ['claude-code'],
+        });
+      }
+    }
+
+    try {
+      await saveMergedModels(
+        Array.from(mergedMap.values()),
+        `已导入 ${passed.length} 个通过测试的 Claude Code 模型`,
+      );
+      setShowSmokeDialog(false);
+    } catch (error) {
+      toast('error', error instanceof Error ? error.message : '保存模型失败');
     }
   };
 
@@ -447,17 +564,31 @@ export default function EnginesPage() {
                     placeholder="选择默认模型"
                     triggerClassName="h-9 text-sm"
                   />
-                  {!['claude-code', 'cangjie-magic', 'codex'].includes(engine.id) && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full mt-2"
-                      disabled={detecting}
-                      onClick={() => handleDetectModels(engine.id)}
-                    >
-                      <Search className="w-4 h-4 mr-2" />
-                      {detecting && detectingEngine === engine.id ? '检测中...' : '检测可用模型'}
-                    </Button>
+                  {!['cangjie-magic', 'codex'].includes(engine.id) && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full mt-2"
+                        disabled={detecting}
+                        onClick={() => handleDetectModels(engine.id)}
+                      >
+                        <Search className="w-4 h-4 mr-2" />
+                        {detecting && detectingEngine === engine.id ? '检测中...' : '检测可用模型'}
+                      </Button>
+                      {engine.id === 'claude-code' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full mt-2"
+                          disabled={smokeTesting}
+                          onClick={handleSmokeTestClaudeModels}
+                        >
+                          <Search className="w-4 h-4 mr-2" />
+                          {smokeTesting ? '测试中...' : '测试官方别名'}
+                        </Button>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -521,6 +652,11 @@ CANGJIE_STDX_PATH — stdx 动态库路径`}
               curl -fsSL https://cursor.sh/install | bash
             </code>
             <p className="text-xs">安装后刷新可用性检查，即可切换使用 Cursor CLI 引擎。</p>
+            <p className="mt-2"><strong>安装 Trae CLI：</strong></p>
+            <code className="block bg-background/50 p-2 rounded text-xs">
+              curl -fsSL https://trae.cn/install | bash
+            </code>
+            <p className="text-xs">安装后刷新可用性检查，即可切换使用 Trae CLI 引擎。</p>
           </div>
         </motion.div>
       </div>
@@ -548,6 +684,7 @@ CANGJIE_STDX_PATH — stdx 动态库路径`}
                     />
                   </th>
                   <th className="p-2 text-left">模型 ID</th>
+                  <th className="p-2 text-left w-28">来源</th>
                   <th className="p-2 text-left">显示名称</th>
                   <th className="p-2 text-left w-24">费用倍率</th>
                 </tr>
@@ -564,6 +701,10 @@ CANGJIE_STDX_PATH — stdx 动态库路径`}
                       />
                     </td>
                     <td className="p-2 font-mono text-xs">{m.modelId}</td>
+                    <td className="p-2 text-xs text-muted-foreground">
+                      {m.source === 'alias' ? '官方别名' : m.source === 'api' ? 'Anthropic API' : m.source === 'config' ? '本地配置' : '检测结果'}
+                      {m.recommended && <span className="ml-1 text-primary">推荐</span>}
+                    </td>
                     <td className="p-2">
                       <Input
                         value={m.label}
@@ -594,6 +735,60 @@ CANGJIE_STDX_PATH — stdx 动态库路径`}
               <Button onClick={handleImportModels}>
                 <Download className="w-4 h-4 mr-2" />
                 导入选中模型
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showSmokeDialog} onOpenChange={setShowSmokeDialog}>
+        <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
+          <DialogTitle className="text-lg font-semibold">
+            <Search className="w-5 h-5 inline mr-2" />
+            Claude Code 官方别名测试
+          </DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            通过真实请求测试 alias 是否可用；如果 SDK 暴露了实际模型名，会显示在“实际模型”列。
+          </p>
+          <div className="flex-1 overflow-auto border rounded-lg">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 sticky top-0">
+                <tr>
+                  <th className="p-2 text-left w-24">别名</th>
+                  <th className="p-2 text-left w-24">状态</th>
+                  <th className="p-2 text-left">实际模型</th>
+                  <th className="p-2 text-left w-24">耗时</th>
+                  <th className="p-2 text-left">详情</th>
+                </tr>
+              </thead>
+              <tbody>
+                {smokeResults.map((result) => (
+                  <tr key={result.model} className="border-t border-border/30 hover:bg-muted/30">
+                    <td className="p-2 font-mono text-xs">{result.model}</td>
+                    <td className="p-2">
+                      <Badge variant={result.ok ? 'default' : 'secondary'}>
+                        {result.ok ? '可用' : '失败'}
+                      </Badge>
+                    </td>
+                    <td className="p-2 font-mono text-xs">{result.resolvedModel || '未返回'}</td>
+                    <td className="p-2 text-xs">{(result.durationMs / 1000).toFixed(1)}s</td>
+                    <td className="p-2 text-xs text-muted-foreground">
+                      {result.ok ? (result.preview || 'OK') : (result.error || 'Unknown error')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex justify-between items-center pt-2">
+            <span className="text-xs text-muted-foreground">
+              通过 {smokeResults.filter((result) => result.ok).length} / {smokeResults.length}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowSmokeDialog(false)}>关闭</Button>
+              <Button onClick={handleImportSmokePassedModels}>
+                <Download className="w-4 h-4 mr-2" />
+                导入通过测试的模型
               </Button>
             </div>
           </div>

@@ -31,6 +31,7 @@ interface StateMachineRuntimePanelProps {
   status: 'idle' | 'running' | 'completed' | 'failed';
   startTime?: string | null;
   endTime?: string | null;
+  onStateClick?: (stateName: string) => void;
 }
 
 export default function StateMachineRuntimePanel({
@@ -42,6 +43,7 @@ export default function StateMachineRuntimePanel({
   status,
   startTime,
   endTime,
+  onStateClick,
 }: StateMachineRuntimePanelProps) {
   const [selectedTransition, setSelectedTransition] = useState<StateTransitionRecord | null>(null);
 
@@ -73,7 +75,15 @@ export default function StateMachineRuntimePanel({
             <span className="text-sm font-medium">当前状态</span>
           </div>
           <div className="text-2xl font-bold">
-            {currentState ? formatStateName(currentState) : '未开始'}
+            {currentState ? (
+              <button
+                type="button"
+                onClick={() => onStateClick?.(currentState)}
+                className="text-left underline-offset-4 hover:underline"
+              >
+                {formatStateName(currentState)}
+              </button>
+            ) : '未开始'}
           </div>
           {status === 'running' && (
             <div className="flex items-center gap-1 mt-2 text-sm">
@@ -189,9 +199,27 @@ export default function StateMachineRuntimePanel({
                   </div>
 
                   <div className="flex items-center gap-2 text-sm font-medium mb-1">
-                    <span>{formatStateName(record.from)}</span>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onStateClick?.(record.from);
+                      }}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      {formatStateName(record.from)}
+                    </button>
                     <ArrowRight className="w-4 h-4 text-gray-400" />
-                    <span className="text-blue-600 dark:text-blue-400">{formatStateName(record.to)}</span>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onStateClick?.(record.to);
+                      }}
+                      className="text-blue-600 underline-offset-4 hover:underline dark:text-blue-400"
+                    >
+                      {formatStateName(record.to)}
+                    </button>
                   </div>
 
                   <div className="text-xs text-gray-600 dark:text-gray-400">

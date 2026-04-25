@@ -37,6 +37,11 @@ export const ENGINE_META: Record<EngineType, EngineMeta> = {
     name: 'CangjieMagic',
     iconPath: '/engines/cangjie_magic.png',
   },
+  'trae-cli': {
+    id: 'trae-cli',
+    name: 'Trae CLI',
+    iconPath: '/engines/trae.svg',
+  },
 }
 
 export const CONCRETE_ENGINE_IDS = Object.keys(ENGINE_META) as EngineType[]
@@ -47,4 +52,9 @@ export function getConcreteEngines(): EngineMeta[] {
 
 export function getEngineMeta(id: string): EngineMeta | undefined {
   return ENGINE_META[id as EngineType]
+}
+
+export function getEngineDisplayName(id?: string): string {
+  if (!id) return ''
+  return getEngineMeta(id)?.name || id
 }

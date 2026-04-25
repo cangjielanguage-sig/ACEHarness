@@ -6,6 +6,7 @@ import { newConfigFormSchema } from '@/lib/schemas';
 import { ZodError } from 'zod';
 import { requireAuth } from '@/lib/auth-middleware';
 import { setConfigMeta } from '@/lib/config-metadata';
+import { ensureRuntimeConfigsSeeded, getRuntimeConfigsDirPath } from '@/lib/runtime-configs';
 
 function createPhaseBasedConfig(workflowName: string, workingDirectory: string, workspaceMode: 'isolated-copy' | 'in-place', description?: string) {
   return {
@@ -141,7 +142,8 @@ export async function POST(request: NextRequest) {
     const workflowMode = mode || 'phase-based';
 
     // 检查文件是否已存在
-    const filepath = resolve(process.cwd(), 'configs', filename);
+    await ensureRuntimeConfigsSeeded();
+    const filepath = resolve(await getRuntimeConfigsDirPath(), filename);
     try {
       await access(filepath);
       return NextResponse.json(

@@ -4,6 +4,8 @@ import { createHash, randomBytes, randomUUID } from 'crypto';
 import { dirname } from 'path';
 import { spawn } from 'child_process';
 import { parse, stringify } from 'yaml';
+import { getModelOptions } from './lib/models';
+import { ACPEngine } from './lib/engines/acp-engine';
 import {
   getWorkspaceDirectory,
   getEngineConfigPath,
@@ -16,7 +18,12 @@ import {
 process.chdir(getRepoRoot());
 
 type Locale = 'zh' | 'en';
-type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode';
+type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode' | 'trae-cli';
+
+interface ConfiguredEngine {
+  engine?: EngineType;
+  defaultModel?: string;
+}
 
 interface SystemSettings {
   gitcodeToken?: string;
@@ -60,7 +67,7 @@ interface CliMessages {
   languageChoices: Array<{ title: string; value: Locale }>;
   detectEngines: string;
   chooseEngine: string;
-  skipKeepDefault: string;
+  chooseModel: string;
   noEnginesDetected: string;
   createAdmin: string;
   adminUsername: string;
@@ -97,6 +104,7 @@ const ENGINE_META: Array<{ id: EngineType; name: string }> = [
   { id: 'opencode', name: 'OpenCode' },
   { id: 'cursor', name: 'Cursor CLI' },
   { id: 'cangjie-magic', name: 'CangjieMagic' },
+  { id: 'trae-cli', name: 'Trae CLI' },
 ];
 
 const CLI_MESSAGES: Record<Locale, CliMessages> = {
@@ -118,7 +126,7 @@ const CLI_MESSAGES: Record<Locale, CliMessages> = {
     ],
     detectEngines: '现在检测可用引擎吗？',
     chooseEngine: '选择默认引擎',
-    skipKeepDefault: '跳过，保留当前/默认设置',
+    chooseModel: '选择默认模型',
     noEnginesDetected: '[ACE] 未检测到受支持的引擎，将使用当前/默认引擎。',
     createAdmin: '现在创建管理员账号吗？',
     adminUsername: '管理员用户名',
@@ -159,7 +167,7 @@ const CLI_MESSAGES: Record<Locale, CliMessages> = {
     ],
     detectEngines: 'Detect available engines now?',
     chooseEngine: 'Choose a default engine',
-    skipKeepDefault: 'Skip and keep current/default',
+    chooseModel: 'Choose a default model',
     noEnginesDetected: '[ACE] No supported engines were detected. Using the current/default engine.',
     createAdmin: 'Create an admin account now?',
     adminUsername: 'Admin username',
@@ -238,20 +246,23 @@ async function resetAceState(force: boolean) {
   console.log(messages.resetDone);
 }
 
-async function loadConfiguredEngine(): Promise<EngineType | undefined> {
-  if (!existsSync(getEngineConfigPath())) return undefined;
+async function loadConfiguredEngine(): Promise<ConfiguredEngine> {
+  if (!existsSync(getEngineConfigPath())) return {};
   try {
     const content = JSON.parse(await readFile(getEngineConfigPath(), 'utf-8'));
-    return content.engine as EngineType | undefined;
+    return {
+      engine: content.engine as EngineType | undefined,
+      defaultModel: typeof content.defaultModel === 'string' ? content.defaultModel : '',
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
-async function saveConfiguredEngine(engine: EngineType) {
+async function saveConfiguredEngine(engine: EngineType, defaultModel: string) {
   await writeFile(
     getEngineConfigPath(),
-    JSON.stringify({ engine, updatedAt: new Date().toISOString() }, null, 2),
+    JSON.stringify({ engine, defaultModel, updatedAt: new Date().toISOString() }, null, 2),
     'utf-8'
   );
 }
@@ -369,6 +380,49 @@ async function detectEngines() {
   })));
 
   return availability;
+}
+
+async function discoverAcpModels(engineType: EngineType): Promise<Array<{ value: string; title: string }>> {
+  const commandMap: Partial<Record<EngineType, string>> = {
+    opencode: 'opencode',
+    'kiro-cli': 'kiro-cli',
+    cursor: 'agent',
+    'trae-cli': 'trae-cli',
+  };
+  const command = commandMap[engineType];
+  if (!command) return [];
+
+  const engine = new ACPEngine({
+    engineType,
+    command,
+    workingDirectory: process.cwd(),
+  });
+
+  try {
+    await engine.start();
+    await engine.createSession();
+    const models = await engine.getAvailableModels();
+    return models.map((item) => ({
+      value: item.modelId,
+      title: item.name || item.modelId,
+    }));
+  } finally {
+    engine.stop();
+  }
+}
+
+async function getEngineModelChoices(engineType: EngineType): Promise<Array<{ value: string; title: string }>> {
+  if (['opencode', 'kiro-cli', 'cursor', 'trae-cli'].includes(engineType)) {
+    return discoverAcpModels(engineType);
+  }
+
+  const models = await getModelOptions();
+  return models
+    .filter((model) => !model.engines || model.engines.length === 0 || model.engines.includes(engineType))
+    .map((model) => ({
+      value: model.value,
+      title: `${model.label} (${model.costMultiplier}x)`,
+    }));
 }
 
 type PromptFn = (questions: PromptQuestion | PromptQuestion[], options?: { onCancel?: () => void }) => Promise<Record<string, any>>;
@@ -552,15 +606,15 @@ async function runFirstLaunchWizard() {
   console.log(messages.welcome);
   console.log(messages.statusLabel);
   console.log(`  ${messages.localeStatus(formatLocaleLabel(settings.locale ? initialLocale : undefined))}`);
-  console.log(`  ${messages.engineStatus(configuredEngine ? formatEngineLabel(configuredEngine) : '未设置')}`);
+  console.log(`  ${messages.engineStatus(configuredEngine.engine ? formatEngineLabel(configuredEngine.engine) : '未设置')}`);
   console.log(`  ${messages.adminStatus(adminExists)}`);
   const { verbose } = parseArgs(process.argv);
   if (verbose) {
     console.log(`[ACE] ${messages.runtimeHome}: ${getWorkspaceDirectory('workspace')}`);
   }
 
-  let selectedEngine = configuredEngine || 'claude-code';
-  if (!configuredEngine) {
+  let selectedEngine = configuredEngine.engine;
+  if (!selectedEngine) {
     const shouldDetectEnginesAnswer = await prompt({
       type: 'toggle',
       name: 'value',
@@ -580,20 +634,54 @@ async function runFirstLaunchWizard() {
           type: 'select',
           name: 'value',
           message: messages.chooseEngine,
-          choices: [
-            { title: messages.skipKeepDefault, value: '__skip__' },
-            ...availableChoices.map((item) => ({ title: item.name, value: item.id })),
-          ],
-          initial: Math.max(availableChoices.findIndex((item) => item.id === selectedEngine) + 1, 0),
+          choices: availableChoices.map((item) => ({ title: item.name, value: item.id })),
+          initial: Math.max(availableChoices.findIndex((item) => item.id === selectedEngine), 0),
         }, getPromptOptions(locale));
 
-        if (engineAnswer.value && engineAnswer.value !== '__skip__') {
+        if (engineAnswer.value) {
           selectedEngine = engineAnswer.value as EngineType;
         }
       } else {
         console.log(messages.noEnginesDetected);
+        const engineAnswer = await prompt({
+          type: 'select',
+          name: 'value',
+          message: messages.chooseEngine,
+          choices: ENGINE_META.map((item) => ({ title: item.name, value: item.id })),
+          initial: 0,
+        }, getPromptOptions(locale));
+        selectedEngine = engineAnswer.value as EngineType;
       }
+    } else {
+      const engineAnswer = await prompt({
+        type: 'select',
+        name: 'value',
+        message: messages.chooseEngine,
+        choices: ENGINE_META.map((item) => ({ title: item.name, value: item.id })),
+        initial: 0,
+      }, getPromptOptions(locale));
+      selectedEngine = engineAnswer.value as EngineType;
     }
+  }
+
+  if (!selectedEngine) {
+    throw new Error('默认引擎未配置');
+  }
+
+  let selectedModel = configuredEngine.defaultModel || '';
+  if (!selectedModel) {
+    const modelChoices = await getEngineModelChoices(selectedEngine);
+    if (modelChoices.length === 0) {
+      throw new Error(`未发现可用于 ${formatEngineLabel(selectedEngine)} 的模型`);
+    }
+    const modelAnswer = await prompt({
+      type: 'select',
+      name: 'value',
+      message: messages.chooseModel,
+      choices: modelChoices,
+      initial: Math.max(modelChoices.findIndex((item) => item.value === selectedModel), 0),
+    }, getPromptOptions(locale));
+    selectedModel = modelAnswer.value as string;
   }
 
   if (!adminExists) {
@@ -620,9 +708,7 @@ async function runFirstLaunchWizard() {
     }
   }
 
-  if (!configuredEngine) {
-    await saveConfiguredEngine(selectedEngine);
-  }
+  await saveConfiguredEngine(selectedEngine, selectedModel);
 
   await saveSystemSettings({
     ...settings,
@@ -666,7 +752,7 @@ async function start() {
   const settings = await loadSystemSettings();
   const configuredEngine = await loadConfiguredEngine();
   const adminExists = await isSetup();
-  if (!settings.locale || !configuredEngine || !adminExists) {
+  if (!settings.locale || !configuredEngine.engine || !configuredEngine.defaultModel || !adminExists) {
     await runFirstLaunchWizard();
   }
 

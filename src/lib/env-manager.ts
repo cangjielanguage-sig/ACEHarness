@@ -4,11 +4,12 @@
  */
 
 import { readFile, writeFile, mkdir } from 'fs/promises';
-import { resolve, dirname } from 'path';
+import { dirname, resolve } from 'path';
 import { parse, stringify } from 'yaml';
+import { getWorkspaceDataFile } from '@/lib/app-paths';
 
-const ENV_VARS_PATH = resolve(process.cwd(), 'data', 'env-vars.yaml');
-const USER_ENV_DIR = resolve(process.cwd(), 'data', 'env-vars.users');
+const ENV_VARS_PATH = getWorkspaceDataFile('env-vars.yaml');
+const USER_ENV_DIR = getWorkspaceDataFile('env-vars.users');
 
 export interface EnvVar {
   key: string;

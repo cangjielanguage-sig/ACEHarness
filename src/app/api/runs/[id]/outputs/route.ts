@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { listOutputFiles, loadRunState } from '@/lib/run-state-persistence';
 import { readFile } from 'fs/promises';
 import { resolve } from 'path';
+import { getWorkspaceRunsDir } from '@/lib/app-paths';
+import { resolveWorkflowConfigPath } from '@/lib/workflow-config-path';
 
-const RUNS_DIR = resolve(process.cwd(), 'runs');
+const RUNS_DIR = getWorkspaceRunsDir();
 
 export async function GET(
   request: NextRequest,
@@ -41,20 +43,17 @@ export async function GET(
     if (state) {
       // Parse workflow config to get phase/step mapping
       try {
-        // Try direct path first, then with configs/ prefix
-        let configPath = resolve(process.cwd(), state.configFile);
-        const { existsSync } = await import('fs');
-        if (!existsSync(configPath)) {
-          configPath = resolve(process.cwd(), 'configs', state.configFile);
-        }
-        const configContent = await readFile(configPath, 'utf-8');
-        const { parse } = await import('yaml');
-        const config = parse(configContent);
-        if (config?.workflow?.phases) {
-          for (const phase of config.workflow.phases) {
-            for (const step of phase.steps || []) {
-              stepPhaseMap[step.name] = phase.name;
-              stepRoleMap[step.name] = step.role || 'defender';
+        const configPath = await resolveWorkflowConfigPath(state.configFile);
+        if (configPath) {
+          const configContent = await readFile(configPath, 'utf-8');
+          const { parse } = await import('yaml');
+          const config = parse(configContent);
+          if (config?.workflow?.phases) {
+            for (const phase of config.workflow.phases) {
+              for (const step of phase.steps || []) {
+                stepPhaseMap[step.name] = phase.name;
+                stepRoleMap[step.name] = step.role || 'defender';
+              }
             }
           }
         }

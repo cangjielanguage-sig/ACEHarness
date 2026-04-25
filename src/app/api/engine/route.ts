@@ -3,10 +3,10 @@ import fs from 'fs/promises';
 import { existsSync, symlinkSync, mkdirSync, lstatSync, readlinkSync } from 'fs';
 import path from 'path';
 import { getEngineConfigDir } from '@/lib/engines/engine-config';
-import { getEngineConfigPath } from '@/lib/app-paths';
+import { getEngineConfigPath, getWorkspaceRoot } from '@/lib/app-paths';
+import { getRuntimeSkillsDirPath } from '@/lib/runtime-skills';
 
 const ENGINE_CONFIG_FILE = getEngineConfigPath();
-const SKILLS_DIR = path.join(process.cwd(), 'skills');
 
 interface EngineConfig {
   engine: string;
@@ -19,7 +19,7 @@ export async function GET() {
     const exists = await fs.access(ENGINE_CONFIG_FILE).then(() => true).catch(() => false);
 
     if (!exists) {
-      return NextResponse.json({ engine: 'claude-code', defaultModel: '' });
+      return NextResponse.json({ engine: '', defaultModel: '' });
     }
 
     const content = await fs.readFile(ENGINE_CONFIG_FILE, 'utf-8');
@@ -28,7 +28,7 @@ export async function GET() {
     return NextResponse.json({ engine: config.engine, defaultModel: config.defaultModel || '' });
   } catch (error) {
     console.error('Failed to read engine config:', error);
-    return NextResponse.json({ engine: 'claude-code', defaultModel: '' });
+    return NextResponse.json({ engine: '', defaultModel: '' });
   }
 }
 
@@ -62,13 +62,14 @@ export async function POST(request: Request) {
     // Create engine config dir and symlink skills
     try {
       const engineConfigDir = getEngineConfigDir(engine);
-      const configDir = path.join(process.cwd(), engineConfigDir);
+      const configDir = path.join(getWorkspaceRoot(), engineConfigDir);
+      const skillsDir = await getRuntimeSkillsDirPath();
       if (!existsSync(configDir)) {
         mkdirSync(configDir, { recursive: true });
       }
       const skillsLink = path.join(configDir, 'skills');
-      if (existsSync(SKILLS_DIR) && !existsSync(skillsLink)) {
-        symlinkSync(SKILLS_DIR, skillsLink);
+      if (existsSync(skillsDir) && !existsSync(skillsLink)) {
+        symlinkSync(skillsDir, skillsLink);
         console.log(`[Engine] Linked ${engineConfigDir}/skills -> skills/`);
       }
     } catch (e) {

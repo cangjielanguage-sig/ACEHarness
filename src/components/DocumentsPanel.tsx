@@ -30,6 +30,7 @@ interface DocFile {
 
 interface DocumentsPanelProps {
   runId: string | null;
+  openLatestTimestampedRequest?: number;
 }
 
 type SortField = 'name' | 'time' | 'size';
@@ -67,7 +68,7 @@ function getFileGroup(filename: string): string {
   return stripped || '其他';
 }
 
-export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
+export default function DocumentsPanel({ runId, openLatestTimestampedRequest = 0 }: DocumentsPanelProps) {
   const { toast } = useToast();
   const [files, setFiles] = useState<DocFile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -122,6 +123,7 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
   const resizingPanel = useRef<'folderTree' | 'fileList' | null>(null);
   const startX = useRef(0);
   const startWidth = useRef(0);
+  const lastOpenLatestRequestRef = useRef(0);
 
   // Load persisted sidebar state
   useEffect(() => {
@@ -235,7 +237,7 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
     else { setSortField(field); setSortOrder('asc'); }
   };
 
-  const selectFile = async (file: DocFile) => {
+  const selectFile = useCallback(async (file: DocFile) => {
     if (!runId) return;
     setPreviewFile(file);
     setLoadingPreview(true);
@@ -244,7 +246,40 @@ export default function DocumentsPanel({ runId }: DocumentsPanelProps) {
       setPreviewContent(content);
     } catch { setPreviewContent('(无法加载)'); }
     setLoadingPreview(false);
-  };
+  }, [runId]);
+
+  const openLatestTimestampedFile = useCallback(async () => {
+    if (!runId) return;
+    setLoading(true);
+    try {
+      const data = await runsApi.listDocuments(runId);
+      const nextFiles = data.files || [];
+      setFiles(nextFiles);
+      const latestFile = nextFiles
+        .filter(file => hasTimestamp(file.filename))
+        .sort((a, b) => b.filename.localeCompare(a.filename))[0];
+
+      if (!latestFile) {
+        toast('error', '未找到 AI 最新结论文档');
+        return;
+      }
+
+      setModalOpen(true);
+      await selectFile(latestFile);
+    } catch {
+      toast('error', '打开最新 AI 结论文档失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [runId, selectFile, toast]);
+
+  useEffect(() => {
+    if (!openLatestTimestampedRequest || openLatestTimestampedRequest === lastOpenLatestRequestRef.current) {
+      return;
+    }
+    lastOpenLatestRequestRef.current = openLatestTimestampedRequest;
+    void openLatestTimestampedFile();
+  }, [openLatestTimestampedFile, openLatestTimestampedRequest]);
 
   const toggleSelect = (filename: string) => {
     setSelected(prev => {

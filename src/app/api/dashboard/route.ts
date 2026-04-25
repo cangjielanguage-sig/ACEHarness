@@ -4,11 +4,11 @@ import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { parse } from 'yaml';
 import { requireAuth } from '@/lib/auth-middleware';
+import { getWorkspaceRunsDir } from '@/lib/app-paths';
 import { listConfigsWithMeta } from '@/lib/config-metadata';
+import { ensureRuntimeConfigsSeeded, getRuntimeAgentsDirPath, getRuntimeConfigsDirPath } from '@/lib/runtime-configs';
 
-const RUNS_DIR = resolve(process.cwd(), 'runs');
-const CONFIGS_DIR = resolve(process.cwd(), 'configs');
-const AGENTS_DIR = resolve(CONFIGS_DIR, 'agents');
+const RUNS_DIR = getWorkspaceRunsDir();
 
 // ── In-memory cache with background refresh ──
 let cachedResult: any = null;
@@ -16,6 +16,13 @@ let cacheTimestamp = 0;
 const CACHE_TTL = 10_000; // 10s — background refresh interval
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let isRefreshing = false;
+const IS_BUILD_PHASE = process.env.NEXT_PHASE === 'phase-production-build';
+
+function getSafeTime(value: unknown): number {
+  if (typeof value !== 'string' || !value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
 
 async function computeDashboardData(userId = '', role: 'admin' | 'user' = 'admin') {
   const [configResult, agentCount, runsResult] = await Promise.all([
@@ -35,8 +42,10 @@ async function computeDashboardData(userId = '', role: 'admin' | 'user' = 'admin
   let totalDuration = 0;
   let durationCount = 0;
   for (const r of runs) {
-    if (r.endTime) {
-      totalDuration += new Date(r.endTime).getTime() - new Date(r.startTime).getTime();
+    const startTime = getSafeTime(r.startTime);
+    const endTime = getSafeTime(r.endTime);
+    if (startTime > 0 && endTime > 0) {
+      totalDuration += endTime - startTime;
       durationCount++;
     }
   }
@@ -46,7 +55,7 @@ async function computeDashboardData(userId = '', role: 'admin' | 'user' = 'admin
     r.configName = configNameMap[r.configFile] || r.configFile;
   }
 
-  runs.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+  runs.sort((a, b) => getSafeTime(b.startTime) - getSafeTime(a.startTime));
   const recentRuns = runs.slice(0, 5);
 
   // Weekly activity
@@ -54,7 +63,7 @@ async function computeDashboardData(userId = '', role: 'admin' | 'user' = 'admin
   const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
   const dayCounts: number[] = [0, 0, 0, 0, 0, 0, 0];
   for (const r of runs) {
-    const t = new Date(r.startTime).getTime();
+    const t = getSafeTime(r.startTime);
     if (t >= sevenDaysAgo) {
       const daysAgo = Math.floor((now - t) / (24 * 60 * 60 * 1000));
       if (daysAgo >= 0 && daysAgo < 7) dayCounts[6 - daysAgo]++;
@@ -96,14 +105,16 @@ async function refreshCache() {
     cachedResult = await computeDashboardData();
     cacheTimestamp = Date.now();
   } catch (e) {
-    console.error('[dashboard cache] refresh failed:', e);
+    if (!IS_BUILD_PHASE) {
+      console.error('[dashboard cache] refresh failed:', e);
+    }
   } finally {
     isRefreshing = false;
   }
 }
 
 // Start background refresh timer on first import
-if (!refreshTimer) {
+if (!IS_BUILD_PHASE && !refreshTimer) {
   refreshTimer = setInterval(() => {
     refreshCache().catch(() => {});
   }, CACHE_TTL);
@@ -130,6 +141,8 @@ export async function GET(request: NextRequest) {
 async function readConfigsSummary(userId: string, role: 'admin' | 'user') {
   const configNameMap: Record<string, string> = {};
   const configs: any[] = [];
+  await ensureRuntimeConfigsSeeded();
+  const CONFIGS_DIR = await getRuntimeConfigsDirPath();
   const metaMap = await listConfigsWithMeta('workflow');
   try {
     const entries = await readdir(CONFIGS_DIR, { withFileTypes: true });
@@ -166,6 +179,7 @@ async function readConfigsSummary(userId: string, role: 'admin' | 'user') {
 
 async function readAgentCount(): Promise<number> {
   try {
+    const AGENTS_DIR = await getRuntimeAgentsDirPath();
     const files = await readdir(AGENTS_DIR);
     return files.filter(f => f.endsWith('.yaml') || f.endsWith('.yml')).length;
   } catch { return 0; }
@@ -175,6 +189,20 @@ interface RunSummary {
   id: string; configFile: string; configName: string;
   startTime: string; endTime: string | null; status: string;
   currentPhase: string | null; totalSteps: number; completedSteps: number;
+}
+
+function isValidRunState(state: any): state is {
+  runId?: string;
+  configFile?: string;
+  startTime?: string;
+  endTime?: string | null;
+  status?: string;
+  currentPhase?: string | null;
+  completedSteps?: any[];
+  failedSteps?: any[];
+  stepLogs?: any[];
+} {
+  return !!state && typeof state === 'object' && !Array.isArray(state);
 }
 
 async function readAllRunsSummary() {
@@ -192,13 +220,15 @@ async function readAllRunsSummary() {
       if (!existsSync(stateFile)) return null;
       try {
         const content = await readFile(stateFile, 'utf-8');
-        return { dirName: entry.name, state: parse(content) };
+        const state = parse(content);
+        if (!isValidRunState(state)) return null;
+        return { dirName: entry.name, state };
       } catch { return null; }
     })
   );
 
-  const valid = results.filter(Boolean) as { dirName: string; state: any }[];
-  valid.sort((a, b) => new Date(b.state.startTime).getTime() - new Date(a.state.startTime).getTime());
+  const valid = results.filter(Boolean) as { dirName: string; state: NonNullable<ReturnType<typeof parse>> }[];
+  valid.sort((a, b) => getSafeTime(b.state.startTime) - getSafeTime(a.state.startTime));
 
   for (const { state } of valid) {
     runs.push({

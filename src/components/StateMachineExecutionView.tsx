@@ -84,6 +84,11 @@ export default function StateMachineExecutionView({
 }: StateMachineExecutionViewProps) {
   const [activeTab, setActiveTab] = useState('overview');
 
+  const handleOverviewStateClick = (stateName: string) => {
+    setActiveTab('diagram');
+    onStateClick?.(stateName);
+  };
+
   return (
     <div className="h-full flex flex-col">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
@@ -127,6 +132,7 @@ export default function StateMachineExecutionView({
               status={status}
               startTime={startTime}
               endTime={endTime}
+              onStateClick={handleOverviewStateClick}
             />
 
             {/* 快速流转预览 */}
@@ -136,6 +142,7 @@ export default function StateMachineExecutionView({
                 <StateFlowVisualizer
                   stateHistory={stateHistory.slice(-10)}
                   currentState={currentState}
+                  onStateClick={handleOverviewStateClick}
                 />
               </div>
             )}

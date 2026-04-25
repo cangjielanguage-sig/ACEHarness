@@ -13,6 +13,7 @@
 # production
 /build
 /dist
+*.tgz
 
 # misc
 .DS_Store
@@ -67,3 +68,4 @@ configs/unreachable.yaml
 
 # Runtime uploaded assets
 /public/uploads/
+package-lock.json

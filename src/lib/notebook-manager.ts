@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { getWorkspaceNotebookRoot } from '@/lib/app-paths';
 
 export type NotebookScope = 'personal' | 'global';
 
@@ -7,7 +8,7 @@ export const NOTEBOOK_ROOT_DIRNAME = '.cangjie-notbook';
 
 export function getNotebookRoot(scope: NotebookScope, personalDir: string): string {
   if (scope === 'global') {
-    return path.resolve(process.cwd(), 'data', 'notebook');
+    return getWorkspaceNotebookRoot();
   }
   return path.resolve(personalDir, NOTEBOOK_ROOT_DIRNAME);
 }
