@@ -378,8 +378,13 @@ function rehypePreserveUnknownHtmlAsText() {
   return transform;
 }
 
-function closeUnterminatedFences(content: string): string {
-  const lines = content.split('\n');
+function normalizeMarkdownInput(content: unknown): string {
+  return typeof content === 'string' ? content : '';
+}
+
+function closeUnterminatedFences(content: unknown): string {
+  const safeContent = normalizeMarkdownInput(content);
+  const lines = safeContent.split('\n');
   let inCodeBlock = false;
   let fenceWidth = 0;
   let fenceChar: '`' | '~' | null = null;
@@ -403,12 +408,12 @@ function closeUnterminatedFences(content: string): string {
   }
 
   if (inCodeBlock && fenceChar) {
-    return content + '\n' + fenceChar.repeat(fenceWidth);
+    return safeContent + '\n' + fenceChar.repeat(fenceWidth);
   }
-  return content;
+  return safeContent;
 }
 
-function preprocessMarkdown(content: string): string {
+function preprocessMarkdown(content: unknown): string {
   const closed = closeUnterminatedFences(content);
   return closed.replace(
     /(?<![<"\[])(https?:\/\/[^\s<>\]")]+)/g,
@@ -416,7 +421,7 @@ function preprocessMarkdown(content: string): string {
   );
 }
 
-export default function Markdown({ children }: { children: string }) {
+export default function Markdown({ children }: { children?: string | null }) {
   const processedContent = useMemo(() => preprocessMarkdown(children), [children]);
   const [, forceRefresh] = useState(0);
 
