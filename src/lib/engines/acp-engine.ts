@@ -8,6 +8,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import { Writable, Readable } from 'node:stream';
 import { EventEmitter } from 'events';
+import { delimiter } from 'path';
 import {
   ClientSideConnection,
   ndJsonStream,
@@ -75,7 +76,11 @@ export class ACPEngine extends EventEmitter {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        PATH: `${process.env.PATH}:/root/.local/bin:/usr/local/bin`,
+        PATH: [
+          process.env.PATH || '',
+          '/root/.local/bin',
+          '/usr/local/bin',
+        ].filter(Boolean).join(delimiter),
         ...this.config.env,
       },
     });
