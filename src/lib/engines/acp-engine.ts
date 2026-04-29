@@ -28,9 +28,9 @@ import type {
 // ============================================================================
 
 export interface ACPEngineConfig {
-  /** Engine type: 'opencode', 'kiro-cli', 'cursor' */
+  /** Engine type: 'opencode', 'nga', 'kiro-cli', 'cursor', ... */
   engineType: string;
-  /** Command to execute (e.g., 'opencode', 'kiro-cli', 'cursor') */
+  /** Command to execute (e.g., 'opencode', 'nga', 'kiro-cli', 'cursor') */
   command: string;
   /** Working directory */
   workingDirectory: string;
@@ -58,6 +58,7 @@ export class ACPEngine extends EventEmitter {
   private sessionId: string | null = null;
   private initialized = false;
   private availableModels: Array<{ modelId: string; name: string }> = [];
+  private lastStderrChunk = '';
 
   constructor(private config: ACPEngineConfig) {
     super();
@@ -86,6 +87,7 @@ export class ACPEngine extends EventEmitter {
 
     this.process.stderr.on('data', (data: Buffer) => {
       const msg = data.toString();
+      this.lastStderrChunk = msg.trim();
       console.error(`[${this.config.engineType} stderr] ${msg.trim()}`);
       this.emit('log', msg);
     });
@@ -144,7 +146,9 @@ export class ACPEngine extends EventEmitter {
       },
     }), stream);
 
+    console.log(`[${this.config.engineType}] initializing ACP client...`);
     await this.initialize();
+    console.log(`[${this.config.engineType}] ACP client initialized`);
   }
 
   /**
@@ -155,6 +159,10 @@ export class ACPEngine extends EventEmitter {
     switch (this.config.engineType) {
       case 'opencode':
         args.push('acp', '--cwd', this.config.workingDirectory);
+        break;
+      case 'nga':
+        // ngagent 套壳 OpenCode：默认关闭更新检查，cwd 与 opencode 一致
+        args.push('--disable-update', 'acp', '--cwd', this.config.workingDirectory);
         break;
       case 'kiro-cli':
         args.push('acp');
@@ -178,7 +186,8 @@ export class ACPEngine extends EventEmitter {
    */
   private async initialize(): Promise<void> {
     if (!this.connection) throw new Error('No connection');
-    const result = await this.connection.initialize({
+    console.log(`[${this.config.engineType}] connection.initialize() start`);
+    const initPromise = this.connection.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientInfo: { name: 'aceharness', version: '1.0.0' },
       clientCapabilities: {
@@ -186,7 +195,24 @@ export class ACPEngine extends EventEmitter {
         terminal: true,
       },
     });
+
+    const initTimeoutMs = 30_000;
+    const result = await Promise.race([
+      initPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `ACP connection.initialize timeout after ${initTimeoutMs}ms. engineType=${this.config.engineType}, command=${this.config.command}. lastStderr=${this.lastStderrChunk || '<empty>'}`
+              )
+            ),
+          initTimeoutMs
+        )
+      ),
+    ]);
     this.initialized = true;
+    console.log(`[${this.config.engineType}] connection.initialize() done`);
 
     // Cursor ACP requires authenticate after initialize
     if (this.config.engineType === 'cursor') {
@@ -205,15 +231,34 @@ export class ACPEngine extends EventEmitter {
    */
   async createSession(): Promise<string> {
     if (!this.initialized || !this.connection) throw new Error(`${this.config.engineType} not initialized`);
-    const result = await this.connection.newSession({
+    console.log(`[${this.config.engineType}] createSession() start`);
+    const newSessionPromise = this.connection.newSession({
       cwd: this.config.workingDirectory,
       mcpServers: [],
     });
+
+    const sessionTimeoutMs = 30_000;
+    const result = await Promise.race([
+      newSessionPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `ACP newSession timeout after ${sessionTimeoutMs}ms. engineType=${this.config.engineType}, command=${this.config.command}. lastStderr=${this.lastStderrChunk || '<empty>'}`
+              )
+            ),
+          sessionTimeoutMs
+        )
+      ),
+    ]);
     this.sessionId = result.sessionId;
     this.availableModels = (result.models?.availableModels as any[]) || [];
     console.log(`[${this.config.engineType}] session created: ${this.sessionId}`);
-    console.log(`[${this.config.engineType}] available models (${this.availableModels.length}):`,
-      JSON.stringify(this.availableModels.map(m => ({ id: m.modelId, name: m.name })), null, 2));
+    console.log(
+      `[${this.config.engineType}] available models (${this.availableModels.length}):`,
+      JSON.stringify(this.availableModels.map(m => ({ id: m.modelId, name: m.name })), null, 2),
+    );
     this.emit('session-created', {
       sessionId: this.sessionId,
       configOptions: result.configOptions,

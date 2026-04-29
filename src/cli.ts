@@ -18,7 +18,7 @@ import {
 process.chdir(getRepoRoot());
 
 type Locale = 'zh' | 'en';
-type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode' | 'trae-cli';
+type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode' | 'nga' | 'trae-cli';
 
 interface ConfiguredEngine {
   engine?: EngineType;
@@ -102,6 +102,7 @@ const ENGINE_META: Array<{ id: EngineType; name: string }> = [
   { id: 'codex', name: 'Codex' },
   { id: 'kiro-cli', name: 'Kiro CLI' },
   { id: 'opencode', name: 'OpenCode' },
+  { id: 'nga', name: 'NGA' },
   { id: 'cursor', name: 'Cursor CLI' },
   { id: 'cangjie-magic', name: 'CangjieMagic' },
   { id: 'trae-cli', name: 'Trae CLI' },
@@ -385,6 +386,8 @@ async function detectEngines() {
 async function discoverAcpModels(engineType: EngineType): Promise<Array<{ value: string; title: string }>> {
   const commandMap: Partial<Record<EngineType, string>> = {
     opencode: 'opencode',
+    // Some distributions expose a separate `ngagent` intended for ACP stdio.
+    nga: commandExists('ngagent') ? 'ngagent' : 'nga',
     'kiro-cli': 'kiro-cli',
     cursor: 'agent',
     'trae-cli': 'trae-cli',
@@ -412,7 +415,7 @@ async function discoverAcpModels(engineType: EngineType): Promise<Array<{ value:
 }
 
 async function getEngineModelChoices(engineType: EngineType): Promise<Array<{ value: string; title: string }>> {
-  if (['opencode', 'kiro-cli', 'cursor', 'trae-cli'].includes(engineType)) {
+  if (['opencode', 'nga', 'kiro-cli', 'cursor', 'trae-cli'].includes(engineType)) {
     return discoverAcpModels(engineType);
   }
 

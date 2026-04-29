@@ -15,8 +15,9 @@ import { CodexEngineWrapper } from './codex-wrapper';
 import { CursorEngineWrapper } from './cursor-wrapper';
 import { ClaudeCodeEngineWrapper } from './claude-code-wrapper';
 import { TraeCliEngineWrapper } from './trae-cli-wrapper';
+import { NgaEngineWrapper } from './nga-wrapper';
 
-export type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode' | 'trae-cli';
+export type EngineType = 'claude-code' | 'kiro-cli' | 'codex' | 'cursor' | 'cangjie-magic' | 'opencode' | 'nga' | 'trae-cli';
 
 interface EngineConfig {
   engine: EngineType;
@@ -145,6 +146,14 @@ export async function createEngine(type?: EngineType): Promise<Engine | null> {
       }
       return ocEngine;
 
+    case 'nga':
+      const ngaEngine = new NgaEngineWrapper();
+      if (!(await ngaEngine.isAvailable())) {
+        console.warn('[EngineFactory] NGA (nga) is not available, falling back to Claude Code');
+        return null;
+      }
+      return ngaEngine;
+
     case 'trae-cli':
       const traeEngine = new TraeCliEngineWrapper();
       if (!(await traeEngine.isAvailable())) {
@@ -179,6 +188,10 @@ export async function isEngineAvailable(type: EngineType): Promise<boolean> {
     case 'opencode':
       const ocCheck = new OpenCodeEngineWrapper();
       return await ocCheck.isAvailable();
+
+    case 'nga':
+      const ngaCheck = new NgaEngineWrapper();
+      return await ngaCheck.isAvailable();
 
     case 'codex':
       const codexCheck = new CodexEngineWrapper();

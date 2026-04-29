@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ACPEngine } from '@/lib/engines/acp-engine';
 import { discoverClaudeCodeModels } from '@/lib/engines/claude-code-model-discovery';
+import { commandExists } from '@/lib/command-exists';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +47,12 @@ export async function GET(request: NextRequest) {
 
   const commandMap: Record<string, string> = {
     'opencode': 'opencode',
+    // Prefer ngagent when available; it's commonly the intended ACP stdio entrypoint.
+    'nga': commandExists('ngagent', [
+      '/root/.local/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+    ]) ? 'ngagent' : 'nga',
     'kiro-cli': 'kiro-cli',
     'cursor': 'agent',
     'trae-cli': 'trae-cli',

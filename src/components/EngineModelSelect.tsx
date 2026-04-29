@@ -21,6 +21,16 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
   const [globalEngine, setGlobalEngine] = useState('claude-code');
   const { toast } = useToast();
 
+  const isModelCompatible = useMemo(() => {
+    return (model: ModelOption, engineId: string): boolean => {
+      if (!model.engines || model.engines.length === 0) return true;
+      if (model.engines.includes(engineId)) return true;
+      // nga 是 opencode 套壳：复用 opencode 的模型声明
+      if (engineId === 'nga' && model.engines.includes('opencode')) return true;
+      return false;
+    };
+  }, []);
+
   useEffect(() => {
     const refresh = () => {
       fetch('/api/models').then(r => r.json()).then(d => setModels(d.models || [])).catch(() => {});
@@ -52,9 +62,7 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
     const result: ComboboxGroupDef[] = [];
 
     // "跟随系统" group — uses the global engine's compatible models
-    const sysModels = models.filter(
-      m => !m.engines || m.engines.length === 0 || m.engines.includes(globalEngine),
-    );
+    const sysModels = models.filter((m) => isModelCompatible(m, globalEngine));
     if (sysModels.length > 0) {
       result.push({
         label: `跟随系统 (${globalLabel})`,
@@ -69,9 +77,7 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
 
     // Concrete engine groups
     for (const eng of getConcreteEngines()) {
-      const engineModels = models.filter(
-        m => !m.engines || m.engines.length === 0 || m.engines.includes(eng.id),
-      );
+      const engineModels = models.filter((m) => isModelCompatible(m, eng.id));
       if (engineModels.length > 0) {
         result.push({
           label: eng.name,
@@ -86,7 +92,7 @@ export function EngineModelSelect({ engine, model, onEngineChange, onModelChange
     }
 
     return result;
-  }, [models, globalEngine, globalLabel]);
+  }, [models, globalEngine, globalLabel, isModelCompatible]);
 
   const modelLabel = models.find(m => m.value === model)?.label || model || '选择模型';
   const triggerLabel = modelLabel;

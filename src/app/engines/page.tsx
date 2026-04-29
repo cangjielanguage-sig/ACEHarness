@@ -87,6 +87,14 @@ const engines: Engine[] = [
     endpoints: ['anthropic', 'openai'],
   },
   {
+    id: 'nga',
+    name: 'NGA',
+    description: '基于 OpenCode 的 ngagent 套壳，ACP 与 OpenCode 一致，默认关闭自动更新',
+    status: 'available',
+    features: ['ACP 协议', '与 OpenCode 兼容', '流式输出', '默认 --disable-update'],
+    endpoints: ['anthropic', 'openai'],
+  },
+  {
     id: 'codex',
     name: 'Codex',
     description: 'OpenAI Codex 引擎，专注于代码生成和理解，基于 Codex SDK',
@@ -206,6 +214,7 @@ export default function EnginesPage() {
         'claude-code': '安装方法：npm install -g @anthropic-ai/claude-code',
         'cangjie-magic': '请在环境变量中配置 CANGJIE_HOME、CANGJIE_MAGIC_PATH、OPENSSL_PATH、CANGJIE_STDX_PATH',
         'opencode': '安装方法：npm install -g opencode-ai',
+        'nga': '请确保已安装 ngagent 并把 nga 命令加入 PATH',
         'trae-cli': '安装方法：curl -fsSL https://trae.cn/install | bash',
       };
       const hint = hints[engineId] || '请确保已安装相应的命令行工具';
