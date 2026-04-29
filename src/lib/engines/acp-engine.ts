@@ -149,7 +149,9 @@ export class ACPEngine extends EventEmitter {
       },
     }), stream);
 
+    console.log(`[${this.config.engineType}] initializing ACP client...`);
     await this.initialize();
+    console.log(`[${this.config.engineType}] ACP client initialized`);
   }
 
   /**
@@ -187,6 +189,7 @@ export class ACPEngine extends EventEmitter {
    */
   private async initialize(): Promise<void> {
     if (!this.connection) throw new Error('No connection');
+    console.log(`[${this.config.engineType}] connection.initialize() start`);
     const result = await this.connection.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientInfo: { name: 'aceharness', version: '1.0.0' },
@@ -196,6 +199,7 @@ export class ACPEngine extends EventEmitter {
       },
     });
     this.initialized = true;
+    console.log(`[${this.config.engineType}] connection.initialize() done`);
 
     // Cursor ACP requires authenticate after initialize
     if (this.config.engineType === 'cursor') {
@@ -214,6 +218,7 @@ export class ACPEngine extends EventEmitter {
    */
   async createSession(): Promise<string> {
     if (!this.initialized || !this.connection) throw new Error(`${this.config.engineType} not initialized`);
+    console.log(`[${this.config.engineType}] createSession() start`);
     const result = await this.connection.newSession({
       cwd: this.config.workingDirectory,
       mcpServers: [],

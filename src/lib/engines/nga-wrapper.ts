@@ -10,14 +10,27 @@ import { ACPEngineConfig } from './acp-engine';
 import { commandExists } from '../command-exists';
 
 export class NgaEngineWrapper extends ACPWrapperBase {
+  private resolveCommand(): string {
+    // Some distributions expose a separate `ngagent` binary intended for ACP stdio.
+    // Prefer it when available, otherwise fall back to `nga`.
+    const extraPaths = [
+      '/root/.local/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+    ];
+    if (commandExists('ngagent', extraPaths)) return 'ngagent';
+    return 'nga';
+  }
+
   getName(): string {
     return 'nga';
   }
 
   protected getACPConfig(options: EngineOptions): ACPEngineConfig {
+    const command = this.resolveCommand();
     return {
       engineType: 'nga',
-      command: 'nga',
+      command,
       workingDirectory: options.workingDirectory,
       agentName: options.agent,
       model: options.model,
@@ -26,10 +39,11 @@ export class NgaEngineWrapper extends ACPWrapperBase {
   }
 
   async isAvailable(): Promise<boolean> {
-    return commandExists('nga', [
+    const extraPaths = [
       '/root/.local/bin',
       '/usr/local/bin',
       '/usr/bin',
-    ]);
+    ];
+    return commandExists('ngagent', extraPaths) || commandExists('nga', extraPaths);
   }
 }
