@@ -1,5 +1,5 @@
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { delimiter, isAbsolute, join } from 'path';
 
 function getExecutableCandidates(command: string): string[] {
   if (process.platform !== 'win32') return [command];
@@ -15,19 +15,47 @@ function getExecutableCandidates(command: string): string[] {
   return [command, ...pathext.map((ext) => `${command}${ext}`)];
 }
 
-export function commandExists(command: string, extraPaths: string[] = []): boolean {
-  const pathValue = process.env.PATH || '';
-  const pathDirs = pathValue
-    .split(process.platform === 'win32' ? ';' : ':')
-    .filter(Boolean);
+export function getCommonCliSearchPaths(): string[] {
+  const home = process.env.HOME || process.env.USERPROFILE || '';
 
+  if (process.platform === 'win32') {
+    return [
+      home ? join(home, 'AppData', 'Roaming', 'npm') : '',
+      process.env.APPDATA ? join(process.env.APPDATA, 'npm') : '',
+    ].filter(Boolean);
+  }
+
+  return [
+    home ? join(home, '.local', 'bin') : '',
+    '/root/.local/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+  ].filter(Boolean);
+}
+
+export function findCommand(command: string, extraPaths: string[] = []): string | null {
+  if (isAbsolute(command) || command.includes('/') || command.includes('\\')) {
+    for (const candidate of getExecutableCandidates(command)) {
+      if (existsSync(candidate)) return candidate;
+    }
+    return existsSync(command) ? command : null;
+  }
+
+  const pathDirs = (process.env.PATH || '')
+    .split(delimiter)
+    .filter(Boolean);
   const candidates = getExecutableCandidates(command);
 
   for (const dir of [...extraPaths, ...pathDirs]) {
     for (const candidate of candidates) {
-      if (existsSync(join(dir, candidate))) return true;
+      const fullPath = join(dir, candidate);
+      if (existsSync(fullPath)) return fullPath;
     }
   }
 
-  return false;
+  return null;
+}
+
+export function commandExists(command: string, extraPaths: string[] = []): boolean {
+  return findCommand(command, extraPaths) !== null;
 }

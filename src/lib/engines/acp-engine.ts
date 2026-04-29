@@ -9,6 +9,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { Writable, Readable } from 'node:stream';
 import { EventEmitter } from 'events';
 import { delimiter } from 'path';
+import { findCommand, getCommonCliSearchPaths } from '../command-exists';
 import {
   ClientSideConnection,
   ndJsonStream,
@@ -69,19 +70,24 @@ export class ACPEngine extends EventEmitter {
    */
   async start(): Promise<void> {
     const args = this.buildCommandArgs();
-    console.log(`[${this.config.engineType}] spawning: ${this.config.command} ${args.join(' ')}`);
+    const commonCliPaths = getCommonCliSearchPaths();
+    const resolvedCommand = findCommand(this.config.command, commonCliPaths) ?? this.config.command;
+    const envPath = [
+      process.env.PATH || '',
+      ...commonCliPaths,
+      this.config.env?.PATH || this.config.env?.Path || '',
+    ].filter(Boolean).join(delimiter);
 
-    this.process = spawn(this.config.command, args, {
+    console.log(`[${this.config.engineType}] spawning: ${resolvedCommand} ${args.join(' ')}`);
+
+    this.process = spawn(resolvedCommand, args, {
       cwd: this.config.workingDirectory,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        PATH: [
-          process.env.PATH || '',
-          '/root/.local/bin',
-          '/usr/local/bin',
-        ].filter(Boolean).join(delimiter),
         ...this.config.env,
+        PATH: envPath,
+        Path: envPath,
       },
     });
 
