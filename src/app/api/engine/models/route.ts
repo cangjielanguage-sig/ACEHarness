@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
 
   const commandMap: Record<string, string> = {
     'opencode': 'opencode',
+    'nga': 'nga',
     'kiro-cli': 'kiro-cli',
     'cursor': 'agent',
     'trae-cli': 'trae-cli',

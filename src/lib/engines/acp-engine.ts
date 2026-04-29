@@ -28,9 +28,9 @@ import type {
 // ============================================================================
 
 export interface ACPEngineConfig {
-  /** Engine type: 'opencode', 'kiro-cli', 'cursor' */
+  /** Engine type: 'opencode', 'nga', 'kiro-cli', 'cursor', ... */
   engineType: string;
-  /** Command to execute (e.g., 'opencode', 'kiro-cli', 'cursor') */
+  /** Command to execute (e.g., 'opencode', 'nga', 'kiro-cli', 'cursor') */
   command: string;
   /** Working directory */
   workingDirectory: string;
@@ -155,6 +155,10 @@ export class ACPEngine extends EventEmitter {
     switch (this.config.engineType) {
       case 'opencode':
         args.push('acp', '--cwd', this.config.workingDirectory);
+        break;
+      case 'nga':
+        // ngagent 套壳 OpenCode：默认关闭更新检查，cwd 与 opencode 一致
+        args.push('--disable-update', 'acp', '--cwd', this.config.workingDirectory);
         break;
       case 'kiro-cli':
         args.push('acp');

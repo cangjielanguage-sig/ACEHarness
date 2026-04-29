@@ -46,6 +46,7 @@ const ALL_ENGINES = [
   { id: 'claude-code', label: 'Claude Code' },
   { id: 'kiro-cli', label: 'Kiro CLI' },
   { id: 'opencode', label: 'OpenCode' },
+  { id: 'nga', label: 'NGA' },
   { id: 'codex', label: 'Codex' },
   { id: 'cursor', label: 'Cursor' },
   { id: 'cangjie-magic', label: 'CangjieMagic' },
