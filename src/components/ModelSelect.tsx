@@ -30,7 +30,13 @@ export function ModelSelect({ value, onChange, className = '', engine }: ModelSe
 
   // Filter by engine if specified; models without engines field are shown for all engines
   const models = engine
-    ? allModels.filter(m => !m.engines || m.engines.length === 0 || m.engines.includes(engine))
+    ? allModels.filter((m) => {
+      if (!m.engines || m.engines.length === 0) return true;
+      if (m.engines.includes(engine)) return true;
+      // nga 是 opencode 套壳：兼容 opencode 的模型配置
+      if (engine === 'nga' && m.engines.includes('opencode')) return true;
+      return false;
+    })
     : allModels;
 
   const options: ComboboxOption[] = useMemo(
