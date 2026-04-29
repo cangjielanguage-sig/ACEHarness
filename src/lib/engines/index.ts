@@ -12,6 +12,7 @@ export * from './kiro-cli-wrapper';
 export * from './cangjie-magic';
 export * from './cangjie-magic-wrapper';
 export * from './opencode-wrapper';
+export * from './nga-wrapper';
 export * from './codex-wrapper';
 export * from './cursor-wrapper';
 export * from './claude-code-wrapper';

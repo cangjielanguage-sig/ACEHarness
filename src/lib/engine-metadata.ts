@@ -22,6 +22,11 @@ export const ENGINE_META: Record<EngineType, EngineMeta> = {
     name: 'OpenCode',
     iconPath: '/engines/opencode.svg',
   },
+  nga: {
+    id: 'nga',
+    name: 'NGA',
+    iconPath: '/engines/opencode.svg',
+  },
   codex: {
     id: 'codex',
     name: 'Codex',
