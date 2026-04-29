@@ -386,7 +386,8 @@ async function detectEngines() {
 async function discoverAcpModels(engineType: EngineType): Promise<Array<{ value: string; title: string }>> {
   const commandMap: Partial<Record<EngineType, string>> = {
     opencode: 'opencode',
-    nga: 'nga',
+    // Some distributions expose a separate `ngagent` intended for ACP stdio.
+    nga: commandExists('ngagent') ? 'ngagent' : 'nga',
     'kiro-cli': 'kiro-cli',
     cursor: 'agent',
     'trae-cli': 'trae-cli',
