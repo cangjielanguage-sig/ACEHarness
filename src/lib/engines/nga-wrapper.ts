@@ -7,18 +7,26 @@
 import { ACPWrapperBase } from './acp-wrapper-base';
 import type { EngineOptions } from './engine-interface';
 import { ACPEngineConfig } from './acp-engine';
-import { commandExists } from '../command-exists';
+
+const COMMON_BIN_DIRS = ['/root/.local/bin', '/usr/local/bin', '/usr/bin'];
+
+function hasCommand(name: string): boolean {
+  try {
+    const { execSync } = require('child_process');
+    execSync(`command -v ${name}`, { stdio: 'ignore', shell: '/bin/bash' });
+    return true;
+  } catch {
+    const fs = require('fs');
+    for (const dir of COMMON_BIN_DIRS) {
+      if (fs.existsSync(`${dir}/${name}`)) return true;
+    }
+    return false;
+  }
+}
 
 export class NgaEngineWrapper extends ACPWrapperBase {
   private resolveCommand(): string {
-    // Some distributions expose a separate `ngagent` binary intended for ACP stdio.
-    // Prefer it when available, otherwise fall back to `nga`.
-    const extraPaths = [
-      '/root/.local/bin',
-      '/usr/local/bin',
-      '/usr/bin',
-    ];
-    if (commandExists('ngagent', extraPaths)) return 'ngagent';
+    if (hasCommand('ngagent')) return 'ngagent';
     return 'nga';
   }
 
@@ -39,11 +47,6 @@ export class NgaEngineWrapper extends ACPWrapperBase {
   }
 
   async isAvailable(): Promise<boolean> {
-    const extraPaths = [
-      '/root/.local/bin',
-      '/usr/local/bin',
-      '/usr/bin',
-    ];
-    return commandExists('ngagent', extraPaths) || commandExists('nga', extraPaths);
+    return hasCommand('ngagent') || hasCommand('nga');
   }
 }
