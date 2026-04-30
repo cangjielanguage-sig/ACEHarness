@@ -1,4 +1,5 @@
 import { existsSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { delimiter, isAbsolute, join } from 'path';
 
 function getExecutableCandidates(command: string): string[] {
@@ -22,11 +23,18 @@ export function getCommonCliSearchPaths(): string[] {
     return [
       home ? join(home, 'AppData', 'Roaming', 'npm') : '',
       process.env.APPDATA ? join(process.env.APPDATA, 'npm') : '',
+      home ? join(home, 'go', 'bin') : '',
+      home ? join(home, '.cargo', 'bin') : '',
+      home ? join(home, 'scoop', 'shims') : '',
+      home ? join(home, '.local', 'bin') : '',
+      process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links') : '',
     ].filter(Boolean);
   }
 
   return [
     home ? join(home, '.local', 'bin') : '',
+    home ? join(home, 'go', 'bin') : '',
+    home ? join(home, '.cargo', 'bin') : '',
     '/root/.local/bin',
     '/usr/local/bin',
     '/usr/bin',
@@ -57,5 +65,22 @@ export function findCommand(command: string, extraPaths: string[] = []): string 
 }
 
 export function commandExists(command: string, extraPaths: string[] = []): boolean {
-  return findCommand(command, extraPaths) !== null;
+  if (findCommand(command, extraPaths) !== null) return true;
+
+  // Fallback: try spawning the command directly.
+  // On Windows, some tools are registered via doskey aliases, App Execution
+  // Aliases, or shell-level shims that don't appear as files on disk.
+  try {
+    execFileSync(command, ['--version'], {
+      stdio: 'ignore',
+      timeout: 5000,
+      windowsHide: true,
+    });
+    return true;
+  } catch (err: any) {
+    // If the process spawned but returned a non-zero exit code, the command
+    // still exists — only ENOENT / EACCES means "not found".
+    if (err?.status != null) return true;
+    return false;
+  }
 }
