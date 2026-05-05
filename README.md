@@ -2,6 +2,8 @@
 
 # ACE Harness (Agent Centric Engineering Harness)
 
+[English](./README.en.md) | 中文
+
 <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./public/logo.png">
     <img src="./public/logo.png" alt="ACEHarness" width="300">
