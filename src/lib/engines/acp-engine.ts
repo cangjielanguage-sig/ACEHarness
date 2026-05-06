@@ -28,9 +28,9 @@ import type {
 // ============================================================================
 
 export interface ACPEngineConfig {
-  /** Engine type: 'opencode', 'nga', 'kiro-cli', 'cursor', ... */
+  /** Engine type: 'opencode', 'nga', 'codegenie', 'kiro-cli', 'cursor', ... */
   engineType: string;
-  /** Command to execute (e.g., 'opencode', 'nga', 'kiro-cli', 'cursor') */
+  /** Command to execute (e.g., 'opencode', 'nga', 'codegenie', 'kiro-cli', 'cursor') */
   command: string;
   /** Working directory */
   workingDirectory: string;
@@ -158,6 +158,10 @@ export class ACPEngine extends EventEmitter {
     const args: string[] = [];
     switch (this.config.engineType) {
       case 'opencode':
+        args.push('acp', '--cwd', this.config.workingDirectory);
+        break;
+      case 'codegenie':
+        // OpenCode-kernel CLI: same ACP argv as opencode
         args.push('acp', '--cwd', this.config.workingDirectory);
         break;
       case 'nga':
